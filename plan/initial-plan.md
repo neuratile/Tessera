@@ -299,7 +299,7 @@ MVP ships: Test Plan + Test Cases only. Others in V1.
 - **projects** — id, user_id, name, file_count, total_size, status, language_breakdown (JSONB)
 - **project_files** — id, project_id, path, language, size, file_type, hash (SHA-256)
 - **ast_analyses** — id, file_id, functions/classes/imports (JSONB)
-- **code_chunks** — id, file_id, chunk_type, name, content, embedding VECTOR(1024), metadata
+- **code_chunks** — id, project_id, file_id, chunk_type, name, content, start_line, end_line, token_count, embedding BLOB (packed f32), embedding_dim, embedding_provider, embedding_model, metadata. Variable-length BLOB chosen over fixed-dim VECTOR so multiple embedding providers (nomic-embed-text 768, OpenAI 1536/3072, Voyage 1024) coexist; vector search filters by (project_id, embedding_provider, embedding_dim) before cosine to avoid comparing mismatched dimensions. See `apps/desktop/src-tauri/docs/adr/0001-blob-embeddings.md`.
 - **artifacts** — id, project_id, type, title, content (MD), structured_data (JSONB), status, version
 - **jobs** — id, project_id, type, status, progress, result (JSONB)
 

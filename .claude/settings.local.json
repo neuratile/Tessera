@@ -1,7 +1,30 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh repo *)"
+      "Bash(gh repo *)",
+      "Bash(git -C \"c:/Testing IDE\" checkout -b feat/backend/phase-1-foundation)",
+      "Bash(cargo --version)",
+      "PowerShell(Get-Command cargo -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command rustc -ErrorAction SilentlyContinue)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(winget --version)",
+      "Bash(choco --version)",
+      "PowerShell(choco install rustup.install -y)",
+      "PowerShell($url = 'https://win.rustup.rs/x86_64'; $dest = \"$env:USERPROFILE\\\\rustup-init.exe\"; Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing; Get-Item $dest | Select-Object FullName, Length)",
+      "PowerShell(Test-Path \"$env:USERPROFILE\\\\rustup-init.exe\"; \\(Get-Item \"$env:USERPROFILE\\\\rustup-init.exe\" -ErrorAction SilentlyContinue\\).Length)",
+      "PowerShell(& \"$env:USERPROFILE\\\\rustup-init.exe\" -y --default-toolchain stable --profile minimal --no-modify-path 2>&1 | Select-Object -Last 30)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; cargo --version; rustc --version)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; rustup component add clippy rustfmt 2>&1 | Select-Object -Last 10)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; cargo --version; cargo clippy --version; cargo fmt --version)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\"; cargo fmt --check 2>&1 | Select-Object -Last 50)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\"; cargo check --all-targets 2>&1 | Select-Object -Last 80)",
+      "PowerShell(Add-Type -AssemblyName System.Drawing; $bmp = New-Object System.Drawing.Bitmap 32, 32; $g = [System.Drawing.Graphics]::FromImage\\($bmp\\); $g.Clear\\([System.Drawing.Color]::FromArgb\\(255, 30, 30, 30\\)\\); $brush = New-Object System.Drawing.SolidBrush\\([System.Drawing.Color]::FromArgb\\(255, 100, 200, 255\\)\\); $g.FillRectangle\\($brush, 8, 8, 16, 16\\); $g.Dispose\\(\\); $icon = [System.Drawing.Icon]::FromHandle\\($bmp.GetHicon\\(\\)\\); $stream = New-Object System.IO.FileStream\\(\"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\\\\icons\\\\icon.ico\", [System.IO.FileMode]::Create\\); $icon.Save\\($stream\\); $stream.Close\\(\\); $icon.Dispose\\(\\); $bmp.Dispose\\(\\); Get-Item \"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\\\\icons\\\\icon.ico\" | Select-Object Length)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\"; cargo clippy --all-targets -- -D warnings; \"exit=$LASTEXITCODE\")",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"C:\\\\Testing IDE\\\\apps\\\\desktop\\\\src-tauri\"; cargo test; \"exit=$LASTEXITCODE\")",
+      "Bash(git -C \"c:/Testing IDE\" diff --stat rules.md)",
+      "Bash(gh auth *)",
+      "Bash(gh issue create --repo Rajveerx11/Testing-IDE --title 'ADR backlog: 0001 \\(embeddings\\) — opened, 0002 \\(vec0 migration\\) + 0003 \\(LlmProvider\\) pending' --body ' *)"
     ]
   }
 }
