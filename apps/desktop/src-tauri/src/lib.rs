@@ -9,7 +9,9 @@
 //! Cross-cutting: `providers` (LLM/embeddings), `workers`, `prompts`, `utils`.
 
 pub mod commands;
+pub mod config;
 pub mod db;
+pub mod error;
 pub mod prompts;
 pub mod providers;
 pub mod repositories;
