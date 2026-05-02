@@ -3,6 +3,10 @@ src-tauri/target/
 src-tauri/gen/
 **/*.rs.bk
 
+# Local CI scratch (cargo command output captured during dev)
+src-tauri/clippy.log
+src-tauri/test.log
+
 # SQLite
 *.db
 *.db-journal
