@@ -1,0 +1,22 @@
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Env
+.env
+.env.local
+
+# Frontend (Student 1 territory; Tauri build expects ../dist at bundle time)
+dist/
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
