@@ -112,30 +112,57 @@ CREATE INDEX idx_ast_analyses_file_id ON ast_analyses(file_id);
 
 -- ---------------------------------------------------------------------------
 -- code_chunks — semantic chunks (function / class / module) with embeddings.
+--
 -- embedding is a packed f32 vector serialized to BLOB (little-endian).
+-- Vectors are NOT compared across providers / dimensions — embedding_dim
+-- and embedding_provider columns let callers filter the search set so
+-- mismatched vectors never enter the same cosine sweep. See ADR-0001 for
+-- the brute-force-cosine + dim-filter design and the trigger conditions
+-- for migrating to a sqlite-vec vec0 mirror.
 -- ---------------------------------------------------------------------------
 CREATE TABLE code_chunks (
-    id              TEXT PRIMARY KEY NOT NULL,
-    project_id      TEXT NOT NULL,
-    file_id         TEXT NOT NULL,
-    chunk_type      TEXT NOT NULL,
-    name            TEXT,
-    content         TEXT NOT NULL,
-    start_line      INTEGER NOT NULL,
-    end_line        INTEGER NOT NULL,
-    token_count     INTEGER NOT NULL,
-    embedding       BLOB,
-    embedding_model TEXT,
-    metadata        TEXT NOT NULL DEFAULT '{}',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
+    id                 TEXT PRIMARY KEY NOT NULL,
+    project_id         TEXT NOT NULL,
+    file_id            TEXT NOT NULL,
+    chunk_type         TEXT NOT NULL,
+    name               TEXT,
+    content            TEXT NOT NULL,
+    start_line         INTEGER NOT NULL,
+    end_line           INTEGER NOT NULL,
+    token_count        INTEGER NOT NULL,
+    embedding          BLOB,
+    embedding_dim      INTEGER,
+    embedding_provider TEXT,
+    embedding_model    TEXT,
+    metadata           TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (file_id) REFERENCES project_files(id) ON DELETE CASCADE
+    FOREIGN KEY (file_id) REFERENCES project_files(id) ON DELETE CASCADE,
+    -- All four embedding fields move together. Either embedding is NULL
+    -- (chunk not yet indexed) or all four producer-tracking fields are
+    -- populated. Enforced via CHECK so partial writes fail loudly per
+    -- rules.md §1.7.
+    CHECK (
+        (embedding IS NULL
+            AND embedding_dim IS NULL
+            AND embedding_provider IS NULL
+            AND embedding_model IS NULL)
+        OR
+        (embedding IS NOT NULL
+            AND embedding_dim IS NOT NULL
+            AND embedding_provider IS NOT NULL
+            AND embedding_model IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_code_chunks_project_id ON code_chunks(project_id);
 CREATE INDEX idx_code_chunks_file_id ON code_chunks(file_id);
 CREATE INDEX idx_code_chunks_chunk_type ON code_chunks(chunk_type);
+-- Composite index drives RAG vector search: scope to project, then to a
+-- single (provider, dim) so brute-force cosine never crosses dimensions.
+CREATE INDEX idx_code_chunks_search_scope
+    ON code_chunks(project_id, embedding_provider, embedding_dim);
 
 -- ---------------------------------------------------------------------------
 -- artifacts — generated test plans / cases / defect reports / etc.
