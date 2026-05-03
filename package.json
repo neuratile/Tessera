@@ -1,0 +1,16 @@
+{
+  "name": "testing-ide",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.9.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}

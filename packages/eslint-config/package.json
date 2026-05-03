@@ -1,0 +1,25 @@
+{
+  "name": "@testing-ide/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "files": [
+    "base.cjs",
+    "react.cjs",
+    "README.md"
+  ],
+  "exports": {
+    "./base": "./base.cjs",
+    "./react": "./react.cjs"
+  },
+  "peerDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}

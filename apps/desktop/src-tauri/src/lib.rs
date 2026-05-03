@@ -36,23 +36,20 @@ pub fn run() {
 
     tracing::info!(
         ollama_base_url = %cfg.ollama_base_url,
-        db_path = %cfg.db_path.display(),
         "starting Testing IDE backend"
     );
 
-    // Bootstrap the DB synchronously on a single-thread runtime, then drop
-    // it. Tauri commands run on Tauri's own tokio runtime — we do not need
-    // to keep a second runtime alive for the lifetime of the app.
-    let pool = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to build bootstrap runtime")
-        .block_on(db::init_pool(&cfg.database_url()))
-        .expect("failed to initialize database");
-
     tauri::Builder::default()
         .manage(cfg)
-        .manage(pool)
+        .setup(|app| {
+            let db_path = db::resolve_app_db_path(app.handle()).map_err(|e| e.to_string())?;
+            tracing::info!(db_path = %db_path.display(), "initializing database");
+            let pool = tauri::async_runtime::block_on(db::init_pool_at(&db_path))
+                .map_err(|e| e.to_string())?;
+            app.manage(pool);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![commands::greet, commands::init_db])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");
 }

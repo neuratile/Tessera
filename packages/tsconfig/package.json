@@ -1,0 +1,10 @@
+{
+  "name": "@testing-ide/tsconfig",
+  "version": "0.1.0",
+  "private": true,
+  "files": ["base.json", "desktop.json", "README.md"],
+  "exports": {
+    "./base": "./base.json",
+    "./desktop": "./desktop.json"
+  }
+}

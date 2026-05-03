@@ -14,11 +14,12 @@
 //! stores embeddings as `BLOB` (packed f32 vectors) — usable for brute-
 //! force cosine similarity at MVP scale.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
+use tauri::{AppHandle, Runtime};
 
 use crate::error::{AppError, AppResult};
 
@@ -26,6 +27,36 @@ use crate::error::{AppError, AppResult};
 /// background workers); five connections covers analysis + generation +
 /// IPC commands without thrashing `SQLite`'s writer lock.
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 5;
+
+/// Maximum length accepted for a `DB_PATH` override (env). Prevents trivial
+/// IPC/env abuse from allocating huge strings.
+const MAX_DB_PATH_ENV_BYTES: usize = 4096;
+
+fn sqlite_options_with_pragmas(options: SqliteConnectOptions) -> SqliteConnectOptions {
+    options
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true)
+        .busy_timeout(std::time::Duration::from_secs(5))
+}
+
+async fn connect_pool_and_migrate(
+    options: SqliteConnectOptions,
+    log_target: &str,
+) -> AppResult<SqlitePool> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(DEFAULT_MAX_CONNECTIONS)
+        .connect_with(options)
+        .await?;
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .map_err(AppError::Migration)?;
+
+    tracing::info!(database = %log_target, "database pool ready");
+    Ok(pool)
+}
 
 /// Build a `SQLite` pool from the configured database URL, creating the file
 /// if necessary and applying all pending migrations.
@@ -41,38 +72,69 @@ pub const DEFAULT_MAX_CONNECTIONS: u32 = 5;
 /// Returns `AppError::Database` on connection failure or
 /// `AppError::Migration` if any migration fails to apply.
 pub async fn init_pool(database_url: &str) -> AppResult<SqlitePool> {
-    let options = SqliteConnectOptions::from_str(database_url)
-        .map_err(AppError::Database)?
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .foreign_keys(true)
-        .busy_timeout(std::time::Duration::from_secs(5));
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(DEFAULT_MAX_CONNECTIONS)
-        .connect_with(options)
-        .await?;
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .map_err(AppError::Migration)?;
-
-    tracing::info!(database_url = %redact_url(database_url), "database pool ready");
-    Ok(pool)
+    let options = sqlite_options_with_pragmas(
+        SqliteConnectOptions::from_str(database_url)
+            .map_err(AppError::Database)?
+            .create_if_missing(true),
+    );
+    let log_line = redact_url(database_url);
+    connect_pool_and_migrate(options, &log_line).await
 }
 
-/// Build a pool against a path on disk. Convenience wrapper around
-/// [`init_pool`] for callers that already hold a `Path` instead of a URL.
+/// Build a pool against a path on disk. Uses sqlx file options (not a URI string)
+/// so paths with spaces, Unicode, and Windows drive letters stay correct and safe.
 ///
 /// # Errors
 ///
 /// Same conditions as [`init_pool`].
 pub async fn init_pool_at(path: &Path) -> AppResult<SqlitePool> {
-    let normalized = path.display().to_string().replace('\\', "/");
-    let url = format!("sqlite://{normalized}?mode=rwc");
-    init_pool(&url).await
+    let options = sqlite_options_with_pragmas(
+        SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true),
+    );
+    let log_line = redact_url(&path.display().to_string());
+    connect_pool_and_migrate(options, &log_line).await
+}
+
+/// Parse and validate `DB_PATH` from the environment (trust boundary).
+fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Config(
+            "DB_PATH is set but empty after trimming".into(),
+        ));
+    }
+    if trimmed.contains('\0') {
+        return Err(AppError::Config("DB_PATH must not contain NUL bytes".into()));
+    }
+    if trimmed.len() > MAX_DB_PATH_ENV_BYTES {
+        return Err(AppError::Config(format!(
+            "DB_PATH exceeds maximum length ({MAX_DB_PATH_ENV_BYTES} bytes)"
+        )));
+    }
+    Ok(PathBuf::from(trimmed))
+}
+
+/// Resolve the SQLite file path for this process: `DB_PATH` when set, otherwise
+/// `<app_local_data_dir>/testing-ide.db` (Tauri desktop layout).
+///
+/// # Errors
+///
+/// Returns `AppError::Config` when the app data directory cannot be resolved,
+/// or `AppError::Io` when the directory cannot be created.
+pub fn resolve_app_db_path<R: Runtime>(handle: &AppHandle<R>) -> AppResult<PathBuf> {
+    match std::env::var("DB_PATH") {
+        Ok(value) if !value.trim().is_empty() => validated_env_db_path(&value),
+        _ => {
+            let dir = handle
+                .path()
+                .app_local_data_dir()
+                .map_err(|e| AppError::Config(e.to_string()))?;
+            std::fs::create_dir_all(&dir)?;
+            Ok(dir.join(crate::config::DEFAULT_DB_FILENAME))
+        }
+    }
 }
 
 /// Strip query-string fragments from a `SQLite` URL before logging.
@@ -133,5 +195,26 @@ mod tests {
             "sqlite:///tmp/x.db"
         );
         assert_eq!(redact_url("sqlite:///tmp/x.db"), "sqlite:///tmp/x.db");
+    }
+
+    #[test]
+    fn validated_env_db_path_rejects_nul_and_empty() {
+        assert!(super::validated_env_db_path("ok.db").is_ok());
+        assert!(super::validated_env_db_path("  ok.db  ").is_ok());
+        assert!(super::validated_env_db_path("").is_err());
+        assert!(super::validated_env_db_path("   ").is_err());
+        assert!(super::validated_env_db_path("bad\0.db").is_err());
+    }
+
+    #[tokio::test]
+    async fn pool_init_succeeds_when_path_has_spaces() {
+        let dir = env::temp_dir().join(format!("testing ide {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let db_file = dir.join("app data.db");
+        let pool = init_pool_at(&db_file)
+            .await
+            .expect("pool with spaces in path must init");
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
