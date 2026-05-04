@@ -37,6 +37,7 @@ futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 ignore = "0.4"
 walkdir = "2"
+jsonschema = { version = "0.18", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
