@@ -13,9 +13,11 @@
 //!   into typed declarations, imports, and exports.
 //! - [`chunking_service`] (Phase 3) — semantic chunking at function /
 //!   class boundaries, ready for embedding.
-//!
-//! Future Phase 3 / 5 modules: `generation_service`, `context_service`.
+//! - [`generation_service`] (Phase 5) — orchestrator tying RAG +
+//!   prompts + `LlmProvider` into one end-to-end artifact-production
+//!   flow with token-budget enforcement and JSON-Schema validation.
 
 pub mod ast_service;
 pub mod chunking_service;
 pub mod file_discovery_service;
+pub mod generation_service;
