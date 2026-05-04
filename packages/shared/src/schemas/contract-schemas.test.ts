@@ -46,12 +46,21 @@ describe('JWTPayloadSchema', () => {
 });
 
 describe('ProviderConfigSchema', () => {
-  it('accepts ollama-local config', () => {
+  it('accepts local Ollama config', () => {
     const parsed = ProviderConfigSchema.parse({
-      provider: 'ollama-local',
+      provider: 'ollama',
       defaultModel: 'qwen2.5-coder:7b',
     });
-    expect(parsed.provider).toBe('ollama-local');
+    expect(parsed.provider).toBe('ollama');
+  });
+
+  it('rejects the legacy ollama-local literal', () => {
+    expect(() =>
+      ProviderConfigSchema.parse({
+        provider: 'ollama-local',
+        defaultModel: 'qwen2.5-coder:7b',
+      }),
+    ).toThrow();
   });
 });
 
@@ -109,6 +118,63 @@ describe('CodeChunkSchema', () => {
         startLine: 10,
         endLine: 2,
         tokenCount: 3,
+        createdAt: '2026-05-03T12:00:00.000Z',
+        updatedAt: '2026-05-03T12:00:00.000Z',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts the four kinds the Rust ChunkKind enum emits', () => {
+    for (const chunkType of ['function', 'method', 'class', 'module'] as const) {
+      const parsed = CodeChunkSchema.parse({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        projectId: '223e4567-e89b-12d3-a456-426614174001',
+        fileId: '323e4567-e89b-12d3-a456-426614174002',
+        chunkType,
+        name: chunkType === 'module' ? '' : 'foo',
+        content: 'snippet',
+        startLine: 1,
+        endLine: 5,
+        tokenCount: 12,
+        createdAt: '2026-05-03T12:00:00.000Z',
+        updatedAt: '2026-05-03T12:00:00.000Z',
+      });
+      expect(parsed.chunkType).toBe(chunkType);
+    }
+  });
+
+  it('rejects legacy chunk kinds (block / other) that the Rust enum no longer emits', () => {
+    for (const chunkType of ['block', 'other']) {
+      expect(() =>
+        CodeChunkSchema.parse({
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          projectId: '223e4567-e89b-12d3-a456-426614174001',
+          fileId: '323e4567-e89b-12d3-a456-426614174002',
+          chunkType,
+          name: 'x',
+          content: 'snippet',
+          startLine: 1,
+          endLine: 1,
+          tokenCount: 1,
+          createdAt: '2026-05-03T12:00:00.000Z',
+          updatedAt: '2026-05-03T12:00:00.000Z',
+        }),
+      ).toThrow();
+    }
+  });
+
+  it('requires non-empty name for non-module chunk kinds', () => {
+    expect(() =>
+      CodeChunkSchema.parse({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        projectId: '223e4567-e89b-12d3-a456-426614174001',
+        fileId: '323e4567-e89b-12d3-a456-426614174002',
+        chunkType: 'function',
+        name: '',
+        content: 'fn foo() {}',
+        startLine: 1,
+        endLine: 1,
+        tokenCount: 1,
         createdAt: '2026-05-03T12:00:00.000Z',
         updatedAt: '2026-05-03T12:00:00.000Z',
       }),

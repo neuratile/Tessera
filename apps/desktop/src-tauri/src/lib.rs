@@ -19,6 +19,10 @@ pub mod services;
 pub mod utils;
 pub mod workers;
 
+// `tauri::App::manage` is provided by the `Manager` trait — bring it in
+// scope so `app.manage(...)` resolves at the call site below.
+use tauri::Manager;
+
 /// Entry point invoked from `main.rs`. Loads configuration, initializes
 /// structured logging, builds the database pool, then starts the Tauri
 /// application with both stashed in the managed state container.

@@ -137,6 +137,29 @@ src/
 - **No business logic in routes** — routes parse input, call service, format response
 - **No SQL in services** — all DB access goes through repositories
 
+### 4.2.1 Tauri-adapted layering (Rust desktop)
+
+The desktop app uses the same layering with `commands/` replacing
+`routes/`. Tauri's IPC bridge imposes a few constraints:
+
+- **`#[tauri::command]` requires owned argument types** (e.g.
+  `String`, not `&str`). The bridge deserializes JSON into Rust
+  values; borrowed types break the lifetime model. This trips
+  `clippy::needless_pass_by_value` — silence it at the command
+  function with a comment explaining why, never globally.
+- **Commands return `Result<T, String>`** because Tauri serializes
+  the error variant for the frontend. Map domain errors with
+  `.map_err(|e| e.to_string())` at the IPC boundary; keep the typed
+  `AppError` everywhere else.
+- **Trait extension methods need explicit `use` imports.**
+  `app.manage(...)` and `handle.path()` are provided by
+  `tauri::Manager`. Forgetting the import is a silent failure mode
+  in development since rust-analyzer suggests the method but it
+  fails to compile — always pull `use tauri::Manager;` into any
+  file that calls these.
+- **No business logic in commands** — they parse input, delegate to a
+  service, format the response. Same rule as HTTP routes.
+
 ### 4.3 Frontend structure
 
 ```
@@ -323,6 +346,30 @@ src/
 - Embeddings generated lazily, cached by content hash
 - Vector queries always include metadata filters (project_id, file_type) — never global search
 - Top-K capped at 50; rerank if more candidates needed
+
+### 12.3.1 FE / BE schema sync
+
+The Rust producer is the source of truth. TS Zod schemas in
+`packages/shared/` *mirror* serde-derived Rust types, never drive
+them. Concretely:
+
+- **Discriminator strings**: when a Rust enum carries `#[serde(rename
+  = "...")]`, the TS literal must match exactly. Example:
+  `ProviderKind::Ollama` → `#[serde(rename = "ollama")]` →
+  `z.literal('ollama')` (not `'ollama-local'`).
+- **Optional vs required fields**: if Rust models a field as
+  `Option<T>`, the Zod schema marks it `.optional()`. If a refinement
+  exists in Rust (e.g. "name is empty only for Module-kind chunks"),
+  encode it as a Zod `.refine(...)` so the wire boundary catches the
+  same constraint.
+- **When a Rust enum gains or drops a variant**, the TS schema and
+  every test that covers it must be updated in the same PR. Drift
+  between the two layers is a runtime bug class — the IPC boundary
+  is the only place it can fail.
+- **New Zod schemas land in `packages/shared/src/schemas/`** with a
+  matching contract test that exercises the round-trip. Backend PRs
+  that change a serialized type must update the matching schema; the
+  PR review checklist (§15) enforces this.
 
 ### 12.4 Cost / safety
 

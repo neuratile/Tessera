@@ -1,6 +1,12 @@
 # Node / pnpm
 node_modules/
 .pnpm-store/
+# Lockfile NOTE: package-lock.json was committed alongside the
+# pnpm-workspace.yaml scaffold. The workspace uses pnpm; pnpm-lock.yaml
+# is the correct lockfile and is intentionally NOT tracked yet to avoid
+# shipping two competing lockfiles in the same PR. Follow-up: switch
+# to pnpm-lock.yaml and remove package-lock.json (separate PR).
+pnpm-lock.yaml
 
 # Turbo
 .turbo/

@@ -77,10 +77,15 @@ This IDE bridges the gap with three guarantees:
 | 3 | AST pipeline: file discovery, Tree-sitter parsing, semantic chunking, chunk repository | **Shipped** ([PR #6](https://github.com/Rajveerx11/Testing-IDE/pull/6)) |
 | 4 | Versioned prompt templates with JSON-Schema function calling | Pending |
 | 5 | Generation service tying RAG + prompts + LLM | Pending |
-| 6 | Tauri IPC commands + AES-GCM API-key encryption | Pending |
+| 6 | Tauri IPC commands + AES-GCM API-key encryption | In progress — `init_db` command + `setup` lifecycle hook landed |
 | 7 | Integration tests against Ollama, snapshot tests for prompts, CI workflow | Pending |
 
-**Tests**: 136 passing. **Clippy**: clean (`pedantic` enforced). **Audit**: 21 advisories triaged in `audit.toml`. **Release build**: green.
+**Parallel streams shipped:**
+- **Monorepo** — pnpm workspaces + Turborepo at root. `packages/shared/` (Zod schemas + TS types for FE/BE contracts), `packages/eslint-config/`, `packages/tsconfig/`, `packages/ui/`. Single source of truth for types is the Rust serde-derived data layer; Zod schemas mirror per `rules.md` §12.3.1.
+- **Frontend skeleton** — `apps/desktop/src/` Vite + React 19 + TailwindCSS v4 + shadcn/ui scaffold (App.tsx, main.tsx, button.tsx). Wired to Tauri's `init_db` and `greet` commands.
+- **Tauri build pipeline** — `tauri.conf.json` carries `beforeDevCommand` + `beforeBuildCommand` hooks; CSP allows the Vite dev server at `localhost:5173`.
+
+**Tests**: 138 Rust unit + Zod contract tests in `packages/shared/`. **Clippy**: clean (`pedantic` enforced). **Audit**: 21 advisories triaged in `audit.toml`. **Release build**: green.
 
 ---
 
@@ -290,10 +295,32 @@ let hits = search_similar(
 
 ```
 Testing-IDE/
+├── package.json                          # pnpm workspace root
+├── pnpm-workspace.yaml
+├── turbo.json
+├── packages/                             # Shared workspace packages
+│   ├── shared/                           # Zod schemas + TS types (FE/BE contract)
+│   │   └── src/schemas/
+│   │       ├── code-chunk.schema.ts      # Mirrors Rust ChunkKind
+│   │       ├── llm-provider.schema.ts    # Mirrors Rust ProviderKind
+│   │       ├── provider.schema.ts        # Mirrors user_provider_configs table
+│   │       └── ...
+│   ├── eslint-config/                    # Shared ESLint configs
+│   ├── tsconfig/                         # Shared TS configs
+│   └── ui/                               # Shared shadcn primitives (placeholder)
 ├── apps/
 │   └── desktop/                          # Tauri 2 desktop app
 │       ├── .env.example
 │       ├── .gitignore
+│       ├── package.json                  # Vite + React deps
+│       ├── vite.config.ts
+│       ├── components.json               # shadcn config
+│       ├── src/                          # React frontend
+│       │   ├── main.tsx
+│       │   ├── App.tsx
+│       │   ├── components/ui/button.tsx  # First shadcn primitive
+│       │   ├── lib/utils.ts
+│       │   └── index.css
 │       └── src-tauri/                    # Rust backend
 │           ├── Cargo.toml
 │           ├── audit.toml                # cargo-audit triage
@@ -387,6 +414,7 @@ See [`apps/desktop/src-tauri/docs/adr/README.md`](./apps/desktop/src-tauri/docs/
 - **Phase 1** — Foundation: monorepo + Tauri scaffold, layered architecture per [rules.md §4.2](./rules/rules.md), typed env config, AppError + AppResult, SQLite pool with WAL + foreign keys, migrations runner, schema for users / projects / files / chunks / artifacts / providers / dependencies, structured tracing logs.
 - **Phase 2** — LLM provider abstraction: 4 chat providers + 1 embedding provider + factory + typed `LlmError`. 88 tests at end of phase, fmt + clippy + release build green, audit triaged.
 - **Phase 3** — AST pipeline producer chain: `file_discovery_service` (gitignore-aware walk, extension allow-list, size caps, path-traversal guards), `ast_service` (Tree-sitter JS/TS/Python with declaration / import / export extraction), `chunking_service` (function / class / module-boundary chunks with token counts + oversize flag), `chunk_repo` (BLOB embeddings with brute-force cosine search filtered by `(project_id, embedding_provider, embedding_dim)`, top-K capped at 50, 50 000-chunk-per-tuple cap per ADR-0002). 136 tests at end of phase.
+- **Monorepo + frontend scaffold** (parallel stream) — pnpm workspaces, Turborepo, shared Zod schemas mirroring Rust types per `rules.md` §12.3.1, ESLint / TS configs, Vite + React 19 + Tailwind + shadcn skeleton. First Tauri IPC commands wired (`greet`, `init_db`).
 
 ### Next
 

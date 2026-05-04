@@ -19,7 +19,9 @@ use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
-use tauri::{AppHandle, Runtime};
+// `Manager` provides `AppHandle::path()`. Bring it into scope explicitly
+// so `handle.path()` resolves in `resolve_app_db_path` below.
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::error::{AppError, AppResult};
 
@@ -106,7 +108,9 @@ fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
         ));
     }
     if trimmed.contains('\0') {
-        return Err(AppError::Config("DB_PATH must not contain NUL bytes".into()));
+        return Err(AppError::Config(
+            "DB_PATH must not contain NUL bytes".into(),
+        ));
     }
     if trimmed.len() > MAX_DB_PATH_ENV_BYTES {
         return Err(AppError::Config(format!(
@@ -116,7 +120,7 @@ fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
     Ok(PathBuf::from(trimmed))
 }
 
-/// Resolve the SQLite file path for this process: `DB_PATH` when set, otherwise
+/// Resolve the `SQLite` file path for this process: `DB_PATH` when set, otherwise
 /// `<app_local_data_dir>/testing-ide.db` (Tauri desktop layout).
 ///
 /// # Errors
