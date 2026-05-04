@@ -1,0 +1,64 @@
+---
+source: src/prompts/snapshots.rs
+expression: "context_md_v1::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  architecture_notes:
+    description: "Bullet-prose describing layers, boundaries, and data flow. Cite files / functions / classes by name."
+    minLength: 40
+    type: string
+  data_flows:
+    description: Notable producer -> consumer flows the model identified.
+    items:
+      additionalProperties: false
+      properties:
+        consumer:
+          minLength: 1
+          type: string
+        payload:
+          minLength: 1
+          type: string
+        producer:
+          minLength: 1
+          type: string
+      required:
+        - producer
+        - consumer
+        - payload
+      type: object
+    type: array
+  key_modules:
+    description: "Top 3-10 modules / files that drive the system's behavior."
+    items:
+      additionalProperties: false
+      properties:
+        name:
+          minLength: 1
+          type: string
+        responsibility:
+          minLength: 1
+          type: string
+      required:
+        - name
+        - responsibility
+      type: object
+    maxItems: 20
+    minItems: 1
+    type: array
+  known_risks:
+    description: Areas the model could not understand from sampled chunks. Empty when nothing is unclear.
+    items:
+      minLength: 1
+      type: string
+    type: array
+  summary:
+    description: One-paragraph elevator pitch for the project.
+    maxLength: 1200
+    minLength: 40
+    type: string
+required:
+  - summary
+  - architecture_notes
+  - key_modules
+type: object
