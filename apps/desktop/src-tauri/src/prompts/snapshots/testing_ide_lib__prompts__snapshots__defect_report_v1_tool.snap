@@ -1,0 +1,82 @@
+---
+source: src/prompts/snapshots.rs
+expression: "defect_report_v1::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  findings:
+    items:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - logic_error
+            - race_condition
+            - null_safety
+            - input_validation
+            - security
+            - performance
+            - memory_leak
+            - error_handling
+          type: string
+        confidence:
+          enum:
+            - high
+            - medium
+          type: string
+        description:
+          minLength: 10
+          type: string
+        id:
+          description: "Stable id, prefix `DEF-`."
+          pattern: "^DEF-[A-Z0-9_-]+$"
+          type: string
+        impact:
+          minLength: 5
+          type: string
+        location:
+          additionalProperties: false
+          properties:
+            end_line:
+              minimum: 1
+              type: integer
+            file_hint:
+              type: string
+            start_line:
+              minimum: 1
+              type: integer
+            symbol:
+              minLength: 1
+              type: string
+          required:
+            - symbol
+            - start_line
+            - end_line
+          type: object
+        severity:
+          enum:
+            - critical
+            - major
+            - minor
+            - trivial
+          type: string
+        suggested_fix:
+          minLength: 5
+          type: string
+      required:
+        - id
+        - severity
+        - category
+        - confidence
+        - location
+        - description
+        - impact
+        - suggested_fix
+      type: object
+    type: array
+  summary:
+    description: One-paragraph overview written after the findings list.
+    type: string
+required:
+  - findings
+type: object
