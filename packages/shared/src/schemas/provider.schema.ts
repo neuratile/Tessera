@@ -6,24 +6,14 @@ const OptionalUrlSchema = z.union([z.string().url(), z.literal('')]);
 
 /**
  * User-facing provider configuration (forms + API). Secrets may be redacted server-side.
+ *
+ * Provider literals must mirror `ProviderKind` in
+ * `apps/desktop/src-tauri/src/providers/factory.rs` exactly; see
+ * `llm-provider.schema.ts` for the canonical list.
  */
 export const ProviderConfigSchema = z.discriminatedUnion('provider', [
   z.object({
-    provider: z.literal('openai'),
-    apiKey: z.string().optional(),
-    baseUrl: OptionalUrlSchema.optional(),
-    defaultModel: z.string().min(1),
-    isActive: z.boolean().optional(),
-  }),
-  z.object({
-    provider: z.literal('anthropic'),
-    apiKey: z.string().optional(),
-    baseUrl: OptionalUrlSchema.optional(),
-    defaultModel: z.string().min(1),
-    isActive: z.boolean().optional(),
-  }),
-  z.object({
-    provider: z.literal('openrouter'),
+    provider: z.literal('ollama'),
     apiKey: z.string().optional(),
     baseUrl: OptionalUrlSchema.optional(),
     defaultModel: z.string().min(1),
@@ -37,7 +27,21 @@ export const ProviderConfigSchema = z.discriminatedUnion('provider', [
     isActive: z.boolean().optional(),
   }),
   z.object({
-    provider: z.literal('ollama-local'),
+    provider: z.literal('openai'),
+    apiKey: z.string().optional(),
+    baseUrl: OptionalUrlSchema.optional(),
+    defaultModel: z.string().min(1),
+    isActive: z.boolean().optional(),
+  }),
+  z.object({
+    provider: z.literal('openrouter'),
+    apiKey: z.string().optional(),
+    baseUrl: OptionalUrlSchema.optional(),
+    defaultModel: z.string().min(1),
+    isActive: z.boolean().optional(),
+  }),
+  z.object({
+    provider: z.literal('anthropic'),
     apiKey: z.string().optional(),
     baseUrl: OptionalUrlSchema.optional(),
     defaultModel: z.string().min(1),
