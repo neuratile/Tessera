@@ -38,6 +38,9 @@ chrono = { version = "0.4", features = ["serde"] }
 ignore = "0.4"
 walkdir = "2"
 jsonschema = { version = "0.18", default-features = false }
+aes-gcm = "0.10"
+rand = "0.8"
+sysinfo = "0.31"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

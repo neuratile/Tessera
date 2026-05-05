@@ -11,7 +11,8 @@
 //! - [`artifact_repo`] (Phase 5) — generated-artifact persistence with
 //!   chained version-tracking for regenerations.
 //!
-//! Future phases add `project_repo`, `provider_config_repo`.
-
 pub mod artifact_repo;
 pub mod chunk_repo;
+pub mod project_file_repo;
+pub mod project_repo;
+pub mod provider_config_repo;

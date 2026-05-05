@@ -16,6 +16,12 @@
 //! Sub-modules added in Phase 6: `projects`, `analysis`, `generation`,
 //! `providers`, `health`.
 
+pub mod analysis;
+pub mod generation;
+pub mod health;
+pub mod projects;
+pub mod providers;
+
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, State};

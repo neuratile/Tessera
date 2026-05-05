@@ -17,7 +17,11 @@
 //!   prompts + `LlmProvider` into one end-to-end artifact-production
 //!   flow with token-budget enforcement and JSON-Schema validation.
 
+pub mod analysis_service;
 pub mod ast_service;
 pub mod chunking_service;
 pub mod file_discovery_service;
 pub mod generation_service;
+pub mod health_service;
+pub mod project_service;
+pub mod provider_config_service;

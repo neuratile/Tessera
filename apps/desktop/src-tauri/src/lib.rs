@@ -51,9 +51,29 @@ pub fn run() {
             let pool = tauri::async_runtime::block_on(db::init_pool_at(&db_path))
                 .map_err(|e| e.to_string())?;
             app.manage(pool);
+
+            let data_dir = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let crypto_key = utils::crypto::CryptoKey::load_or_generate(data_dir)
+                .map_err(|e| e.to_string())?;
+            tracing::info!("encryption key loaded");
+            app.manage(crypto_key);
+
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::greet, commands::init_db])
+        .invoke_handler(tauri::generate_handler![
+            commands::greet,
+            commands::init_db,
+            commands::projects::create_project,
+            commands::projects::list_projects,
+            commands::projects::get_project,
+            commands::projects::delete_project,
+            commands::analysis::analyze_project,
+            commands::generation::generate_artifact,
+            commands::providers::save_provider_config,
+            commands::providers::list_provider_configs,
+            commands::providers::delete_provider_config,
+            commands::health::health_check,
+        ])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");
 }
