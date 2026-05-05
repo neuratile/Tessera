@@ -25,11 +25,8 @@ pub mod services;
 pub mod utils;
 pub mod workers;
 
-<<<<<<< HEAD
-=======
 // `tauri::App::manage` is provided by the `Manager` trait — bring it in
 // scope so `app.manage(...)` resolves at the call site below.
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 use tauri::Manager;
 
 /// Entry point invoked from `main.rs`. Loads configuration, initializes
@@ -77,12 +74,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::init_db,
-<<<<<<< HEAD
             commands::auth::register,
             commands::auth::login,
             commands::auth::refresh_token,
             commands::auth::auth_me,
-=======
             commands::projects::create_project,
             commands::projects::list_projects,
             commands::projects::get_project,
@@ -93,7 +88,6 @@ pub fn run() {
             commands::providers::list_provider_configs,
             commands::providers::delete_provider_config,
             commands::health::health_check,
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");

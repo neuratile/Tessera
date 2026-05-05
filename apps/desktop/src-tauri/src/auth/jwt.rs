@@ -40,9 +40,10 @@ pub fn encode_access_token(
     secret: &[u8],
 ) -> AppResult<String> {
     let now = chrono::Utc::now().timestamp();
-    let exp = now + i64::try_from(ttl_secs).map_err(|_| {
-        AppError::Config("jwt_access_ttl_secs does not fit in i64 seconds".into())
-    })?;
+    let exp = now
+        + i64::try_from(ttl_secs).map_err(|_| {
+            AppError::Config("jwt_access_ttl_secs does not fit in i64 seconds".into())
+        })?;
     let claims = Claims {
         sub: user_id.to_string(),
         email: email.to_string(),
@@ -66,9 +67,10 @@ pub fn encode_refresh_token(
     secret: &[u8],
 ) -> AppResult<String> {
     let now = chrono::Utc::now().timestamp();
-    let exp = now + i64::try_from(ttl_secs).map_err(|_| {
-        AppError::Config("jwt_refresh_ttl_secs does not fit in i64 seconds".into())
-    })?;
+    let exp = now
+        + i64::try_from(ttl_secs).map_err(|_| {
+            AppError::Config("jwt_refresh_ttl_secs does not fit in i64 seconds".into())
+        })?;
     let claims = Claims {
         sub: user_id.to_string(),
         email: email.to_string(),

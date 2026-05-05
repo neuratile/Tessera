@@ -258,7 +258,10 @@ mod tests {
         let cfg = AppConfig::from_env().expect("defaults must always load");
         assert_eq!(cfg.ollama_base_url, DEFAULT_OLLAMA_BASE_URL);
         assert_eq!(cfg.log_level, DEFAULT_LOG_LEVEL);
-        assert!(cfg.db_path.is_none(), "unset DB_PATH must defer to app data dir resolver");
+        assert!(
+            cfg.db_path.is_none(),
+            "unset DB_PATH must defer to app data dir resolver"
+        );
     }
 
     #[test]

@@ -64,13 +64,11 @@ pub async fn insert_user(
 /// Returns [`AppError::Unauthorized`] when no row exists (indistinguishable from a
 /// bad password at the IPC layer).
 pub async fn find_auth_by_email(pool: &SqlitePool, email: &str) -> AppResult<UserAuthRow> {
-    sqlx::query_as::<_, UserAuthRow>(
-        "SELECT id, email, password_hash FROM users WHERE email = ?",
-    )
-    .bind(email)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("invalid credentials".into()))
+    sqlx::query_as::<_, UserAuthRow>("SELECT id, email, password_hash FROM users WHERE email = ?")
+        .bind(email)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("invalid credentials".into()))
 }
 
 /// Loads a full [`UserRow`] by primary key.

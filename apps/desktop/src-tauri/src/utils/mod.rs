@@ -7,9 +7,6 @@
 //! Sub-modules added as needed: `secret_redaction`, `path_safety`,
 //! `token_counting`.
 
-<<<<<<< HEAD
-pub mod sqlite_path;
-=======
 pub mod crypto;
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
+pub mod sqlite_path;
 pub mod telemetry;

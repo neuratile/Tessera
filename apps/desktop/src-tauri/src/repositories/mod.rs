@@ -13,10 +13,7 @@
 //!
 pub mod artifact_repo;
 pub mod chunk_repo;
-<<<<<<< HEAD
-pub mod user_repo;
-=======
 pub mod project_file_repo;
 pub mod project_repo;
 pub mod provider_config_repo;
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
+pub mod user_repo;

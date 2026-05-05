@@ -19,11 +19,8 @@ use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
-<<<<<<< HEAD
-=======
 // `Manager` provides `AppHandle::path()`. Bring it into scope explicitly
 // so `handle.path()` resolves in `resolve_app_db_path` below.
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::config::AppConfig;
@@ -112,40 +109,17 @@ pub async fn init_pool_at(path: &Path) -> AppResult<SqlitePool> {
     connect_pool_and_migrate(options, &log_line).await
 }
 
-<<<<<<< HEAD
 /// Resolve the `SQLite` file path from [`AppConfig::db_path`] when set,
 /// otherwise `<app_local_data_dir>/testing-ide.db`.
-=======
-/// Parse and validate `DB_PATH` from the environment (trust boundary).
-fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::Config(
-            "DB_PATH is set but empty after trimming".into(),
-        ));
-    }
-    if trimmed.contains('\0') {
-        return Err(AppError::Config(
-            "DB_PATH must not contain NUL bytes".into(),
-        ));
-    }
-    if trimmed.len() > MAX_DB_PATH_ENV_BYTES {
-        return Err(AppError::Config(format!(
-            "DB_PATH exceeds maximum length ({MAX_DB_PATH_ENV_BYTES} bytes)"
-        )));
-    }
-    Ok(PathBuf::from(trimmed))
-}
-
-/// Resolve the `SQLite` file path for this process: `DB_PATH` when set, otherwise
-/// `<app_local_data_dir>/testing-ide.db` (Tauri desktop layout).
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 ///
 /// # Errors
 ///
 /// Returns [`AppError::Config`] when the app data directory cannot be resolved,
 /// or [`AppError::Io`] when the directory cannot be created.
-pub fn resolve_app_db_path<R: Runtime>(handle: &AppHandle<R>, cfg: &AppConfig) -> AppResult<PathBuf> {
+pub fn resolve_app_db_path<R: Runtime>(
+    handle: &AppHandle<R>,
+    cfg: &AppConfig,
+) -> AppResult<PathBuf> {
     if let Some(path) = &cfg.db_path {
         return Ok(path.clone());
     }
@@ -240,10 +214,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("pragma users");
-        assert!(
-            users_cols.0 > 0,
-            "users.password_hash must exist"
-        );
+        assert!(users_cols.0 > 0, "users.password_hash must exist");
 
         let projects_cols: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'path'",
@@ -251,10 +222,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("pragma projects");
-        assert!(
-            projects_cols.0 > 0,
-            "projects.path must exist"
-        );
+        assert!(projects_cols.0 > 0, "projects.path must exist");
 
         let artifacts_type_cols: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name = 'type'",
@@ -262,20 +230,14 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("pragma artifacts type");
-        assert!(
-            artifacts_type_cols.0 > 0,
-            "artifacts.type must exist"
-        );
+        assert!(artifacts_type_cols.0 > 0, "artifacts.type must exist");
         let artifacts_content_cols: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name = 'content'",
         )
         .fetch_one(&pool)
         .await
         .expect("pragma artifacts content");
-        assert!(
-            artifacts_content_cols.0 > 0,
-            "artifacts.content must exist"
-        );
+        assert!(artifacts_content_cols.0 > 0, "artifacts.content must exist");
 
         let chunk_embedding_cols: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM pragma_table_info('code_chunks') WHERE name = 'embedding'",
@@ -293,10 +255,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("pragma chunks path");
-        assert!(
-            chunk_path_cols.0 > 0,
-            "code_chunks.file_path must exist"
-        );
+        assert!(chunk_path_cols.0 > 0, "code_chunks.file_path must exist");
 
         pool.close().await;
         let _ = std::fs::remove_file(&tmp);

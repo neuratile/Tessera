@@ -16,15 +16,12 @@
 //! Sub-modules added in Phase 6: `projects`, `analysis`, `generation`,
 //! `providers`, `health`.
 
-<<<<<<< HEAD
-pub mod auth;
-=======
 pub mod analysis;
+pub mod auth;
 pub mod generation;
 pub mod health;
 pub mod projects;
 pub mod providers;
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -48,13 +45,8 @@ pub struct InitDbResponse {
 
 /// Placeholder command to verify IPC wiring end-to-end.
 #[tauri::command]
-<<<<<<< HEAD
-#[must_use]
-#[allow(clippy::needless_pass_by_value)]
-=======
 #[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
 #[must_use]
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 pub fn greet(name: String) -> String {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -66,14 +58,6 @@ pub fn greet(name: String) -> String {
 
 /// Confirms the database file location and that the managed pool can execute a query.
 ///
-<<<<<<< HEAD
-/// The database file and migrations are applied during app [`setup`](tauri::Builder::setup);
-/// this command is safe to call multiple times.
-///
-/// # Errors
-///
-/// Returns `Err(String)` when path resolution, migration, or query execution fails.
-=======
 /// The database file and migrations are applied during app
 /// [`setup`](tauri::Builder::setup); this command is safe to call
 /// multiple times.
@@ -88,22 +72,14 @@ pub fn greet(name: String) -> String {
 ///   `AppError::Io` if the directory cannot be created.
 /// - The managed pool rejects the smoke-test query (pool dropped /
 ///   connection lost / `SQLite` corruption).
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 #[tauri::command]
 pub async fn init_db(
     app: AppHandle,
     pool: State<'_, SqlitePool>,
-<<<<<<< HEAD
     cfg: State<'_, AppConfig>,
 ) -> Result<InitDbResponse, String> {
     let path = db::resolve_app_db_path(&app, &cfg).map_err(|e| e.to_string())?;
-    db::run_migrations(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
-=======
-) -> Result<InitDbResponse, String> {
-    let path = db::resolve_app_db_path(&app).map_err(|e| e.to_string())?;
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
+    db::run_migrations(&pool).await.map_err(|e| e.to_string())?;
     sqlx::query("SELECT 1")
         .execute(&*pool)
         .await

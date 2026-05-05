@@ -35,7 +35,11 @@ pub struct SessionUser {
 /// # Errors
 ///
 /// Propagates validation, hashing, and database errors.
-pub async fn register(pool: &SqlitePool, cfg: &AppConfig, dto: &RegisterDto) -> AppResult<TokenPair> {
+pub async fn register(
+    pool: &SqlitePool,
+    cfg: &AppConfig,
+    dto: &RegisterDto,
+) -> AppResult<TokenPair> {
     validate_register(dto)?;
     let email = canonical_email(&dto.email)?;
     if user_repo::email_exists(pool, &email).await? {
@@ -90,7 +94,10 @@ pub async fn refresh_tokens(
 /// # Errors
 ///
 /// Propagates [`AppError::Unauthorized`] / [`AppError::NotFound`].
-pub async fn session_from_access_claims(pool: &SqlitePool, claims: &Claims) -> AppResult<SessionUser> {
+pub async fn session_from_access_claims(
+    pool: &SqlitePool,
+    claims: &Claims,
+) -> AppResult<SessionUser> {
     let user = user_repo::find_user_by_id(pool, &claims.sub).await?;
     if user.email != claims.email {
         return Err(AppError::Unauthorized("invalid access token".into()));
@@ -175,12 +182,9 @@ mod tests {
             .expect("refresh");
         assert!(!refreshed.access_token.is_empty());
 
-        let claims = auth::decode_access_token(
-            &refreshed.access_token,
-            cfg.jwt_secret.as_bytes(),
-            60,
-        )
-        .expect("decode access");
+        let claims =
+            auth::decode_access_token(&refreshed.access_token, cfg.jwt_secret.as_bytes(), 60)
+                .expect("decode access");
         let session = session_from_access_claims(&pool, &claims)
             .await
             .expect("session");

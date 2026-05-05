@@ -1,26 +1,15 @@
-<<<<<<< HEAD
 import { invoke } from '@tauri-apps/api/core';
 import { LoginSchema, RegisterSchema } from '@testing-ide/shared';
-=======
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 import { useCallback, useEffect, useState } from 'react';
 import type { ZodError } from 'zod';
 
 import { FirstRunWizard } from '@/components/first-run-wizard';
 import { Button } from '@/components/ui/button';
-<<<<<<< HEAD
 import { Input } from '@/components/ui/input';
-import { useAuthStore } from '@/stores/auth-store';
-
-type InitDbResponse = {
-  dbPath: string;
-  ok: boolean;
-};
-=======
 import { IpcError, system } from '@/lib/ipc';
 import type { InitDbResponse } from '@/lib/ipc/system';
 import { readOnboardingFlag } from '@/lib/onboarding';
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
+import { useAuthStore } from '@/stores/auth-store';
 
 type TokenPair = {
   accessToken: string;
@@ -52,15 +41,11 @@ function formatZodError(err: ZodError): string {
 }
 
 /**
-<<<<<<< HEAD
- * Desktop shell: verifies Tauri IPC and exercises Phase 5 auth commands.
-=======
  * Desktop shell.
  *
  * Phase 8: routes to the first-run wizard until the user dismisses it,
- * then renders the IPC smoke panel. Real workspace UI (file tree, Monaco,
- * AI panel) lands in later phases.
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
+ * then renders the IPC smoke panel + Phase 5 auth panel. Real workspace
+ * UI (file tree, Monaco, AI panel) lands in later phases.
  */
 export function App() {
   const [showWizard, setShowWizard] = useState<boolean>(() => !readOnboardingFlag());
@@ -109,7 +94,6 @@ export function App() {
       });
   }, []);
 
-<<<<<<< HEAD
   const handleRegister = useCallback(() => {
     setAuthError(null);
     const parsed = RegisterSchema.safeParse({
@@ -178,11 +162,10 @@ export function App() {
         setAuthError(err instanceof Error ? err.message : String(err));
       });
   }, [accessToken]);
-=======
+
   if (showWizard) {
     return <FirstRunWizard onComplete={() => setShowWizard(false)} />;
   }
->>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 
   return (
     <div className="flex min-h-screen flex-col gap-6 p-8">
@@ -211,8 +194,8 @@ export function App() {
       <section className="space-y-3 rounded-lg border border-border p-4">
         <h2 className="text-sm font-medium">Auth (Phase 5)</h2>
         <p className="text-muted-foreground text-xs">
-          Tokens stay in memory (Zustand) until you reload. Set a strong <code className="text-xs">JWT_SECRET</code>{' '}
-          for real builds.
+          Tokens stay in memory (Zustand) until you reload. Set a strong{' '}
+          <code className="text-xs">JWT_SECRET</code> for real builds.
         </p>
         <div className="grid max-w-md gap-2">
           <label className="text-xs font-medium" htmlFor="auth-email">
@@ -281,7 +264,11 @@ export function App() {
         <div className="text-muted-foreground space-y-1 text-xs">
           <p>
             Access token:{' '}
-            {accessToken === null ? '—' : <code className="break-all">{`${accessToken.slice(0, 24)}…`}</code>}
+            {accessToken === null ? (
+              '—'
+            ) : (
+              <code className="break-all">{`${accessToken.slice(0, 24)}…`}</code>
+            )}
           </p>
           {sessionUser ? (
             <p>

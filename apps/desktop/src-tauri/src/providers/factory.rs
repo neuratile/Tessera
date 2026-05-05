@@ -87,7 +87,10 @@ pub struct ProviderConfig {
 pub fn build_llm_provider(config: &ProviderConfig) -> Result<Arc<dyn LlmProvider>, LlmError> {
     match config.kind {
         ProviderKind::Ollama => {
-            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_BASE_URL);
+            let base = config
+                .base_url
+                .as_deref()
+                .unwrap_or(DEFAULT_OLLAMA_BASE_URL);
             Ok(Arc::new(OllamaProvider::new(base.to_string())?))
         }
         ProviderKind::OllamaCloud => {
@@ -148,7 +151,10 @@ pub fn build_embedding_provider(
 ) -> Result<Arc<dyn EmbeddingProvider>, LlmError> {
     match config.kind {
         ProviderKind::Ollama | ProviderKind::OllamaCloud => {
-            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_BASE_URL);
+            let base = config
+                .base_url
+                .as_deref()
+                .unwrap_or(DEFAULT_OLLAMA_BASE_URL);
             Ok(Arc::new(OllamaEmbeddingProvider::new(base.to_string())?))
         }
         kind => Err(LlmError::Unsupported {
