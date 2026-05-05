@@ -8,20 +8,23 @@
 //! Sub-modules added in Phase 6: `projects`, `analysis`, `generation`,
 //! `providers`, `health`.
 
+pub mod auth;
+
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, State};
 
+use crate::config::AppConfig;
 use crate::db;
 
-/// Upper bound on greeting name length from IPC (DoS / log noise hardening).
+/// Upper bound on greeting name length from IPC (`DoS` / log noise hardening).
 const MAX_GREET_NAME_CHARS: usize = 256;
 
 /// Response returned by [`init_db`] so the frontend can display the resolved path.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitDbResponse {
-    /// Absolute path to the SQLite database file.
+    /// Absolute path to the `SQLite` database file.
     pub db_path: String,
     /// Always `true` when the command succeeds (pool is reachable).
     pub ok: bool,
@@ -29,6 +32,8 @@ pub struct InitDbResponse {
 
 /// Placeholder command to verify IPC wiring end-to-end.
 #[tauri::command]
+#[must_use]
+#[allow(clippy::needless_pass_by_value)]
 pub fn greet(name: String) -> String {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -42,9 +47,20 @@ pub fn greet(name: String) -> String {
 ///
 /// The database file and migrations are applied during app [`setup`](tauri::Builder::setup);
 /// this command is safe to call multiple times.
+///
+/// # Errors
+///
+/// Returns `Err(String)` when path resolution, migration, or query execution fails.
 #[tauri::command]
-pub async fn init_db(app: AppHandle, pool: State<'_, SqlitePool>) -> Result<InitDbResponse, String> {
-    let path = db::resolve_app_db_path(&app).map_err(|e| e.to_string())?;
+pub async fn init_db(
+    app: AppHandle,
+    pool: State<'_, SqlitePool>,
+    cfg: State<'_, AppConfig>,
+) -> Result<InitDbResponse, String> {
+    let path = db::resolve_app_db_path(&app, &cfg).map_err(|e| e.to_string())?;
+    db::run_migrations(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
     sqlx::query("SELECT 1")
         .execute(&*pool)
         .await

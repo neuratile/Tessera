@@ -9,10 +9,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit false",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@testing-ide/shared": "file:../shared"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vitest": "^3.0.0"
   }
 }

@@ -17,6 +17,7 @@ use super::llm::ollama::OllamaProvider;
 use super::llm::openai::OpenAiProvider;
 use super::llm::openrouter::OpenRouterProvider;
 use super::llm::LlmProvider;
+use crate::config::DEFAULT_OLLAMA_BASE_URL;
 
 /// Discriminator used to match the provider kind selected by the user
 /// in the Settings UI. Stored on `user_provider_configs.provider`.
@@ -86,7 +87,7 @@ pub struct ProviderConfig {
 pub fn build_llm_provider(config: &ProviderConfig) -> Result<Arc<dyn LlmProvider>, LlmError> {
     match config.kind {
         ProviderKind::Ollama => {
-            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_URL);
+            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_BASE_URL);
             Ok(Arc::new(OllamaProvider::new(base.to_string())?))
         }
         ProviderKind::OllamaCloud => {
@@ -147,7 +148,7 @@ pub fn build_embedding_provider(
 ) -> Result<Arc<dyn EmbeddingProvider>, LlmError> {
     match config.kind {
         ProviderKind::Ollama | ProviderKind::OllamaCloud => {
-            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_URL);
+            let base = config.base_url.as_deref().unwrap_or(DEFAULT_OLLAMA_BASE_URL);
             Ok(Arc::new(OllamaEmbeddingProvider::new(base.to_string())?))
         }
         kind => Err(LlmError::Unsupported {
@@ -156,8 +157,6 @@ pub fn build_embedding_provider(
         }),
     }
 }
-
-const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 fn provider_name_for(kind: ProviderKind) -> &'static str {
     // Static-string lookup so `LlmError::Unsupported::provider`

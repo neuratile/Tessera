@@ -7,4 +7,5 @@
 //! Sub-modules added as needed: `secret_redaction`, `path_safety`,
 //! `token_counting`.
 
+pub mod sqlite_path;
 pub mod telemetry;

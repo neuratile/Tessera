@@ -5,3 +5,15 @@ export * from './types/llm-provider';
 export * from './types/project';
 export * from './types/provider-config';
 export * from './types/user';
+
+// Zod schemas (inferred TS types are re-exported alongside each schema)
+export * from './schemas/artifact.schema';
+export * from './schemas/auth.schema';
+export * from './schemas/code-chunk.schema';
+export * from './schemas/defect-report.schema';
+export * from './schemas/llm-provider.schema';
+export * from './schemas/project.schema';
+export * from './schemas/provider.schema';
+export * from './schemas/test-case.schema';
+export * from './schemas/test-plan.schema';
+export * from './schemas/user.schema';

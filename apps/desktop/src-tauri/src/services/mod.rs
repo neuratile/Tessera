@@ -17,5 +17,6 @@
 //! Future Phase 3 / 5 modules: `generation_service`, `context_service`.
 
 pub mod ast_service;
+pub mod auth_service;
 pub mod chunking_service;
 pub mod file_discovery_service;

@@ -13,3 +13,4 @@
 //! `provider_config_repo`.
 
 pub mod chunk_repo;
+pub mod user_repo;

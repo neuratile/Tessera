@@ -50,6 +50,10 @@ pub enum AppError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    /// Authentication failed or the caller lacked a valid credential.
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+
     /// Caller-supplied input failed validation at a trust boundary
     /// (`rules.md` §9).
     #[error("invalid input: {0}")]
@@ -86,6 +90,7 @@ impl AppError {
             Self::Serde(_) => "SERIALIZATION_ERROR",
             Self::Llm(inner) => inner.code(),
             Self::NotFound(_) => "NOT_FOUND",
+            Self::Unauthorized(_) => "UNAUTHORIZED",
             Self::InvalidInput(_) => "INVALID_INPUT",
             Self::LimitExceeded(_) => "LIMIT_EXCEEDED",
             Self::Internal(_) => "INTERNAL_ERROR",
@@ -105,6 +110,7 @@ mod tests {
         let cases = [
             (AppError::Config("x".into()), "CONFIG_ERROR"),
             (AppError::NotFound("x".into()), "NOT_FOUND"),
+            (AppError::Unauthorized("x".into()), "UNAUTHORIZED"),
             (AppError::InvalidInput("x".into()), "INVALID_INPUT"),
             (AppError::LimitExceeded("x".into()), "LIMIT_EXCEEDED"),
         ];
