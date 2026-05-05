@@ -8,4 +8,5 @@
 //! `token_counting`.
 
 pub mod crypto;
+pub mod sqlite_path;
 pub mod telemetry;

@@ -22,6 +22,9 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Rust (`cargo`) — binaries and intermediates stay out of Git
+**/target/
+
 # OS/editor
 .DS_Store
 Thumbs.db

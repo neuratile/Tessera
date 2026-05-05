@@ -17,6 +17,7 @@
 //! `providers`, `health`.
 
 pub mod analysis;
+pub mod auth;
 pub mod generation;
 pub mod health;
 pub mod projects;
@@ -26,6 +27,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, State};
 
+use crate::config::AppConfig;
 use crate::db;
 
 /// Upper bound on greeting name length from IPC (`DoS` / log noise hardening).
@@ -74,8 +76,10 @@ pub fn greet(name: String) -> String {
 pub async fn init_db(
     app: AppHandle,
     pool: State<'_, SqlitePool>,
+    cfg: State<'_, AppConfig>,
 ) -> Result<InitDbResponse, String> {
-    let path = db::resolve_app_db_path(&app).map_err(|e| e.to_string())?;
+    let path = db::resolve_app_db_path(&app, &cfg).map_err(|e| e.to_string())?;
+    db::run_migrations(&pool).await.map_err(|e| e.to_string())?;
     sqlx::query("SELECT 1")
         .execute(&*pool)
         .await

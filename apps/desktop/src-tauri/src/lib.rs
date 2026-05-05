@@ -13,6 +13,7 @@
 //! `commands` (Tauri IPC, replaces routes) → `services` → `repositories` → `db`.
 //! Cross-cutting: `providers` (LLM/embeddings), `workers`, `prompts`, `utils`.
 
+pub mod auth;
 pub mod commands;
 pub mod config;
 pub mod db;
@@ -45,13 +46,18 @@ pub fn run() {
 
     tracing::info!(
         ollama_base_url = %cfg.ollama_base_url,
+        sentry_configured = cfg.sentry_dsn.is_some(),
         "starting Testing IDE backend"
     );
 
+    // Clone for `.setup`: `.manage(cfg)` moves the original into Tauri state.
+    let cfg_for_db_path = cfg.clone();
+
     tauri::Builder::default()
         .manage(cfg)
-        .setup(|app| {
-            let db_path = db::resolve_app_db_path(app.handle()).map_err(|e| e.to_string())?;
+        .setup(move |app| {
+            let db_path = db::resolve_app_db_path(app.handle(), &cfg_for_db_path)
+                .map_err(|e| e.to_string())?;
             tracing::info!(db_path = %db_path.display(), "initializing database");
             let pool = tauri::async_runtime::block_on(db::init_pool_at(&db_path))
                 .map_err(|e| e.to_string())?;
@@ -68,6 +74,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::init_db,
+            commands::auth::register,
+            commands::auth::login,
+            commands::auth::refresh_token,
+            commands::auth::auth_me,
             commands::projects::create_project,
             commands::projects::list_projects,
             commands::projects::get_project,

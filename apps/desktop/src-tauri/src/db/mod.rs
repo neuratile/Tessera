@@ -23,16 +23,15 @@ use sqlx::SqlitePool;
 // so `handle.path()` resolves in `resolve_app_db_path` below.
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
+
+pub mod models;
 
 /// Default pool size. Desktop workload is low-concurrency (one user, a few
 /// background workers); five connections covers analysis + generation +
 /// IPC commands without thrashing `SQLite`'s writer lock.
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 5;
-
-/// Maximum length accepted for a `DB_PATH` override (env). Prevents trivial
-/// IPC/env abuse from allocating huge strings.
-const MAX_DB_PATH_ENV_BYTES: usize = 4096;
 
 fn sqlite_options_with_pragmas(options: SqliteConnectOptions) -> SqliteConnectOptions {
     options
@@ -51,13 +50,24 @@ async fn connect_pool_and_migrate(
         .connect_with(options)
         .await?;
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .map_err(AppError::Migration)?;
+    run_migrations(&pool).await?;
 
     tracing::info!(database = %log_target, "database pool ready");
     Ok(pool)
+}
+
+/// Apply all pending sqlx migrations against an existing pool.
+///
+/// This function is idempotent and safe to call repeatedly.
+///
+/// # Errors
+///
+/// Returns `AppError::Migration` when any migration fails.
+pub async fn run_migrations(pool: &SqlitePool) -> AppResult<()> {
+    sqlx::migrate!("./migrations")
+        .run(pool)
+        .await
+        .map_err(AppError::Migration)
 }
 
 /// Build a `SQLite` pool from the configured database URL, creating the file
@@ -99,46 +109,26 @@ pub async fn init_pool_at(path: &Path) -> AppResult<SqlitePool> {
     connect_pool_and_migrate(options, &log_line).await
 }
 
-/// Parse and validate `DB_PATH` from the environment (trust boundary).
-fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::Config(
-            "DB_PATH is set but empty after trimming".into(),
-        ));
-    }
-    if trimmed.contains('\0') {
-        return Err(AppError::Config(
-            "DB_PATH must not contain NUL bytes".into(),
-        ));
-    }
-    if trimmed.len() > MAX_DB_PATH_ENV_BYTES {
-        return Err(AppError::Config(format!(
-            "DB_PATH exceeds maximum length ({MAX_DB_PATH_ENV_BYTES} bytes)"
-        )));
-    }
-    Ok(PathBuf::from(trimmed))
-}
-
-/// Resolve the `SQLite` file path for this process: `DB_PATH` when set, otherwise
-/// `<app_local_data_dir>/testing-ide.db` (Tauri desktop layout).
+/// Resolve the `SQLite` file path from [`AppConfig::db_path`] when set,
+/// otherwise `<app_local_data_dir>/testing-ide.db`.
 ///
 /// # Errors
 ///
-/// Returns `AppError::Config` when the app data directory cannot be resolved,
-/// or `AppError::Io` when the directory cannot be created.
-pub fn resolve_app_db_path<R: Runtime>(handle: &AppHandle<R>) -> AppResult<PathBuf> {
-    match std::env::var("DB_PATH") {
-        Ok(value) if !value.trim().is_empty() => validated_env_db_path(&value),
-        _ => {
-            let dir = handle
-                .path()
-                .app_local_data_dir()
-                .map_err(|e| AppError::Config(e.to_string()))?;
-            std::fs::create_dir_all(&dir)?;
-            Ok(dir.join(crate::config::DEFAULT_DB_FILENAME))
-        }
+/// Returns [`AppError::Config`] when the app data directory cannot be resolved,
+/// or [`AppError::Io`] when the directory cannot be created.
+pub fn resolve_app_db_path<R: Runtime>(
+    handle: &AppHandle<R>,
+    cfg: &AppConfig,
+) -> AppResult<PathBuf> {
+    if let Some(path) = &cfg.db_path {
+        return Ok(path.clone());
     }
+    let dir = handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(crate::config::DEFAULT_DB_FILENAME))
 }
 
 /// Strip query-string fragments from a `SQLite` URL before logging.
@@ -201,15 +191,6 @@ mod tests {
         assert_eq!(redact_url("sqlite:///tmp/x.db"), "sqlite:///tmp/x.db");
     }
 
-    #[test]
-    fn validated_env_db_path_rejects_nul_and_empty() {
-        assert!(super::validated_env_db_path("ok.db").is_ok());
-        assert!(super::validated_env_db_path("  ok.db  ").is_ok());
-        assert!(super::validated_env_db_path("").is_err());
-        assert!(super::validated_env_db_path("   ").is_err());
-        assert!(super::validated_env_db_path("bad\0.db").is_err());
-    }
-
     #[tokio::test]
     async fn pool_init_succeeds_when_path_has_spaces() {
         let dir = env::temp_dir().join(format!("testing ide {}", uuid::Uuid::new_v4()));
@@ -220,5 +201,63 @@ mod tests {
             .expect("pool with spaces in path must init");
         pool.close().await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn phase4_compat_columns_exist_after_migrate() {
+        let tmp = env::temp_dir().join(format!("testing-ide-{}.db", uuid::Uuid::new_v4()));
+        let pool = init_pool_at(&tmp).await.expect("pool init");
+
+        let users_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'password_hash'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma users");
+        assert!(users_cols.0 > 0, "users.password_hash must exist");
+
+        let projects_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'path'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma projects");
+        assert!(projects_cols.0 > 0, "projects.path must exist");
+
+        let artifacts_type_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name = 'type'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma artifacts type");
+        assert!(artifacts_type_cols.0 > 0, "artifacts.type must exist");
+        let artifacts_content_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name = 'content'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma artifacts content");
+        assert!(artifacts_content_cols.0 > 0, "artifacts.content must exist");
+
+        let chunk_embedding_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('code_chunks') WHERE name = 'embedding'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma chunks embedding");
+        assert!(
+            chunk_embedding_cols.0 > 0,
+            "code_chunks.embedding must exist"
+        );
+        let chunk_path_cols: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('code_chunks') WHERE name = 'file_path'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("pragma chunks path");
+        assert!(chunk_path_cols.0 > 0, "code_chunks.file_path must exist");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&tmp);
     }
 }

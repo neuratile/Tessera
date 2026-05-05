@@ -41,6 +41,10 @@ jsonschema = { version = "0.18", default-features = false }
 aes-gcm = "0.10"
 rand = "0.8"
 sysinfo = "0.31"
+argon2 = { version = "0.5", features = ["std"] }
+jsonwebtoken = "9"
+email_address = "0.2"
+dotenvy = "0.15"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

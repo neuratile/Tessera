@@ -19,6 +19,7 @@
 
 pub mod analysis_service;
 pub mod ast_service;
+pub mod auth_service;
 pub mod chunking_service;
 pub mod file_discovery_service;
 pub mod generation_service;

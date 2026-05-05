@@ -16,3 +16,4 @@ pub mod chunk_repo;
 pub mod project_file_repo;
 pub mod project_repo;
 pub mod provider_config_repo;
+pub mod user_repo;
