@@ -75,9 +75,9 @@ This IDE bridges the gap with three guarantees:
 | 1 | Foundation: Tauri scaffold, layered structure, typed config + errors, SQLite + migrations | **Shipped** ([PR #2](https://github.com/Rajveerx11/Testing-IDE/pull/2)) |
 | 2 | LLM provider abstraction: Ollama / OpenAI / OpenRouter / Anthropic + Ollama embeddings + factory | **Shipped** ([PR #3](https://github.com/Rajveerx11/Testing-IDE/pull/3)) |
 | 3 | AST pipeline: file discovery, Tree-sitter parsing, semantic chunking, chunk repository | **Shipped** ([PR #6](https://github.com/Rajveerx11/Testing-IDE/pull/6)) |
-| 4 | Versioned prompt templates with JSON-Schema function calling | Pending |
-| 5 | Generation service tying RAG + prompts + LLM | Pending |
-| 6 | Tauri IPC commands + AES-GCM API-key encryption | In progress — `init_db` command + `setup` lifecycle hook landed |
+| 4 | Versioned prompt templates with JSON-Schema function calling | **Shipped** ([PR #9](https://github.com/Rajveerx11/Testing-IDE/pull/9)) |
+| 5 | Generation service tying RAG + prompts + LLM | **Shipped** ([PR #10](https://github.com/Rajveerx11/Testing-IDE/pull/10)) |
+| 6 | Tauri IPC commands + AES-GCM API-key encryption | **Shipped** (merged direct to `master` — commit `dc4d7d4`) |
 | 7 | Integration tests against Ollama, snapshot tests for prompts, CI workflow | Pending |
 
 **Parallel streams shipped:**
@@ -85,7 +85,7 @@ This IDE bridges the gap with three guarantees:
 - **Frontend skeleton** — `apps/desktop/src/` Vite + React 19 + TailwindCSS v4 + shadcn/ui scaffold (App.tsx, main.tsx, button.tsx). Wired to Tauri's `init_db` and `greet` commands.
 - **Tauri build pipeline** — `tauri.conf.json` carries `beforeDevCommand` + `beforeBuildCommand` hooks; CSP allows the Vite dev server at `localhost:5173`.
 
-**Tests**: 138 Rust unit + Zod contract tests in `packages/shared/`. **Clippy**: clean (`pedantic` enforced). **Audit**: 21 advisories triaged in `audit.toml`. **Release build**: green.
+**Tests**: 231 Rust unit + Zod contract tests in `packages/shared/`. **Clippy**: clean (`pedantic` enforced). **Audit**: 21 advisories triaged in `audit.toml`. **Release build**: green.
 
 ---
 
@@ -340,15 +340,28 @@ Testing-IDE/
 │               ├── lib.rs
 │               ├── config.rs                 # Typed env loading
 │               ├── error.rs                  # AppError + AppResult
-│               ├── commands/                 # Tauri IPC handlers (Phase 6)
-│               ├── services/                 # Business logic (Phase 3 — done)
+│               ├── commands/                 # Tauri IPC handlers (Phase 6 — done)
+│               │   ├── projects.rs           # CRUD: create / list / get / delete
+│               │   ├── analysis.rs           # analyze_project (discover→parse→chunk→embed)
+│               │   ├── generation.rs        # generate_artifact (RAG + LLM)
+│               │   ├── providers.rs         # save / list / delete provider configs
+│               │   └── health.rs            # health_check (db + sysinfo)
+│               ├── services/                 # Business logic (Phase 3 / 5 / 6 — done)
 │               │   ├── file_discovery_service.rs
 │               │   ├── ast_service.rs
-│               │   └── chunking_service.rs
-│               ├── repositories/             # DB access (Phase 3 — done)
-│               │   └── chunk_repo.rs         # BLOB insert + cosine search
+│               │   ├── chunking_service.rs
+│               │   ├── generation_service.rs
+│               │   ├── project_service.rs
+│               │   ├── analysis_service.rs
+│               │   ├── provider_config_service.rs
+│               │   └── health_service.rs
+│               ├── repositories/             # DB access (Phase 3 / 6 — done)
+│               │   ├── chunk_repo.rs         # BLOB insert + cosine search
+│               │   ├── project_repo.rs
+│               │   ├── project_file_repo.rs
+│               │   └── provider_config_repo.rs
 │               ├── workers/                  # Background jobs
-│               ├── prompts/                  # Versioned prompt templates (Phase 4)
+│               ├── prompts/                  # Versioned prompt templates (Phase 4 — done)
 │               ├── providers/                # External integrations (Phase 2 — done)
 │               │   ├── factory.rs
 │               │   ├── llm/
@@ -365,7 +378,8 @@ Testing-IDE/
 │               │       └── ollama.rs
 │               ├── db/                       # SQLite pool + migrations
 │               └── utils/
-│                   └── telemetry.rs          # tracing setup
+│                   ├── telemetry.rs          # tracing setup
+│                   └── crypto.rs             # AES-256-GCM key encryption (Phase 6)
 ├── plan/                                 # Planning docs
 │   ├── initial-plan.md
 │   ├── tech-stack.md
@@ -414,14 +428,16 @@ See [`apps/desktop/src-tauri/docs/adr/README.md`](./apps/desktop/src-tauri/docs/
 - **Phase 1** — Foundation: monorepo + Tauri scaffold, layered architecture per [rules.md §4.2](./rules/rules.md), typed env config, AppError + AppResult, SQLite pool with WAL + foreign keys, migrations runner, schema for users / projects / files / chunks / artifacts / providers / dependencies, structured tracing logs.
 - **Phase 2** — LLM provider abstraction: 4 chat providers + 1 embedding provider + factory + typed `LlmError`. 88 tests at end of phase, fmt + clippy + release build green, audit triaged.
 - **Phase 3** — AST pipeline producer chain: `file_discovery_service` (gitignore-aware walk, extension allow-list, size caps, path-traversal guards), `ast_service` (Tree-sitter JS/TS/Python with declaration / import / export extraction), `chunking_service` (function / class / module-boundary chunks with token counts + oversize flag), `chunk_repo` (BLOB embeddings with brute-force cosine search filtered by `(project_id, embedding_provider, embedding_dim)`, top-K capped at 50, 50 000-chunk-per-tuple cap per ADR-0002). 136 tests at end of phase.
+- **Phase 4** — Versioned prompt templates under `src/prompts/` (`context_v1`, `test_plan_v1`, `test_cases_v1`, `defect_report_v1`) with JSON-Schema tool-calling for structured output. Snapshot tests via `insta`.
+- **Phase 5** — `generation_service` ties RAG (cosine search over `code_chunks`) + versioned prompts + `LlmProvider` streaming. Token-budget enforcement raises `AppError::LimitExceeded`. Tool-output validated against the prompt's JSON Schema before persistence to `artifacts`.
+- **Phase 6** — Tauri IPC layer + AES-256-GCM API-key encryption. Adds `commands/{projects, analysis, generation, providers, health}` (11 IPC handlers) over thin services (`project_service`, `analysis_service`, `provider_config_service`, `health_service`) and three new repositories (`project_repo`, `project_file_repo`, `provider_config_repo`). `utils/crypto.rs` bootstraps a per-install key on disk; provider API keys are encrypted at rest and `ProviderConfigView` never serializes plaintext. 231 lib tests at end of phase, zero clippy warnings under `pedantic`.
 - **Monorepo + frontend scaffold** (parallel stream) — pnpm workspaces, Turborepo, shared Zod schemas mirroring Rust types per `rules.md` §12.3.1, ESLint / TS configs, Vite + React 19 + Tailwind + shadcn skeleton. First Tauri IPC commands wired (`greet`, `init_db`).
 
 ### Next
 
-- **Phase 4** — Versioned prompt templates (`prompts/{context, test_plan, test_cases, defect_report}_v1.rs`) with JSON-Schema tool-calling for structured output. Snapshot tests via `insta`.
-- **Phase 5** — Generation service tying RAG + prompts + LLM streaming. Token-budget enforcement (`AppError::LimitExceeded`).
-- **Phase 6** — Tauri IPC commands (`projects`, `analysis`, `generation`, `providers`, `health`). AES-GCM API-key encryption helper. First-run wizard, hardware detection.
 - **Phase 7** — Integration tests against Ollama (no API credit needed), full test suite via `cargo llvm-cov`, GitHub Actions CI matrix (Windows / macOS / Linux), release-bundle workflow via `tauri-action`.
+- **First-run wizard + hardware detection UI** — surfaces `health_check` IPC output and recommends a local model tier.
+- **Frontend integration** — TypeScript Tauri client wrappers in `packages/shared` for the Phase 6 IPC surface.
 
 ### Beyond
 
