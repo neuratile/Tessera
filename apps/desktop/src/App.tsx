@@ -1,9 +1,14 @@
+<<<<<<< HEAD
 import { invoke } from '@tauri-apps/api/core';
 import { LoginSchema, RegisterSchema } from '@testing-ide/shared';
+=======
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 import { useCallback, useEffect, useState } from 'react';
 import type { ZodError } from 'zod';
 
+import { FirstRunWizard } from '@/components/first-run-wizard';
 import { Button } from '@/components/ui/button';
+<<<<<<< HEAD
 import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/stores/auth-store';
 
@@ -11,6 +16,11 @@ type InitDbResponse = {
   dbPath: string;
   ok: boolean;
 };
+=======
+import { IpcError, system } from '@/lib/ipc';
+import type { InitDbResponse } from '@/lib/ipc/system';
+import { readOnboardingFlag } from '@/lib/onboarding';
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 
 type TokenPair = {
   accessToken: string;
@@ -42,9 +52,18 @@ function formatZodError(err: ZodError): string {
 }
 
 /**
+<<<<<<< HEAD
  * Desktop shell: verifies Tauri IPC and exercises Phase 5 auth commands.
+=======
+ * Desktop shell.
+ *
+ * Phase 8: routes to the first-run wizard until the user dismisses it,
+ * then renders the IPC smoke panel. Real workspace UI (file tree, Monaco,
+ * AI panel) lands in later phases.
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
  */
 export function App() {
+  const [showWizard, setShowWizard] = useState<boolean>(() => !readOnboardingFlag());
   const [initResult, setInitResult] = useState<InitDbResponse | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string | null>(null);
@@ -62,34 +81,35 @@ export function App() {
   const clearAuth = useAuthStore((s) => s.clear);
 
   useEffect(() => {
+    if (showWizard) return;
     let cancelled = false;
-    void invoke<InitDbResponse>('init_db')
+    void system
+      .initDb()
       .then((r) => {
-        if (!cancelled) {
-          setInitResult(r);
-        }
+        if (!cancelled) setInitResult(r);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setInitError(err instanceof Error ? err.message : String(err));
-        }
+        if (cancelled) return;
+        setInitError(err instanceof IpcError ? err.message : String(err));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showWizard]);
 
   const handleGreet = useCallback(() => {
     setGreetError(null);
-    void invoke<string>('greet', { name: 'Testing IDE' })
+    void system
+      .greet('Testing IDE')
       .then((msg) => {
         setGreeting(msg);
       })
       .catch((err: unknown) => {
-        setGreetError(err instanceof Error ? err.message : String(err));
+        setGreetError(err instanceof IpcError ? err.message : String(err));
       });
   }, []);
 
+<<<<<<< HEAD
   const handleRegister = useCallback(() => {
     setAuthError(null);
     const parsed = RegisterSchema.safeParse({
@@ -158,6 +178,11 @@ export function App() {
         setAuthError(err instanceof Error ? err.message : String(err));
       });
   }, [accessToken]);
+=======
+  if (showWizard) {
+    return <FirstRunWizard onComplete={() => setShowWizard(false)} />;
+  }
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 
   return (
     <div className="flex min-h-screen flex-col gap-6 p-8">

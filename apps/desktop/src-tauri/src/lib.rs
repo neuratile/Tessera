@@ -1,6 +1,11 @@
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Thin command / repository / service pass-throughs propagate `AppError`
+// uniformly; bullet-listing every variant per function adds noise without
+// information. Critical services (e.g. `generation_service`) document
+// errors in full where the variant set is non-obvious.
+#![allow(clippy::missing_errors_doc)]
 
 //! Testing IDE — Tauri backend library.
 //!
@@ -20,6 +25,11 @@ pub mod services;
 pub mod utils;
 pub mod workers;
 
+<<<<<<< HEAD
+=======
+// `tauri::App::manage` is provided by the `Manager` trait — bring it in
+// scope so `app.manage(...)` resolves at the call site below.
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 use tauri::Manager;
 
 /// Entry point invoked from `main.rs`. Loads configuration, initializes
@@ -55,15 +65,35 @@ pub fn run() {
             let pool = tauri::async_runtime::block_on(db::init_pool_at(&db_path))
                 .map_err(|e| e.to_string())?;
             app.manage(pool);
+
+            let data_dir = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let crypto_key =
+                utils::crypto::CryptoKey::load_or_generate(data_dir).map_err(|e| e.to_string())?;
+            tracing::info!("encryption key loaded");
+            app.manage(crypto_key);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::init_db,
+<<<<<<< HEAD
             commands::auth::register,
             commands::auth::login,
             commands::auth::refresh_token,
             commands::auth::auth_me,
+=======
+            commands::projects::create_project,
+            commands::projects::list_projects,
+            commands::projects::get_project,
+            commands::projects::delete_project,
+            commands::analysis::analyze_project,
+            commands::generation::generate_artifact,
+            commands::providers::save_provider_config,
+            commands::providers::list_provider_configs,
+            commands::providers::delete_provider_config,
+            commands::health::health_check,
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");

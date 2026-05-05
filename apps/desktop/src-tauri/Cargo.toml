@@ -37,10 +37,17 @@ futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 ignore = "0.4"
 walkdir = "2"
+<<<<<<< HEAD
 argon2 = { version = "0.5", features = ["std"] }
 jsonwebtoken = "9"
 email_address = "0.2"
 dotenvy = "0.15"
+=======
+jsonschema = { version = "0.18", default-features = false }
+aes-gcm = "0.10"
+rand = "0.8"
+sysinfo = "0.31"
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

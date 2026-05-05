@@ -1,0 +1,82 @@
+---
+source: src/prompts/snapshots.rs
+expression: "test_cases_v1::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  test_cases:
+    items:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - positive
+            - negative
+            - boundary
+            - error_path
+          type: string
+        expected_result:
+          minLength: 1
+          type: string
+        id:
+          description: "Stable id, prefix `TC-`."
+          pattern: "^TC-[A-Z0-9_-]+$"
+          type: string
+        preconditions:
+          items:
+            minLength: 1
+            type: string
+          type: array
+        priority:
+          enum:
+            - critical
+            - high
+            - medium
+            - low
+          type: string
+        steps:
+          items:
+            minLength: 1
+            type: string
+          minItems: 1
+          type: array
+        title:
+          maxLength: 200
+          minLength: 5
+          type: string
+        traceability:
+          additionalProperties: false
+          properties:
+            file_hint:
+              description: Relative file path if known.
+              type: string
+            kind:
+              enum:
+                - function
+                - method
+                - class
+                - module
+              type: string
+            symbol:
+              description: Function / class / module name covered.
+              minLength: 1
+              type: string
+          required:
+            - symbol
+            - kind
+          type: object
+      required:
+        - id
+        - title
+        - category
+        - priority
+        - preconditions
+        - steps
+        - expected_result
+        - traceability
+      type: object
+    minItems: 1
+    type: array
+required:
+  - test_cases
+type: object

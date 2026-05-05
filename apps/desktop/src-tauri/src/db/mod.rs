@@ -19,6 +19,11 @@ use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
+<<<<<<< HEAD
+=======
+// `Manager` provides `AppHandle::path()`. Bring it into scope explicitly
+// so `handle.path()` resolves in `resolve_app_db_path` below.
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::config::AppConfig;
@@ -107,8 +112,34 @@ pub async fn init_pool_at(path: &Path) -> AppResult<SqlitePool> {
     connect_pool_and_migrate(options, &log_line).await
 }
 
+<<<<<<< HEAD
 /// Resolve the `SQLite` file path from [`AppConfig::db_path`] when set,
 /// otherwise `<app_local_data_dir>/testing-ide.db`.
+=======
+/// Parse and validate `DB_PATH` from the environment (trust boundary).
+fn validated_env_db_path(raw: &str) -> AppResult<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Config(
+            "DB_PATH is set but empty after trimming".into(),
+        ));
+    }
+    if trimmed.contains('\0') {
+        return Err(AppError::Config(
+            "DB_PATH must not contain NUL bytes".into(),
+        ));
+    }
+    if trimmed.len() > MAX_DB_PATH_ENV_BYTES {
+        return Err(AppError::Config(format!(
+            "DB_PATH exceeds maximum length ({MAX_DB_PATH_ENV_BYTES} bytes)"
+        )));
+    }
+    Ok(PathBuf::from(trimmed))
+}
+
+/// Resolve the `SQLite` file path for this process: `DB_PATH` when set, otherwise
+/// `<app_local_data_dir>/testing-ide.db` (Tauri desktop layout).
+>>>>>>> e5b6a5112e8a40bf2fe5db4140027280b536c192
 ///
 /// # Errors
 ///

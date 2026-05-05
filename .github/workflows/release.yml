@@ -1,0 +1,88 @@
+name: Release
+
+# Phase 7 — release-bundle workflow.
+#
+# Triggered by `git push --tags` for tags matching `v*`. Builds the Tauri
+# desktop app on Windows, macOS (universal), and Ubuntu, then publishes a
+# draft GitHub Release with the platform installers attached. Maintainer
+# edits the release notes and clicks "Publish" once the bundles look good.
+#
+# To cut a release:
+#   1. Bump versions in `apps/desktop/package.json` and
+#      `apps/desktop/src-tauri/Cargo.toml` + `tauri.conf.json`.
+#   2. Commit + tag: `git tag v0.1.0 && git push origin v0.1.0`
+#   3. Watch this workflow; review the draft release; publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.platform.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { label: linux,   runner: ubuntu-latest,  args: '' }
+          - { label: macos,   runner: macos-latest,   args: '--target universal-apple-darwin' }
+          - { label: windows, runner: windows-latest, args: '' }
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux WebKit deps
+        if: matrix.platform.runner == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Install Rust (stable + universal target on macOS)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.runner == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+          run_install: false
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build + bundle Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Testing IDE ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.platform.args }}

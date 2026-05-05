@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import path from 'node:path';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -17,4 +18,8 @@ export default defineConfig({
     strictPort: true,
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.{test,spec}.ts'],
+  },
 });

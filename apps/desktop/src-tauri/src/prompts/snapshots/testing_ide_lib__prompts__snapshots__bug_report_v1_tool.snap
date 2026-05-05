@@ -1,0 +1,78 @@
+---
+source: src/prompts/snapshots.rs
+expression: "bug_report_v1::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  bugs:
+    items:
+      additionalProperties: false
+      properties:
+        actual_behavior:
+          minLength: 1
+          type: string
+        environment:
+          description: OS / runtime / version stack when known.
+          type: string
+        evidence_snippet:
+          description: Short verbatim quote of the offending code.
+          type: string
+        expected_behavior:
+          minLength: 1
+          type: string
+        id:
+          description: "Stable id, prefix `BUG-`."
+          pattern: "^BUG-[A-Z0-9_-]+$"
+          type: string
+        root_cause:
+          additionalProperties: false
+          properties:
+            end_line:
+              minimum: 1
+              type: integer
+            explanation:
+              minLength: 10
+              type: string
+            file_hint:
+              type: string
+            start_line:
+              minimum: 1
+              type: integer
+            symbol:
+              minLength: 1
+              type: string
+          required:
+            - symbol
+            - explanation
+          type: object
+        severity:
+          enum:
+            - critical
+            - major
+            - minor
+            - trivial
+          type: string
+        steps_to_reproduce:
+          items:
+            minLength: 1
+            type: string
+          minItems: 1
+          type: array
+        title:
+          maxLength: 200
+          minLength: 10
+          type: string
+      required:
+        - id
+        - title
+        - severity
+        - steps_to_reproduce
+        - expected_behavior
+        - actual_behavior
+        - root_cause
+      type: object
+    minItems: 1
+    type: array
+required:
+  - bugs
+type: object
