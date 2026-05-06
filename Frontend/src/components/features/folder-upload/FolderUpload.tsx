@@ -6,61 +6,93 @@ export function FolderUpload() {
   const { uploadState, setUploadState } = useProjectStore()
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const handleFiles = (fileList: FileList | File[]) => {
+  const handleFiles = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList)
     if (files.length === 0) return
 
     setUploadState({ status: 'uploading', progress: 0 })
 
-    // Simulate parsing
-    setTimeout(() => {
-      // A simple mock for folder tree building
-      // We assume files come with webkitRelativePath
-      const firstFile = files[0]
-      const projectName = (firstFile && firstFile.webkitRelativePath ? firstFile.webkitRelativePath.split('/')[0] : 'Project') || 'Project'
+    const root: ProjectFile[] = []
+    const projectName = (files[0] && files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : 'Project') || 'Project'
 
-      const mockTree: ProjectFile[] = [
-        {
-          id: 'src',
-          name: 'src',
-          path: 'src',
-          type: 'directory',
-          language: null,
-          children: [
-            {
-              id: 'src/main.tsx',
-              name: 'main.tsx',
-              path: 'src/main.tsx',
-              type: 'file',
-              language: 'typescript',
-              content: "console.log('hello world')"
-            },
-            {
-              id: 'src/utils.ts',
-              name: 'utils.ts',
-              path: 'src/utils.ts',
-              type: 'file',
-              language: 'typescript',
-              content: "export const add = (a: number, b: number) => a + b;"
-            }
-          ]
-        },
-        {
-          id: 'package.json',
-          name: 'package.json',
-          path: 'package.json',
-          type: 'file',
-          language: 'json',
-          content: "{\n  \"name\": \"mock-project\"\n}"
+    // Build the tree
+    for (const file of files) {
+      const pathParts = file.webkitRelativePath.split('/').slice(1) // Remove root folder name
+      if (pathParts.length === 0) continue
+
+      let currentLevel = root
+      let currentPath = ''
+
+      for (let i = 0; i < pathParts.length; i++) {
+        const part = pathParts[i]!
+        currentPath = currentPath ? `${currentPath}/${part}` : part
+        const isLast = i === pathParts.length - 1
+
+        let existing = currentLevel.find(item => item.name === part)
+
+        if (!existing) {
+          const newItem: ProjectFile = {
+            id: currentPath,
+            name: part,
+            path: currentPath,
+            type: isLast ? 'file' : 'directory',
+            language: isLast ? getLanguageFromFilename(part) : null,
+            children: isLast ? undefined : []
+          }
+
+          if (isLast) {
+            // Read content
+            newItem.content = await readFileContent(file)
+          }
+
+          currentLevel.push(newItem)
+          existing = newItem
         }
-      ]
 
-      setUploadState({
-        status: 'ready',
-        projectName,
-        files: mockTree
+        if (!isLast && existing.children) {
+          currentLevel = existing.children
+        }
+      }
+    }
+
+    // Sort: Folders first, then files
+    const sortTree = (items: ProjectFile[]) => {
+      items.sort((a, b) => {
+        if (a.type === b.type) return a.name.localeCompare(b.name)
+        return a.type === 'directory' ? -1 : 1
       })
-    }, 1000)
+      items.forEach(item => {
+        if (item.children) sortTree(item.children)
+      })
+    }
+
+    sortTree(root)
+
+    setUploadState({
+      status: 'ready',
+      projectName,
+      files: root
+    })
+  }
+
+  const readFileContent = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target?.result as string || '')
+      reader.onerror = () => resolve('')
+      reader.readAsText(file)
+    })
+  }
+
+  const getLanguageFromFilename = (filename: string): string | null => {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    const map: Record<string, string> = {
+      'ts': 'typescript', 'tsx': 'typescript',
+      'js': 'javascript', 'jsx': 'javascript',
+      'json': 'json', 'html': 'html', 'css': 'css',
+      'md': 'markdown', 'py': 'python', 'rs': 'rust'
+    }
+    return map[ext || ''] || null
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {

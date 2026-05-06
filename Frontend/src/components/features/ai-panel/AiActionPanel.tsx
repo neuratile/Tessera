@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sparkles, Loader2, Check, X, RefreshCw, Download } from 'lucide-react'
+import { Sparkles, Loader2, Check, X, RefreshCw, Download, TerminalSquare, CheckSquare, Code2, Layers, SearchCode, ShieldAlert } from 'lucide-react'
 import { useAiStore, type ReviewItem } from '@/stores/ai-store'
 import { useProjectStore } from '@/stores/project-store'
 import { cn } from '@/lib/utils'
@@ -59,83 +59,102 @@ export function AiActionPanel() {
     URL.revokeObjectURL(url)
   }
 
+  const actions = [
+    { id: 'plan', label: 'Test Plan', icon: <TerminalSquare className="w-4 h-4" />, color: 'text-blue-400', bg: 'bg-blue-400/10' },
+    { id: 'cases', label: 'Test Cases', icon: <CheckSquare className="w-4 h-4" />, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+    { id: 'unit', label: 'Unit Tests', icon: <Code2 className="w-4 h-4" />, color: 'text-amber-400', bg: 'bg-amber-400/10' },
+    { id: 'integration', label: 'Integration', icon: <Layers className="w-4 h-4" />, color: 'text-purple-400', bg: 'bg-purple-400/10' },
+    { id: 'review', label: 'Code Review', icon: <SearchCode className="w-4 h-4" />, color: 'text-rose-400', bg: 'bg-rose-400/10' },
+    { id: 'security', label: 'Security', icon: <ShieldAlert className="w-4 h-4" />, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
+  ]
+
+  const handleAction = (actionId: string) => {
+    if (!isReady || isGenerating) return
+    handleGenerate()
+  }
+
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden border-l border-border/50">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0 bg-muted/20">
         <h2 className="font-semibold tracking-tight text-foreground flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-indigo-400" />
-          AI Actions
+          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+          AI Core
         </h2>
-        <button
-          onClick={handleExport}
-          disabled={reviewQueue.filter(i => i.status === 'approved').length === 0}
-          className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="Export Approved Tests"
-        >
-          <Download className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleExport}
+            disabled={reviewQueue.filter(i => i.status === 'approved').length === 0}
+            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+            title="Export Approved"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="p-4 flex flex-col gap-4 shrink-0 border-b border-border/50 bg-muted/10">
+      <div className="p-4 flex flex-col gap-5 shrink-0 border-b border-border/50">
         <div className="space-y-3">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Scope</label>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-2 cursor-pointer text-foreground">
-              <input 
-                type="radio" 
-                name="scope" 
-                value="current" 
-                checked={scope === 'current'}
-                onChange={() => setScope('current')}
-                className="accent-primary"
-              />
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Active Scope</label>
+            <span className="text-[10px] font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10">Ollama Running</span>
+          </div>
+          <div className="flex p-1 bg-muted/50 rounded-lg border border-border/50">
+            <button 
+              onClick={() => setScope('current')}
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md transition-all",
+                scope === 'current' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
               Current File
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer text-foreground">
-              <input 
-                type="radio" 
-                name="scope" 
-                value="all" 
-                checked={scope === 'all'}
-                onChange={() => setScope('all')}
-                className="accent-primary"
-              />
+            </button>
+            <button 
+              onClick={() => setScope('all')}
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md transition-all",
+                scope === 'all' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
               All Files
-            </label>
+            </button>
           </div>
         </div>
 
-        <button
-          onClick={handleGenerate}
-          disabled={!isReady || isGenerating}
-          className={cn(
-            "w-full py-2.5 rounded-md font-medium flex items-center justify-center gap-2 transition-all relative overflow-hidden",
-            isGenerating 
-              ? "bg-primary/20 text-primary cursor-default" 
-              : "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          )}
-        >
-          {isGenerating ? (
-            <>
+        <div className="space-y-3">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Quick Actions</label>
+          <div className="grid grid-cols-2 gap-2">
+            {actions.map((action) => (
+              <button
+                key={action.id}
+                onClick={() => handleAction(action.id)}
+                disabled={!isReady || isGenerating}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border border-border/50 hover:border-primary/30 transition-all group relative overflow-hidden",
+                  isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/30"
+                )}
+              >
+                <div className={cn("p-2 rounded-lg group-hover:scale-110 transition-transform", action.bg, action.color)}>
+                  {action.icon}
+                </div>
+                <span className="text-[10px] font-semibold text-foreground truncate w-full text-center">{action.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isGenerating && (
+          <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
               <div 
-                className="absolute left-0 top-0 bottom-0 bg-primary/20 transition-all duration-300 ease-linear"
+                className="h-full bg-primary transition-all duration-300 ease-linear"
                 style={{ width: `${generationState.status === 'streaming' ? generationState.progress : 0}%` }}
               />
-              <Loader2 className="w-4 h-4 animate-spin relative z-10" />
-              <span className="relative z-10">Generating tests...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              Generate Tests
-            </>
-          )}
-        </button>
-
-        {generationState.status === 'streaming' && (
-          <div className="text-xs text-muted-foreground truncate animate-pulse">
-            Analyzing {generationState.currentFile}...
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+              <span className="truncate flex-1">Analyzing {generationState.currentFile}...</span>
+              <span className="font-mono">{generationState.status === 'streaming' ? generationState.progress : 0}%</span>
+            </div>
           </div>
         )}
       </div>

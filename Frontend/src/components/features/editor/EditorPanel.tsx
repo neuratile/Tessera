@@ -14,14 +14,45 @@ export function EditorPanel() {
 
   if (openTabs.length === 0 || !activeTab) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground bg-background">
-        <div className="w-24 h-24 mb-4 opacity-20">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
+      <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center">
+        <div className="max-w-md w-full flex flex-col items-center">
+          <div className="w-20 h-20 bg-primary/5 rounded-3xl flex items-center justify-center mb-8 animate-in zoom-in duration-500">
+             <svg className="w-10 h-10 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+               <path d="M15.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L15.5 2z" />
+               <path d="M15 2v6h6" />
+               <path d="M9 13h6" />
+               <path d="M9 17h3" />
+             </svg>
+          </div>
+          
+          <h1 className="text-3xl font-bold tracking-tight mb-3 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">TestIDE</h1>
+          <p className="text-muted-foreground mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+            A high-performance environment for generating and reviewing code tests with local AI.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 w-full animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+            <button 
+              onClick={() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click()}
+              className="flex items-center justify-between px-4 py-3 rounded-xl bg-card border border-border hover:border-primary/50 hover:bg-muted/50 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>
+                </div>
+                <div className="text-left">
+                  <div className="text-sm font-medium">Open Folder</div>
+                  <div className="text-xs text-muted-foreground">Select a project to start testing</div>
+                </div>
+              </div>
+              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">Ctrl+O</span>
+            </button>
+
+            <div className="mt-8 pt-8 border-t border-border/50 w-full">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-4">Recent Projects</div>
+              <div className="text-sm text-muted-foreground italic">No recent projects found</div>
+            </div>
+          </div>
         </div>
-        <p className="text-sm">Select a file to start coding</p>
       </div>
     )
   }

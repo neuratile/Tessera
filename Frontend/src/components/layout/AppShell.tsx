@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect } from 'react'
 // @ts-ignore
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { Toolbar } from './Toolbar'
 import { StatusBar } from './StatusBar'
 import { useUiStore } from '@/stores/ui-store'
@@ -35,7 +35,7 @@ export function AppShell({ sidebar, editor, aiPanel }: AppShellProps) {
       
       <div className="flex-1 overflow-hidden">
         {/* @ts-ignore */}
-        <PanelGroup direction="horizontal" onLayout={handleLayout}>
+        <PanelGroup direction="horizontal" onLayoutChanged={handleLayout}>
           {/* @ts-ignore */}
           <Panel 
             defaultSize={panelSizes[0]} 

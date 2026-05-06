@@ -33,6 +33,8 @@ interface ProjectState {
   
   setUploadState: (state: UploadState) => void
   setSelectedFilePath: (path: string | null) => void
+  setFiles: (projectName: string, files: ProjectFile[]) => void
+  resetProject: () => void
   openFile: (file: ProjectFile) => void
   closeTab: (tabId: string) => void
   setActiveTab: (tabId: string) => void
@@ -49,6 +51,22 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   setUploadState: (state) => set({ uploadState: state }),
   
   setSelectedFilePath: (path) => set({ selectedFilePath: path }),
+
+  setFiles: (projectName, files) => set({ 
+    uploadState: { status: 'ready', projectName, files },
+    selectedFilePath: null,
+    openTabs: [],
+    activeTabId: null,
+    fileContents: {}
+  }),
+
+  resetProject: () => set({
+    uploadState: { status: 'idle' },
+    selectedFilePath: null,
+    openTabs: [],
+    activeTabId: null,
+    fileContents: {}
+  }),
   
   openFile: (file) => {
     if (file.type !== 'file') return
