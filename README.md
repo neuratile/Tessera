@@ -80,6 +80,7 @@ This IDE bridges the gap with three guarantees:
 | 6 | Tauri IPC commands + AES-GCM API-key encryption | **Shipped** (merged direct to `master` — commit `dc4d7d4`) |
 | 7 | Integration tests against Ollama, snapshot tests for prompts, CI workflow | **Shipped** (merged direct to `master`) |
 | 8 | Frontend IPC client + first-run wizard | **Shipped** (merged direct to `master`) |
+| 9 | Workspace shell — three-panel layout, native folder dialog, file explorer | **Shipped** (merged direct to `master`) |
 
 **Parallel streams shipped:**
 - **Monorepo** — pnpm workspaces + Turborepo at root. `packages/shared/` (Zod schemas + TS types for FE/BE contracts), `packages/eslint-config/`, `packages/tsconfig/`, `packages/ui/`. Single source of truth for types is the Rust serde-derived data layer; Zod schemas mirror per `rules.md` §12.3.1.

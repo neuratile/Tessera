@@ -9,6 +9,7 @@
  * functions, never `invoke` directly.
  */
 export * as analysis from './analysis';
+export * as filesystem from './filesystem';
 export * as generation from './generation';
 export * as health from './health';
 export * as projects from './projects';

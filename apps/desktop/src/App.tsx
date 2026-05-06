@@ -3,7 +3,11 @@ import { LoginSchema, RegisterSchema } from '@testing-ide/shared';
 import { useCallback, useEffect, useState } from 'react';
 import type { ZodError } from 'zod';
 
+import { AiPanelPlaceholder } from '@/components/ai-panel/ai-panel-placeholder';
+import { EditorPlaceholder } from '@/components/editor/editor-placeholder';
+import { FileExplorer } from '@/components/file-explorer/file-explorer';
 import { FirstRunWizard } from '@/components/first-run-wizard';
+import { AppShell } from '@/components/layout/app-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IpcError, system } from '@/lib/ipc';
@@ -43,12 +47,46 @@ function formatZodError(err: ZodError): string {
 /**
  * Desktop shell.
  *
- * Phase 8: routes to the first-run wizard until the user dismisses it,
- * then renders the IPC smoke panel + Phase 5 auth panel. Real workspace
- * UI (file tree, Monaco, AI panel) lands in later phases.
+ * Phase 9: three-panel workspace (explorer + editor + AI panel) once
+ * the first-run wizard is dismissed. Auth + DB-smoke controls move into
+ * a floating dev panel so they stay accessible without owning the
+ * whole window.
  */
 export function App() {
   const [showWizard, setShowWizard] = useState<boolean>(() => !readOnboardingFlag());
+  const [showDevPanel, setShowDevPanel] = useState(false);
+
+  if (showWizard) {
+    return <FirstRunWizard onComplete={() => setShowWizard(false)} />;
+  }
+
+  return (
+    <>
+      <AppShell
+        sidebar={<FileExplorer />}
+        editor={<EditorPlaceholder />}
+        aiPanel={<AiPanelPlaceholder />}
+      />
+      <DevPanelToggle open={showDevPanel} onToggle={() => setShowDevPanel((v) => !v)} />
+      {showDevPanel ? <DevPanel /> : null}
+    </>
+  );
+}
+
+function DevPanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="fixed bottom-8 right-3 z-40 rounded-md border border-border bg-card px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
+      aria-label="Toggle developer panel"
+    >
+      {open ? 'hide dev' : 'dev'}
+    </button>
+  );
+}
+
+function DevPanel() {
   const [initResult, setInitResult] = useState<InitDbResponse | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string | null>(null);
@@ -66,7 +104,6 @@ export function App() {
   const clearAuth = useAuthStore((s) => s.clear);
 
   useEffect(() => {
-    if (showWizard) return;
     let cancelled = false;
     void system
       .initDb()
@@ -80,7 +117,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [showWizard]);
+  }, []);
 
   const handleGreet = useCallback(() => {
     setGreetError(null);
@@ -163,132 +200,116 @@ export function App() {
       });
   }, [accessToken]);
 
-  if (showWizard) {
-    return <FirstRunWizard onComplete={() => setShowWizard(false)} />;
-  }
-
   return (
-    <div className="flex min-h-screen flex-col gap-6 p-8">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Testing IDE</h1>
-        <p className="text-muted-foreground text-sm">Tauri 2 + Vite + React + Tailwind v4</p>
-      </header>
+    <aside className="fixed bottom-16 right-3 z-40 max-h-[80vh] w-[360px] overflow-y-auto rounded-md border border-border bg-card p-3 shadow-lg">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Dev panel
+      </h3>
 
-      <section className="space-y-2 rounded-lg border border-border p-4">
-        <h2 className="text-sm font-medium">Database</h2>
-        {initError ? (
-          <p className="text-destructive text-sm" role="alert">
+      <section className="space-y-1">
+        <h4 className="text-xs font-medium">Database</h4>
+        {initError !== null ? (
+          <p className="text-destructive text-xs" role="alert">
             {initError}
           </p>
-        ) : null}
-        {initResult ? (
-          <p className="text-sm">
+        ) : initResult !== null ? (
+          <p className="text-xs">
             <span className="text-muted-foreground">SQLite: </span>
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">{initResult.dbPath}</code>
+            <code className="bg-muted truncate rounded px-1 py-0.5 text-[10px]">
+              {initResult.dbPath}
+            </code>
           </p>
         ) : (
-          <p className="text-muted-foreground text-sm">Initializing…</p>
+          <p className="text-muted-foreground text-xs">Initializing…</p>
         )}
       </section>
 
-      <section className="space-y-3 rounded-lg border border-border p-4">
-        <h2 className="text-sm font-medium">Auth (Phase 5)</h2>
-        <p className="text-muted-foreground text-xs">
-          Tokens stay in memory (Zustand) until you reload. Set a strong{' '}
-          <code className="text-xs">JWT_SECRET</code> for real builds.
-        </p>
-        <div className="grid max-w-md gap-2">
-          <label className="text-xs font-medium" htmlFor="auth-email">
-            Email
-          </label>
+      <section className="mt-3 space-y-2">
+        <h4 className="text-xs font-medium">Auth</h4>
+        <div className="grid gap-1.5">
           <Input
-            id="auth-email"
-            autoComplete="email"
+            placeholder="email"
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
             }}
           />
-          <label className="text-xs font-medium" htmlFor="auth-password">
-            Password
-          </label>
           <Input
-            id="auth-password"
             type="password"
-            autoComplete="current-password"
+            placeholder="password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
             }}
           />
-          <label className="text-xs font-medium" htmlFor="auth-name">
-            Display name (register only)
-          </label>
           <Input
-            id="auth-name"
+            placeholder="display name (register)"
             value={name}
             onChange={(e) => {
               setName(e.target.value);
             }}
           />
         </div>
-        {authError ? (
-          <p className="text-destructive text-sm" role="alert">
+        {authError !== null ? (
+          <p className="text-destructive text-xs" role="alert">
             {authError}
           </p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={handleRegister}>
+        <div className="flex flex-wrap gap-1">
+          <Button size="sm" variant="secondary" onClick={handleRegister}>
             Register
           </Button>
-          <Button type="button" onClick={handleLogin}>
+          <Button size="sm" onClick={handleLogin}>
             Login
           </Button>
-          <Button type="button" variant="outline" onClick={handleRefresh}>
-            Refresh token
+          <Button size="sm" variant="outline" onClick={handleRefresh}>
+            Refresh
           </Button>
-          <Button type="button" variant="outline" onClick={handleMe}>
-            Session (auth_me)
+          <Button size="sm" variant="outline" onClick={handleMe}>
+            Me
           </Button>
           <Button
-            type="button"
+            size="sm"
             variant="ghost"
             onClick={() => {
               clearAuth();
               setSessionUser(null);
             }}
           >
-            Clear tokens
+            Clear
           </Button>
         </div>
-        <div className="text-muted-foreground space-y-1 text-xs">
+        <div className="text-muted-foreground space-y-0.5 text-[10px]">
           <p>
-            Access token:{' '}
+            Token:{' '}
             {accessToken === null ? (
               '—'
             ) : (
               <code className="break-all">{`${accessToken.slice(0, 24)}…`}</code>
             )}
           </p>
-          {sessionUser ? (
+          {sessionUser !== null ? (
             <p>
-              Session: <code>{sessionUser.email}</code> ({sessionUser.id.slice(0, 8)}…)
+              Session: <code>{sessionUser.email}</code>
             </p>
           ) : null}
         </div>
       </section>
 
-      <section className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={handleGreet}>
-          Call greet command
-        </Button>
-        {greetError ? (
-          <span className="text-destructive text-sm" role="alert">
-            {greetError}
-          </span>
-        ) : null}
-        {greeting ? <span className="text-sm">{greeting}</span> : null}
+      <section className="mt-3 space-y-1">
+        <h4 className="text-xs font-medium">Smoke</h4>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={handleGreet}>
+            greet
+          </Button>
+          {greetError !== null ? (
+            <span className="text-destructive text-xs" role="alert">
+              {greetError}
+            </span>
+          ) : null}
+          {greeting !== null ? <span className="text-xs">{greeting}</span> : null}
+        </div>
       </section>
-    </div>
+    </aside>
   );
 }

@@ -54,6 +54,8 @@ pub fn run() {
     let cfg_for_db_path = cfg.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(cfg)
         .setup(move |app| {
             let db_path = db::resolve_app_db_path(app.handle(), &cfg_for_db_path)
