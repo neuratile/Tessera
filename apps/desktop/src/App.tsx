@@ -7,12 +7,8 @@ import { AiPanel } from '@/components/ai-panel/ai-panel';
 import { EditorPanel } from '@/components/editor/editor-panel';
 import { FileExplorer } from '@/components/file-explorer/file-explorer';
 import { FirstRunWizard } from '@/components/first-run-wizard';
-<<<<<<< HEAD
-import { ProviderConfigPanel } from '@/components/provider-config-panel';
-=======
 import { AppShell } from '@/components/layout/app-shell';
 import { SettingsSheet } from '@/components/settings/settings-sheet';
->>>>>>> 2c616a1c9c3a27b5a267ef3d09cbc02b439d3cff
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IpcError, system } from '@/lib/ipc';
@@ -298,20 +294,6 @@ function DevPanel() {
         </div>
       </section>
 
-<<<<<<< HEAD
-      <ProviderConfigPanel />
-
-      <section className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={handleGreet}>
-          Call greet command
-        </Button>
-        {greetError ? (
-          <span className="text-destructive text-sm" role="alert">
-            {greetError}
-          </span>
-        ) : null}
-        {greeting ? <span className="text-sm">{greeting}</span> : null}
-=======
       <section className="mt-3 space-y-1">
         <h4 className="text-xs font-medium">Smoke</h4>
         <div className="flex items-center gap-2">
@@ -325,7 +307,6 @@ function DevPanel() {
           ) : null}
           {greeting !== null ? <span className="text-xs">{greeting}</span> : null}
         </div>
->>>>>>> 2c616a1c9c3a27b5a267ef3d09cbc02b439d3cff
       </section>
     </aside>
   );

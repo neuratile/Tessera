@@ -1,8 +1,6 @@
 import {
-  type ConnectionTestInput,
-  type ConnectionTestResult,
-  ConnectionTestResultSchema,
-  ConnectionTestSchema,
+  type OllamaModel,
+  OllamaModelSchema,
   type ProviderConfigView,
   ProviderConfigViewSchema,
   type ProviderConnectionTestArgs,
@@ -39,16 +37,17 @@ export async function deleteProviderConfig(id: string): Promise<void> {
   return invokeVoid('delete_provider_config', { id });
 }
 
-export async function testProviderConnection(
-<<<<<<< HEAD
-  args: ConnectionTestInput,
-): Promise<ConnectionTestResult> {
-  const parsed = ConnectionTestSchema.safeParse(args);
-  if (!parsed.success) {
-    throw new IpcError('test_provider_connection', `invalid arguments: ${parsed.error.message}`);
+const OllamaModelListSchema = z.array(OllamaModelSchema);
+
+export async function listOllamaModels(baseUrl?: string): Promise<OllamaModel[]> {
+  const args: Record<string, unknown> = {};
+  if (typeof baseUrl === 'string' && baseUrl.length > 0) {
+    args.baseUrl = baseUrl;
   }
-  return invokeAndParse('test_provider_connection', ConnectionTestResultSchema, {
-=======
+  return invokeAndParse('list_ollama_models', OllamaModelListSchema, args);
+}
+
+export async function testProviderConnection(
   args: ProviderConnectionTestArgs,
 ): Promise<ProviderConnectionTestResult> {
   const parsed = ProviderConnectionTestArgsSchema.safeParse(args);
@@ -59,7 +58,6 @@ export async function testProviderConnection(
     );
   }
   return invokeAndParse('test_provider_connection', ProviderConnectionTestResultSchema, {
->>>>>>> 2c616a1c9c3a27b5a267ef3d09cbc02b439d3cff
     args: parsed.data,
   });
 }

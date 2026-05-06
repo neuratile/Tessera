@@ -7,6 +7,7 @@ export * from './types/connection-test';
 export * from './types/generation';
 export * from './types/health';
 export * from './types/llm-provider';
+export * from './types/ollama-models';
 export * from './types/project';
 export * from './types/provider-config';
 export * from './types/user';

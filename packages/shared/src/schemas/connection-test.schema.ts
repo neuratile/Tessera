@@ -18,13 +18,20 @@ export const ProviderConnectionTestArgsSchema = z.object({
 export type ProviderConnectionTestArgs = z.infer<typeof ProviderConnectionTestArgsSchema>;
 
 /**
- * Result of `test_provider_connection` — mirrors `ConnectionTestResult`
- * in `commands/providers.rs`.
+ * Result of `test_provider_connection` — mirrors
+ * `ProviderConnectionTestResult` in
+ * `apps/desktop/src-tauri/src/services/provider_connection_service.rs`.
+ *
+ * `models` is the list of remote / local models reachable with the
+ * supplied credentials; empty when the probe failed or the provider's
+ * model-list endpoint is not exercised (e.g. cloud construction-only
+ * checks).
  */
 export const ProviderConnectionTestResultSchema = z.object({
   ok: z.boolean(),
   message: z.string(),
   latencyMs: z.number().int().nonnegative(),
+  models: z.array(z.string()).default([]),
 });
 
 export type ProviderConnectionTestResult = z.infer<typeof ProviderConnectionTestResultSchema>;

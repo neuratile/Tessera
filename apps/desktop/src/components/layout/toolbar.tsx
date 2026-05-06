@@ -2,7 +2,7 @@ import { FolderOpen, Settings } from 'lucide-react';
 import { useCallback } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { filesystem, IpcError, projects } from '@/lib/ipc';
+import { analysis as analysisIpc, filesystem, IpcError, projects } from '@/lib/ipc';
 import { useEditorStore } from '@/stores/editor-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -19,6 +19,8 @@ export function Toolbar() {
   const setTree = useWorkspaceStore((s) => s.setTree);
   const setTreeLoading = useWorkspaceStore((s) => s.setTreeLoading);
   const setTreeError = useWorkspaceStore((s) => s.setTreeError);
+  const setAnalysis = useWorkspaceStore((s) => s.setAnalysis);
+  const updateProject = useWorkspaceStore((s) => s.updateProject);
 
   const handleOpenFolder = useCallback(() => {
     setTreeError(null);
@@ -32,9 +34,11 @@ export function Toolbar() {
       }
       if (path === null) return; // user cancelled
       setTreeLoading(true);
+      let createdId: string | null = null;
       try {
         const name = deriveProjectName(path);
         const created = await projects.createProject(name, path);
+        createdId = created.id;
         // Reset the editor first so stale tabs from a previous project
         // don't survive into the new one.
         useEditorStore.getState().reset();
@@ -46,8 +50,36 @@ export function Toolbar() {
       } finally {
         setTreeLoading(false);
       }
+
+      // Kick off analysis after the explorer renders so the user is
+      // not staring at an empty tree while AST + embeddings run.
+      // Analysis populates `code_chunks` — without it, RAG retrieval
+      // would return zero hits and `generate_artifact` would emit
+      // empty / nonsense output.
+      if (createdId !== null) {
+        setAnalysis({ status: 'pending' });
+        try {
+          const outcome = await analysisIpc.analyzeProject(createdId);
+          // Patch project (status / fileCount / totalSizeBytes)
+          // without nuking the tree we just loaded. `updateProject`
+          // is the merge-only setter for this case.
+          try {
+            const refreshed = await projects.getProject(createdId);
+            updateProject(refreshed);
+          } catch {
+            // Non-fatal: analysis succeeded; stale project values are
+            // cosmetic.
+          }
+          setAnalysis({ status: 'ready', outcome });
+        } catch (err) {
+          setAnalysis({
+            status: 'error',
+            message: err instanceof IpcError ? err.message : String(err),
+          });
+        }
+      }
     })();
-  }, [setProject, setTree, setTreeError, setTreeLoading]);
+  }, [setAnalysis, setProject, setTree, setTreeError, setTreeLoading, updateProject]);
 
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-3">

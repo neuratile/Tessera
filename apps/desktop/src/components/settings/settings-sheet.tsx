@@ -113,6 +113,7 @@ export function SettingsSheet() {
           ok: false,
           message: err instanceof IpcError ? err.message : String(err),
           latencyMs: 0,
+          models: [],
         });
       } finally {
         setTesting(false);

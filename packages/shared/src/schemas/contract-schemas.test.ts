@@ -10,10 +10,12 @@ import {
   ConnectionTestResultSchema,
   GenerateArgsSchema,
   GenerateResponseSchema,
+  GenerationStreamEventSchema,
   HardwareInfoSchema,
   HealthStatusSchema,
   JWTPayloadSchema,
   LoginSchema,
+  OllamaModelSchema,
   ProjectSchema,
   ProviderConfigSchema,
   ProviderConfigViewSchema,
@@ -242,15 +244,29 @@ describe('GenerateArgsSchema', () => {
 });
 
 describe('GenerateResponseSchema', () => {
-  it('accepts a generation result', () => {
+  it('accepts a generation result with generationId correlator', () => {
     const parsed = GenerateResponseSchema.parse({
+      generationId: '8a3e4567-e89b-12d3-a456-426614174999',
       artifactId: '123e4567-e89b-12d3-a456-426614174000',
       artifactType: 'context-md',
       contentMd: '# Project',
       usageInputTokens: 120,
       usageOutputTokens: 80,
     });
+    expect(parsed.generationId).toBe('8a3e4567-e89b-12d3-a456-426614174999');
     expect(parsed.usageOutputTokens).toBe(80);
+  });
+
+  it('rejects a payload missing generationId', () => {
+    expect(() =>
+      GenerateResponseSchema.parse({
+        artifactId: '123e4567-e89b-12d3-a456-426614174000',
+        artifactType: 'context-md',
+        contentMd: '# Project',
+        usageInputTokens: 120,
+        usageOutputTokens: 80,
+      }),
+    ).toThrow();
   });
 });
 
@@ -365,6 +381,49 @@ describe('ArtifactSummarySchema', () => {
       });
       expect(parsed.status).toBe(status);
     }
+  });
+});
+
+describe('GenerationStreamEventSchema', () => {
+  it('accepts a tool_args delta', () => {
+    const parsed = GenerationStreamEventSchema.parse({
+      generationId: '8a3e4567-e89b-12d3-a456-426614174999',
+      kind: 'tool_args',
+      delta: '{"sum',
+    });
+    expect(parsed.kind).toBe('tool_args');
+    expect(parsed.delta).toBe('{"sum');
+  });
+
+  it('accepts a done event with usage stats', () => {
+    const parsed = GenerationStreamEventSchema.parse({
+      generationId: '8a3e4567-e89b-12d3-a456-426614174999',
+      kind: 'done',
+      inputTokens: 1024,
+      outputTokens: 512,
+    });
+    expect(parsed.kind).toBe('done');
+    expect(parsed.outputTokens).toBe(512);
+  });
+
+  it('rejects unknown kinds', () => {
+    expect(() =>
+      GenerationStreamEventSchema.parse({
+        generationId: '8a3e4567-e89b-12d3-a456-426614174999',
+        kind: 'whatever',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('OllamaModelSchema', () => {
+  it('accepts the daemon listing payload', () => {
+    const parsed = OllamaModelSchema.parse({ name: 'qwen2.5-coder:7b', sizeBytes: 4_700_000_000 });
+    expect(parsed.name).toBe('qwen2.5-coder:7b');
+  });
+
+  it('rejects negative sizes', () => {
+    expect(() => OllamaModelSchema.parse({ name: 'x', sizeBytes: -1 })).toThrow();
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Project } from '@testing-ide/shared';
+import type { AnalysisOutcome, Project } from '@testing-ide/shared';
 import { create } from 'zustand';
 
 /**
@@ -21,6 +21,12 @@ export type FsEntry = {
   children?: FsEntry[];
 };
 
+export type AnalysisState =
+  | { status: 'idle' }
+  | { status: 'pending' }
+  | { status: 'ready'; outcome: AnalysisOutcome }
+  | { status: 'error'; message: string };
+
 export type WorkspaceState = {
   project: Project | null;
   /** Top-level entries under `project.rootPath`. Lazy-loaded per directory. */
@@ -28,12 +34,19 @@ export type WorkspaceState = {
   loadingTree: boolean;
   treeError: string | null;
   selectedPath: string | null;
+  analysis: AnalysisState;
 
   setProject: (project: Project | null) => void;
+  /** Update only the `project` field without resetting the tree /
+   *  analysis state. Used after `analyze_project` completes so the
+   *  refreshed `fileCount` / `status` propagate without nuking the
+   *  loaded directory walk. */
+  updateProject: (project: Project) => void;
   setTree: (tree: FsEntry[]) => void;
   setTreeLoading: (loading: boolean) => void;
   setTreeError: (error: string | null) => void;
   setSelectedPath: (path: string | null) => void;
+  setAnalysis: (state: AnalysisState) => void;
   /** Replace the children of the entry at `relativePath`. Used after a
    *  lazy directory expand. */
   setChildren: (relativePath: string, children: FsEntry[]) => void;
@@ -58,6 +71,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
   loadingTree: false,
   treeError: null,
   selectedPath: null,
+  analysis: { status: 'idle' },
 
   setProject: (project) =>
     set({
@@ -65,11 +79,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
       tree: [],
       treeError: null,
       selectedPath: null,
+      analysis: { status: 'idle' },
     }),
+  updateProject: (project) => set({ project }),
   setTree: (tree) => set({ tree, treeError: null }),
   setTreeLoading: (loadingTree) => set({ loadingTree }),
   setTreeError: (treeError) => set({ treeError, loadingTree: false }),
   setSelectedPath: (selectedPath) => set({ selectedPath }),
+  setAnalysis: (analysis) => set({ analysis }),
   setChildren: (relativePath, children) =>
     set((state) => ({ tree: replaceChildren(state.tree, relativePath, children) })),
   reset: () =>
@@ -79,5 +96,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
       loadingTree: false,
       treeError: null,
       selectedPath: null,
+      analysis: { status: 'idle' },
     }),
 }));

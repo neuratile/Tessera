@@ -17,6 +17,10 @@ import { create } from 'zustand';
 export type GenerationPending = {
   status: 'pending';
   artifactType: GenerationArtifactType;
+  /** Streaming buffer accumulated from `tool_args` / `text` events.
+   *  Used by the AI panel to render a live preview while the await
+   *  for `generate_artifact` is in flight. */
+  partial: string;
 };
 
 export type GenerationStatus =
@@ -34,6 +38,10 @@ export type AiState = {
   activeProvider: ProviderConfigView | null;
 
   setGeneration: (status: GenerationStatus) => void;
+  /** Append a chunk to the streaming buffer. No-op when generation is
+   *  not currently `pending` so a stale event from a cancelled run
+   *  cannot mutate the state. */
+  appendPartial: (delta: string) => void;
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
   upsertArtifact: (artifact: ArtifactSummary) => void;
   setLoadingArtifacts: (loading: boolean) => void;
@@ -50,6 +58,17 @@ export const useAiStore = create<AiState>()((set) => ({
   activeProvider: null,
 
   setGeneration: (generation) => set({ generation }),
+  appendPartial: (delta) =>
+    set((state) =>
+      state.generation.status === 'pending'
+        ? {
+            generation: {
+              ...state.generation,
+              partial: state.generation.partial + delta,
+            },
+          }
+        : state,
+    ),
   setArtifacts: (artifacts) => set({ artifacts, artifactsError: null }),
   upsertArtifact: (artifact) =>
     set((state) => {

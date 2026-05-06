@@ -38,9 +38,12 @@ export type GenerateArgs = z.infer<typeof GenerateArgsSchema>;
 
 /**
  * Response returned by `generate_artifact` — mirrors `GenerateResponse`
- * in `commands/generation.rs`.
+ * in `commands/generation.rs`. The `generationId` matches the
+ * `generationId` field on every `generation://event` payload streamed
+ * during the call so the UI can reconcile partials with finals.
  */
 export const GenerateResponseSchema = z.object({
+  generationId: z.string().uuid(),
   artifactId: z.string().uuid(),
   artifactType: GenerationArtifactTypeSchema,
   contentMd: z.string(),
@@ -49,3 +52,26 @@ export const GenerateResponseSchema = z.object({
 });
 
 export type GenerateResponse = z.infer<typeof GenerateResponseSchema>;
+
+/**
+ * Streaming event payload — mirrors `StreamEventPayload` in
+ * `commands/generation.rs`. Delivered on the `generation://event`
+ * Tauri channel.
+ */
+export const GenerationStreamKindSchema = z.union([
+  z.literal('text'),
+  z.literal('tool_args'),
+  z.literal('done'),
+]);
+
+export type GenerationStreamKind = z.infer<typeof GenerationStreamKindSchema>;
+
+export const GenerationStreamEventSchema = z.object({
+  generationId: z.string().uuid(),
+  kind: GenerationStreamKindSchema,
+  delta: z.string().optional(),
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+});
+
+export type GenerationStreamEvent = z.infer<typeof GenerationStreamEventSchema>;
