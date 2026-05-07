@@ -41,7 +41,99 @@ sudo apt-get install -y \
   file
 ```
 
+<<<<<<< HEAD
 ## Quick Start
+=======
+| Type | Output |
+|------|--------|
+| Test Plan | Scope, objectives, strategy, environments, risk matrix, entry/exit criteria |
+| Test Cases | Individual cases with steps, expected results, priority, traceability to source |
+| Defect Report | Static-analysis findings: severity, category, location, suggested fix, confidence |
+| Bug Report | Potential runtime issues formatted for tracking |
+| Test Summary | Executive coverage assessment with risk areas + recommendations |
+
+---
+
+## Why this exists
+
+No existing tool owns the "static code analysis → full test strategy" space:
+
+- **Cursor / Copilot** generate test code snippets but treat testing as an add-on, not a primary product.
+- **Mabl / TestRigor** automate end-to-end UI testing but require a running application — they cannot reason about closed-source code or generate test plans before the system ships.
+- **SonarQube** detects code-quality issues but does not produce test plans, test cases, or structured QA documents.
+
+This IDE bridges the gap with three guarantees:
+
+1. **Architecture-aware** — analyzes data flows + dependency graphs, not isolated files.
+2. **Static analysis only** — works on any codebase, including production / closed-source. Code never executed.
+3. **Structured outputs** — Markdown / JSON / JIRA-compatible artifacts, not just snippets.
+
+---
+
+## Status
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | Foundation: Tauri scaffold, layered structure, typed config + errors, SQLite + migrations | **Shipped** ([PR #2](https://github.com/Rajveerx11/Testing-IDE/pull/2)) |
+| 2 | LLM provider abstraction: Ollama / OpenAI / OpenRouter / Anthropic + Ollama embeddings + factory | **Shipped** ([PR #3](https://github.com/Rajveerx11/Testing-IDE/pull/3)) |
+| 3 | AST pipeline: file discovery, Tree-sitter parsing, semantic chunking, chunk repository | **Shipped** ([PR #6](https://github.com/Rajveerx11/Testing-IDE/pull/6)) |
+| 4 | Versioned prompt templates with JSON-Schema function calling | **Shipped** ([PR #9](https://github.com/Rajveerx11/Testing-IDE/pull/9)) |
+| 5 | Generation service tying RAG + prompts + LLM | **Shipped** ([PR #10](https://github.com/Rajveerx11/Testing-IDE/pull/10)) |
+| 6 | Tauri IPC commands + AES-GCM API-key encryption | **Shipped** (merged direct to `master` — commit `dc4d7d4`) |
+| 7 | Integration tests against Ollama, snapshot tests for prompts, CI workflow | **Shipped** (merged direct to `master`) |
+| 8 | Frontend IPC client + first-run wizard | **Shipped** (merged direct to `master`) |
+| 9 | Workspace shell — three-panel layout, native folder dialog, file explorer | **Shipped** (merged direct to `master`) |
+| 10 | Monaco editor + tab system + file content reads | **Shipped** (merged direct to `master`) |
+| 11 | AI panel + Settings sheet + 4-step wizard + artifact lifecycle IPC | **Shipped** (merged direct to `master`) |
+| 12 | Markdown preview drawer + regenerate-with-feedback | **Shipped** (merged direct to `master`) |
+| 13 | Auto-analyze on open + Ollama model check + streaming events | **Shipped** (merged direct to `master`) |
+
+**Parallel streams shipped:**
+- **Monorepo** — pnpm workspaces + Turborepo at root. `packages/shared/` (Zod schemas + TS types for FE/BE contracts), `packages/eslint-config/`, `packages/tsconfig/`, `packages/ui/`. Single source of truth for types is the Rust serde-derived data layer; Zod schemas mirror per `rules.md` §12.3.1.
+- **Frontend skeleton** — `apps/desktop/src/` Vite + React 19 + TailwindCSS v4 + shadcn/ui scaffold (App.tsx, main.tsx, button.tsx). Wired to Tauri's `init_db` and `greet` commands.
+- **Tauri build pipeline** — `tauri.conf.json` carries `beforeDevCommand` + `beforeBuildCommand` hooks; CSP allows the Vite dev server at `localhost:5173`.
+
+**Tests**: 231 Rust unit + Zod contract tests in `packages/shared/`. **Clippy**: clean (`pedantic` enforced). **Audit**: 21 advisories triaged in `audit.toml`. **Release build**: green.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|-------|--------|
+| Shell | Tauri 2.0 (~3 MB binary, native filesystem access) |
+| Backend | Rust 1.77+ (Tokio async runtime, sqlx, reqwest with rustls TLS) |
+| Storage | SQLite 3 + `sqlite-vec` (embedded, no daemon, no setup) |
+| AST | `tree-sitter` (JS / TS / Python grammars wired via `services/ast_service.rs`; more languages in Phase 3.5+) |
+| Frontend | React 19 + TypeScript + Vite + TailwindCSS v4 + shadcn/ui |
+| Editor | Monaco (VS Code parity for code viewing) |
+| Logging | `tracing` (pretty in dev, JSON in release) |
+
+### LLM providers (all optional, user-configurable)
+
+| Provider | Auth | Local? | Default? |
+|----------|------|--------|----------|
+| Ollama Local | none | yes | yes — runs `qwen2.5-coder:7b` out of the box |
+| Ollama Cloud | API key | no | no |
+| OpenAI | API key | no | no — supports custom base URLs (Azure / proxies) |
+| OpenRouter | API key | no | no — gateway to many open + proprietary models |
+| Anthropic | API key | no | no — Claude family |
+
+**Embeddings**: `nomic-embed-text` (768 dim) via Ollama by default. Cloud embedding providers (OpenAI, Voyage AI) follow at the same trait shape.
+
+---
+
+## Quick start
+
+### Prerequisites
+
+- **Rust 1.77+** — install from [rustup.rs](https://rustup.rs/), then `rustup component add clippy rustfmt`.
+- **Node.js 20+** + **pnpm** — for the frontend (Phase 1 ships backend only; frontend lands later).
+- **Ollama** — install from [ollama.com](https://ollama.com/) for local LLM inference. Optional if you only use cloud providers.
+- **Platform deps**: Windows is fully supported. Linux requires `webkit2gtk-4.1`. macOS requires Xcode CLI tools.
+
+### Clone + build
+>>>>>>> 4c47d2aa1ccf6ef1885b16104e3665fca6828162
 
 ```bash
 git clone https://github.com/Rajveerx11/Testing-IDE.git

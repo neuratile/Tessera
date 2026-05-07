@@ -13,7 +13,13 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { artifacts as artifactsIpc, generation, IpcError, providers } from '@/lib/ipc';
+import {
+  artifacts as artifactsIpc,
+  generation,
+  IpcError,
+  providers,
+  streaming,
+} from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -56,8 +62,36 @@ export function AiPanel() {
   const upsertArtifact = useAiStore((s) => s.upsertArtifact);
   const setLoadingArtifacts = useAiStore((s) => s.setLoadingArtifacts);
   const setArtifactsError = useAiStore((s) => s.setArtifactsError);
+  const appendPartial = useAiStore((s) => s.appendPartial);
 
   const [openArtifact, setOpenArtifact] = useState<ArtifactSummary | null>(null);
+
+  // Subscribe to streaming events on mount. Backend emits on every
+  // `generate_artifact` invocation; the listener filters via the
+  // `generationId` field so concurrent generations do not cross-wire.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void (async () => {
+      try {
+        unlisten = await streaming.subscribeToGenerationEvents((event) => {
+          if (cancelled) return;
+          if (event.kind === 'tool_args' || event.kind === 'text') {
+            if (typeof event.delta === 'string') {
+              appendPartial(event.delta);
+            }
+          }
+        });
+      } catch {
+        // Streaming events are best-effort. The await on
+        // `generate_artifact` still produces the final outcome.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten !== null) unlisten();
+    };
+  }, [appendPartial]);
 
   // Pull the active provider config the first time the panel renders
   // and after a project loads. The generation panel cannot run without
@@ -117,7 +151,7 @@ export function AiPanel() {
       if (project === null || activeProvider === null) return;
       const model = activeProvider.defaultModel;
       if (typeof model !== 'string' || model.length === 0) return;
-      setGeneration({ status: 'pending', artifactType });
+      setGeneration({ status: 'pending', artifactType, partial: '' });
       void (async () => {
         try {
           const result = await generation.generateArtifact({
@@ -248,10 +282,17 @@ export function AiPanel() {
         </div>
 
         {generationStatus.status === 'pending' ? (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" />
-            Generating {generationStatus.artifactType}…
-          </p>
+          <div className="space-y-1.5">
+            <p className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Loader2 className="size-3 animate-spin" />
+              Generating {generationStatus.artifactType}…
+            </p>
+            {generationStatus.partial.length > 0 ? (
+              <pre className="bg-muted text-muted-foreground max-h-32 overflow-y-auto rounded p-2 font-mono text-[10px] leading-snug">
+                {trimPartialPreview(generationStatus.partial)}
+              </pre>
+            ) : null}
+          </div>
         ) : generationStatus.status === 'error' ? (
           <p className="text-destructive text-xs" role="alert">
             {generationStatus.message}
@@ -356,6 +397,18 @@ function ArtifactRow({
       ) : null}
     </li>
   );
+}
+
+/**
+ * Trim the streaming preview to the trailing N chars so the rendered
+ * `<pre>` does not grow unbounded for long generations. Preserves the
+ * tail because that is the most-recent (most-interesting) part of the
+ * output stream.
+ */
+function trimPartialPreview(buffer: string): string {
+  const MAX = 800;
+  if (buffer.length <= MAX) return buffer;
+  return `…${buffer.slice(-MAX)}`;
 }
 
 function StatusBadge({ status }: { status: ArtifactSummary['status'] }) {

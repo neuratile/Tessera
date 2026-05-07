@@ -7,7 +7,10 @@ import { AiPanel } from '@/components/ai-panel/ai-panel';
 import { EditorPanel } from '@/components/editor/editor-panel';
 import { FileExplorer } from '@/components/file-explorer/file-explorer';
 import { FirstRunWizard } from '@/components/first-run-wizard';
+<<<<<<< HEAD
 import { ProviderConfigPanel } from '@/components/provider-config-panel';
+=======
+>>>>>>> 4c47d2aa1ccf6ef1885b16104e3665fca6828162
 import { AppShell } from '@/components/layout/app-shell';
 import { SettingsSheet } from '@/components/settings/settings-sheet';
 import { Button } from '@/components/ui/button';
@@ -295,9 +298,12 @@ function DevPanel() {
         </div>
       </section>
 
+<<<<<<< HEAD
       <ProviderConfigPanel />
       <ProviderConfigPanel />
 
+=======
+>>>>>>> 4c47d2aa1ccf6ef1885b16104e3665fca6828162
       <section className="mt-3 space-y-1">
         <h4 className="text-xs font-medium">Smoke</h4>
         <div className="flex items-center gap-2">

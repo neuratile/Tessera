@@ -1,9 +1,11 @@
+import { Loader2 } from 'lucide-react';
+
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 /**
- * Bottom status bar. Phase 9 surfaces project status + selected file
- * + analyse-time stats once Phase 11 wires `analyze_project` to it.
- * For now: project name + file count + selected path.
+ * Bottom status bar. Surfaces project status, analysis pipeline
+ * progress, the selected file, and the latest tree-load / analysis
+ * error.
  */
 export function StatusBar() {
   const project = useWorkspaceStore((s) => s.project);
@@ -25,6 +27,7 @@ export function StatusBar() {
           <span className="text-muted-foreground">no project</span>
         )}
         {analysis.status === 'pending' ? (
+<<<<<<< HEAD
           <span className="text-muted-foreground" data-testid="analysis-status">
             analyzing...
           </span>
@@ -37,6 +40,19 @@ export function StatusBar() {
         {analysis.status === 'error' ? (
           <span className="text-destructive" data-testid="analysis-status" role="alert">
             {analysis.message}
+=======
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            analysing…
+          </span>
+        ) : analysis.status === 'ready' ? (
+          <span className="text-muted-foreground">
+            {analysis.outcome.chunksEmbedded} chunks · {analysis.outcome.filesParsed} parsed
+          </span>
+        ) : analysis.status === 'error' ? (
+          <span className="text-destructive truncate" role="alert" title={analysis.message}>
+            analysis failed
+>>>>>>> 4c47d2aa1ccf6ef1885b16104e3665fca6828162
           </span>
         ) : null}
       </div>
