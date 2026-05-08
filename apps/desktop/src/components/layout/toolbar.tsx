@@ -142,12 +142,20 @@ export function Toolbar() {
 
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-3">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold tracking-tight">Testing IDE</span>
+      <div className="flex items-center gap-3">
+        <span className="font-brand text-primary text-base">tessera</span>
         {project ? (
-          <span className="text-muted-foreground truncate text-xs" title={project.rootPath}>
-            · {project.name}
-          </span>
+          <>
+            <span className="text-border" aria-hidden="true">
+              ·
+            </span>
+            <span
+              className="text-muted-foreground truncate font-mono text-xs"
+              title={project.rootPath}
+            >
+              {project.name}
+            </span>
+          </>
         ) : null}
       </div>
       <div className="flex items-center gap-1">

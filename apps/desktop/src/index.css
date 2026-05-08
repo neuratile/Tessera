@@ -1,12 +1,30 @@
 @import 'tailwindcss';
 
+/*
+ * Tessera design tokens — ported from Stitch Generations / UI Components / tessera / DESIGN.md.
+ *
+ * The app is dark-mode-first; the `:root` block carries the dark palette
+ * directly so the desktop window matches the Stitch frames out of the
+ * box. A `:root.light` selector is wired for a future light-mode toggle.
+ *
+ * Every CSS variable is consumed via `@theme inline` below so existing
+ * shadcn-style component classes (`bg-card`, `text-foreground`,
+ * `border-border`, etc.) pick up the new palette with zero JSX changes.
+ */
+
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: 0.125rem;
+  --radius: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -16,27 +34,86 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', 'Fira Code', Consolas, monospace;
+  --font-brand: 'JetBrains Mono', 'Geist Mono', monospace;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
+  /* Dark-mode palette — Stitch / Material 3 surface tones, teal accent */
+  --background: #131313;
+  --foreground: #e5e2e1;
+
+  --surface: #131313;
+  --surface-2: #1c1b1b;
+  --surface-3: #201f1f;
+
+  --card: #1c1b1b;
+  --card-foreground: #e5e2e1;
+  --popover: #201f1f;
+  --popover-foreground: #e5e2e1;
+
+  --primary: #6bd8cb;
+  --primary-foreground: #003732;
+  --secondary: #4cd7f6;
+  --secondary-foreground: #003640;
+  --muted: #1c1b1b;
+  --muted-foreground: #bcc9c6;
+  --accent: #29a195;
+  --accent-foreground: #00302b;
+
+  --destructive: #ffb4ab;
+  --destructive-foreground: #690005;
+  --success: #6bd8cb;
+  --success-foreground: #003732;
+  --warning: #ffb59a;
+  --warning-foreground: #591c02;
+
+  --border: #3d4947;
+  --input: #353534;
+  --ring: #6bd8cb;
+}
+
+:root.light {
+  /* Optional light-mode mirror — Stitch DESIGN.md §Colors */
+  --background: #ffffff;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --card: #f4f4f5;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #06b6d4;
+  --secondary-foreground: #ffffff;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent: #14b8a6;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #10b981;
+  --success-foreground: #ffffff;
+  --warning: #f59e0b;
+  --warning-foreground: #ffffff;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #0d9488;
 }
 
 body {
@@ -44,5 +121,93 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings:
+    'cv11' on,
+    'ss01' on,
+    'ss03' on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Compact monospace family — file paths, IDs, code previews */
+.font-mono,
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+/* Brand mark — lowercase, monospace, tight tracking */
+.font-brand {
+  font-family: var(--font-brand);
+  letter-spacing: -0.05em;
+  font-weight: 600;
+}
+
+/*
+ * Mosaic watermark — the Stitch frames overlay a faint dotted-grid
+ * pattern on empty workspace and panel backgrounds as a brand cue.
+ * Apply with `<div class="bg-mosaic" />` over any positioned parent.
+ */
+.bg-mosaic {
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-color: transparent;
+  opacity: 0.04;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+/* Custom scrollbars — thin, neutral, themed */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+
+/* Status pills — opt-in classes the AI panel + drawer can apply
+ * directly without inventing per-status component variants. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.pill-draft {
+  background: var(--surface-3);
+  color: var(--muted-foreground);
+}
+.pill-in-review {
+  background: color-mix(in oklab, var(--secondary) 18%, transparent);
+  color: var(--secondary);
+  border: 1px solid color-mix(in oklab, var(--secondary) 35%, transparent);
+}
+.pill-approved {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in oklab, var(--success) 35%, transparent);
+}
+.pill-rejected {
+  background: color-mix(in oklab, var(--destructive) 18%, transparent);
+  color: var(--destructive);
+  border: 1px solid color-mix(in oklab, var(--destructive) 35%, transparent);
 }

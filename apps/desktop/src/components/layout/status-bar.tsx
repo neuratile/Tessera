@@ -14,17 +14,18 @@ export function StatusBar() {
   const analysis = useWorkspaceStore((s) => s.analysis);
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between gap-2 border-t border-border bg-card px-3 text-xs">
-      <div className="flex items-center gap-3">
+    <footer className="flex h-7 shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-3 px-3 font-mono text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-4">
         {project ? (
           <>
-            <span className="text-muted-foreground" data-testid="project-status">
+            <span className="flex items-center gap-1" data-testid="project-status">
+              <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
               {project.status}
             </span>
-            <span className="text-muted-foreground">{project.fileCount} files</span>
+            <span>{project.fileCount} files</span>
           </>
         ) : (
-          <span className="text-muted-foreground">no project</span>
+          <span>no project</span>
         )}
         {analysis.status === 'pending' ? (
           <span

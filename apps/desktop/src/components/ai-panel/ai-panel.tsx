@@ -220,9 +220,9 @@ export function AiPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border px-3 py-2 flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          AI
+      <div className="border-b border-border px-3 h-8 flex items-center justify-between bg-card">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground">
+          AI Inspection
         </h2>
         <Button
           type="button"
@@ -236,9 +236,9 @@ export function AiPanel() {
         </Button>
       </div>
 
-      <div className="border-b border-border p-3 space-y-3">
+      <div className="border-b border-border p-3 space-y-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
             Provider
           </p>
           {activeProvider === null ? (
@@ -247,10 +247,10 @@ export function AiPanel() {
             </p>
           ) : (
             <p className="text-xs">
-              <span className="font-medium">{activeProvider.provider}</span>
+              <span className="font-medium text-foreground">{activeProvider.provider}</span>
               {typeof activeProvider.defaultModel === 'string' &&
               activeProvider.defaultModel.length > 0 ? (
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground font-mono">
                   {' · '}
                   {activeProvider.defaultModel}
                 </span>
@@ -260,8 +260,8 @@ export function AiPanel() {
         </div>
 
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-            Generate
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
+            Generate Artifacts
           </p>
           <div className="grid grid-cols-2 gap-1.5">
             {GENERATE_BUTTONS.map((b) => (
@@ -301,9 +301,14 @@ export function AiPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-          Review queue ({reviewQueue.length})
-        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Review Queue
+          </p>
+          <span className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {reviewQueue.length} {reviewQueue.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
         {artifactsError !== null ? (
           <p className="text-destructive text-xs" role="alert">
             {artifactsError}
@@ -351,28 +356,41 @@ function ArtifactRow({
   onOpen: (a: ArtifactSummary) => void;
 }) {
   const isPending = artifact.status === 'draft' || artifact.status === 'in_review';
+  // Stitch artifact-card: 1px-wide status-colored stripe pinned to the
+  // left edge so the queue can be scanned by colour at a glance.
+  const stripe: Record<ArtifactSummary['status'], string> = {
+    draft: 'bg-surface-3',
+    in_review: 'bg-secondary',
+    approved: 'bg-primary',
+    rejected: 'bg-destructive',
+  };
   return (
-    <li className="rounded-md border border-border bg-card p-2 text-xs">
+    <li className="group relative overflow-hidden rounded-md border border-border bg-card p-2 text-xs transition-colors hover:border-primary/50">
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-0 h-full w-1 ${stripe[artifact.status]}`}
+      />
       <button
         type="button"
         onClick={() => onOpen(artifact)}
-        className="hover:bg-muted/30 -m-2 mb-0 block w-[calc(100%+1rem)] rounded-t-md p-2 text-left"
+        className="-m-2 mb-0 block w-[calc(100%+1rem)] rounded-t-md p-2 pl-3 text-left transition-colors hover:bg-muted/40"
         aria-label={`Open ${artifact.title}`}
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-medium" title={artifact.title}>
+            <p className="truncate font-mono text-foreground" title={artifact.title}>
               {artifact.title}
             </p>
             <p className="text-muted-foreground mt-0.5 text-[10px]">
-              {artifact.artifactType} · v{artifact.version} · {artifact.model}
+              {artifact.artifactType} · v{artifact.version} ·{' '}
+              <span className="font-mono">{artifact.model}</span>
             </p>
           </div>
           <StatusBadge status={artifact.status} />
         </div>
       </button>
       {isPending ? (
-        <div className="mt-2 flex items-center gap-1">
+        <div className="mt-2 flex items-center gap-1 pl-1">
           <Button
             type="button"
             size="sm"
@@ -412,16 +430,17 @@ function trimPartialPreview(buffer: string): string {
 }
 
 function StatusBadge({ status }: { status: ArtifactSummary['status'] }) {
-  const colors: Record<ArtifactSummary['status'], string> = {
-    draft: 'bg-muted text-muted-foreground',
-    in_review: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400',
-    approved: 'bg-green-500/10 text-green-700 dark:text-green-400',
-    rejected: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  // Stitch DESIGN.md §Components — pill is fully rounded, uppercase,
+  // status-colored from the design tokens. Backed by `.pill-*` classes
+  // in `index.css` so the palette is the single source of truth.
+  const klass: Record<ArtifactSummary['status'], string> = {
+    draft: 'pill pill-draft',
+    in_review: 'pill pill-in-review',
+    approved: 'pill pill-approved',
+    rejected: 'pill pill-rejected',
   };
   return (
-    <span
-      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${colors[status]}`}
-    >
+    <span className={`${klass[status]} shrink-0`}>
       {status.replace('_', ' ')}
     </span>
   );

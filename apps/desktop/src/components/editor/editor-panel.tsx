@@ -1,5 +1,5 @@
 import Editor, { loader } from '@monaco-editor/react';
-import { Circle, FileText, X } from 'lucide-react';
+import { Circle, X } from 'lucide-react';
 import * as monaco from 'monaco-editor';
 import { useCallback, useMemo } from 'react';
 
@@ -156,14 +156,21 @@ export function EditorPanel() {
 }
 
 function EmptyState() {
+  // Stitch empty-state pattern — centred copy over the mosaic
+  // watermark, monospace brand mark to reinforce the IDE feel.
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-      <FileText className="text-muted-foreground/50 mb-3 size-10" />
-      <h2 className="text-lg font-semibold tracking-tight">No file open</h2>
-      <p className="text-muted-foreground mt-1 max-w-md text-sm">
-        Pick a file from the explorer to view it. Saving lands in a later phase — edits stay
-        in-memory for now.
-      </p>
+    <div className="relative flex flex-1 flex-col items-center justify-center p-8 text-center">
+      <div className="bg-mosaic" aria-hidden="true" />
+      <div className="relative z-10">
+        <span className="font-brand text-primary/70 text-2xl">tessera</span>
+        <h2 className="mt-3 text-base font-semibold tracking-tight text-foreground">
+          No file open
+        </h2>
+        <p className="text-muted-foreground mt-1 max-w-md text-xs">
+          Pick a file from the explorer to view it. Saving lands in a later phase — edits stay
+          in-memory for now.
+        </p>
+      </div>
     </div>
   );
 }

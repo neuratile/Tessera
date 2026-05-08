@@ -65,9 +65,17 @@ export function FileExplorer() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Explorer
+    <div className="flex h-full flex-col overflow-hidden bg-card">
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-card px-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground">
+          Project Explorer
+        </span>
+        <span
+          className="truncate font-mono text-[10px] text-muted-foreground"
+          title={project.rootPath}
+        >
+          {project.name}
+        </span>
       </div>
       <div ref={containerRef} className="flex-1 overflow-hidden">
         {loading && tree.length === 0 ? (
@@ -119,8 +127,10 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<FsEntry>) {
           node.select();
         }
       }}
-      className={`group flex cursor-pointer select-none items-center gap-1 px-2 text-xs hover:bg-muted/50 ${
-        isSelected ? 'bg-primary/10 text-primary' : 'text-foreground'
+      className={`group flex cursor-pointer select-none items-center gap-1.5 px-2 font-mono text-[11px] transition-colors hover:bg-muted/60 ${
+        isSelected
+          ? 'bg-primary/10 text-primary border-l-2 border-primary -ml-[2px] pl-[6px]'
+          : 'text-foreground'
       }`}
     >
       <span className="text-muted-foreground flex w-4 shrink-0 items-center justify-center">
