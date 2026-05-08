@@ -8,7 +8,7 @@ before opening a PR. Branch-protection setup lives in
 ## One-time setup
 
 ```bash
-git clone https://github.com/Rajveerx11/Testing-IDE.git tessera
+git clone https://github.com/Rajveerx11/Tessera.git tessera
 cd tessera
 corepack enable
 corepack pnpm install      # also installs Husky hooks via `prepare`

@@ -94,7 +94,7 @@ the alternatives-considered section, not just the prose.
 
 ## Open Items
 
-The following are tracked as part of [issue #1](https://github.com/Rajveerx11/Testing-IDE/issues/1)
+The following are tracked as part of [issue #1](https://github.com/Rajveerx11/Tessera/issues/1)
 and remain out of scope for the backend stream:
 
 - CI lint that fails any PR adding files under `docs/adr/` without the

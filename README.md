@@ -4,8 +4,8 @@
 
 **Local-first AI testing IDE — turn any codebase into a full QA dossier without sending source to the cloud.**
 
-[![CI](https://github.com/Rajveerx11/Testing-IDE/actions/workflows/ci.yml/badge.svg)](https://github.com/Rajveerx11/Testing-IDE/actions/workflows/ci.yml)
-[![Release](https://github.com/Rajveerx11/Testing-IDE/actions/workflows/release.yml/badge.svg)](https://github.com/Rajveerx11/Testing-IDE/actions/workflows/release.yml)
+[![CI](https://github.com/Rajveerx11/Tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/Rajveerx11/Tessera/actions/workflows/ci.yml)
+[![Release](https://github.com/Rajveerx11/Tessera/actions/workflows/release.yml/badge.svg)](https://github.com/Rajveerx11/Tessera/actions/workflows/release.yml)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.81+-CE422B?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
@@ -173,7 +173,7 @@ Embedding model is pluggable. The default `nomic-embed-text` (768-dim, Apache-2.
 ### Clone + run
 
 ```bash
-git clone https://github.com/Rajveerx11/Testing-IDE.git tessera
+git clone https://github.com/Rajveerx11/Tessera.git tessera
 cd tessera
 corepack enable
 corepack pnpm install
@@ -325,11 +325,11 @@ Phases 1–13 are shipped. Tessera is feature-complete for the v0.1 milestone.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 1 | Tauri scaffold, layered structure, typed config + errors, SQLite + migrations | Shipped ([PR #2](https://github.com/Rajveerx11/Testing-IDE/pull/2)) |
-| 2 | LLM provider abstraction (Ollama / OpenAI / OpenRouter / Anthropic) + embeddings + factory | Shipped ([PR #3](https://github.com/Rajveerx11/Testing-IDE/pull/3)) |
-| 3 | AST pipeline: file discovery, Tree-sitter parsing, semantic chunking, chunk repository | Shipped ([PR #6](https://github.com/Rajveerx11/Testing-IDE/pull/6)) |
-| 4 | Versioned prompt templates with JSON-Schema function calling | Shipped ([PR #9](https://github.com/Rajveerx11/Testing-IDE/pull/9)) |
-| 5 | Generation service (RAG + prompts + LLM) | Shipped ([PR #10](https://github.com/Rajveerx11/Testing-IDE/pull/10)) |
+| 1 | Tauri scaffold, layered structure, typed config + errors, SQLite + migrations | Shipped ([PR #2](https://github.com/Rajveerx11/Tessera/pull/2)) |
+| 2 | LLM provider abstraction (Ollama / OpenAI / OpenRouter / Anthropic) + embeddings + factory | Shipped ([PR #3](https://github.com/Rajveerx11/Tessera/pull/3)) |
+| 3 | AST pipeline: file discovery, Tree-sitter parsing, semantic chunking, chunk repository | Shipped ([PR #6](https://github.com/Rajveerx11/Tessera/pull/6)) |
+| 4 | Versioned prompt templates with JSON-Schema function calling | Shipped ([PR #9](https://github.com/Rajveerx11/Tessera/pull/9)) |
+| 5 | Generation service (RAG + prompts + LLM) | Shipped ([PR #10](https://github.com/Rajveerx11/Tessera/pull/10)) |
 | 6 | Tauri IPC commands + AES-GCM API-key encryption | Shipped |
 | 7 | Live Ollama integration tests, prompt snapshots, CI workflow | Shipped |
 | 8 | Frontend IPC client + first-run wizard | Shipped |
@@ -424,7 +424,7 @@ The repo enforces:
 To get going:
 
 ```bash
-git clone https://github.com/Rajveerx11/Testing-IDE.git tessera
+git clone https://github.com/Rajveerx11/Tessera.git tessera
 cd tessera
 corepack enable
 corepack pnpm install      # also wires the Husky pre-commit + pre-push hooks

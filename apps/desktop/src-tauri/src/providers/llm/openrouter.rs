@@ -26,8 +26,8 @@ pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api";
 /// Default attribution headers — identify this application to
 /// `OpenRouter` for ranking on the public app leaderboard. No secrets
 /// here; safe to ship.
-pub const DEFAULT_REFERER: &str = "https://github.com/Rajveerx11/Testing-IDE";
-pub const DEFAULT_TITLE: &str = "AI-Powered Testing IDE";
+pub const DEFAULT_REFERER: &str = "https://github.com/Rajveerx11/Tessera";
+pub const DEFAULT_TITLE: &str = "Tessera — AI Testing IDE";
 
 const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 

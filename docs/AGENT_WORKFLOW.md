@@ -35,7 +35,7 @@ Every guard described below exists to defend this invariant.
 ## 2. Required setup (one-time, per machine)
 
 ```bash
-git clone https://github.com/Rajveerx11/Testing-IDE.git tessera
+git clone https://github.com/Rajveerx11/Tessera.git tessera
 cd tessera
 corepack enable
 corepack pnpm install
