@@ -41,20 +41,16 @@ jobs:
           fi
 
   lint:
-    name: lint (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+    name: lint
+    # Ubuntu-only by design. Lint output is platform-independent and
+    # the Tauri matrix already covers Windows + macOS on tag pushes
+    # (see release.yml). Running lint × 3 OS on every push burned
+    # ~13× the billed minutes for no extra signal.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux Tauri deps
-        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -97,15 +93,9 @@ jobs:
         run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets --lib -- -D warnings
 
   typecheck:
-    name: typecheck (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+    name: typecheck
+    # Ubuntu-only — TypeScript output is identical across runners.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -127,20 +117,17 @@ jobs:
         run: pnpm typecheck
 
   unit-test:
-    name: unit-test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+    name: unit-test
+    # Ubuntu-only. Vitest + Rust unit tests do not exercise OS-
+    # specific code paths. The Tauri release workflow still builds
+    # full bundles on Windows + macOS when a tag is pushed, so the
+    # cross-platform contract is covered without paying for it on
+    # every push.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux Tauri deps
-        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
