@@ -162,19 +162,27 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         aria-hidden="true"
       />
       <aside
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-2xl"
+        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l border-border bg-card shadow-2xl"
         role="dialog"
         aria-label={`Review ${summary.title}`}
       >
-        <header className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
-              {summary.artifactType} · v{summary.version}
-            </p>
-            <h2 className="truncate text-base font-semibold tracking-tight" title={summary.title}>
+        <header className="flex items-start justify-between gap-2 border-b border-border bg-card px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
+                {summary.artifactType} · v{summary.version}
+              </p>
+              <span className={`pill pill-${summary.status.replace('_', '-')}`}>
+                {summary.status.replace('_', ' ')}
+              </span>
+            </div>
+            <h2
+              className="mt-1 truncate font-mono text-sm font-semibold text-foreground"
+              title={summary.title}
+            >
               {summary.title}
             </h2>
-            <p className="text-muted-foreground mt-0.5 text-[10px]">
+            <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">
               {summary.provider} · {summary.model}
             </p>
           </div>
@@ -198,11 +206,11 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
           ) : null}
         </div>
 
-        <footer className="border-t border-border bg-card p-3 space-y-3">
+        <footer className="border-t border-border bg-surface-3 p-3 space-y-3">
           <div>
             <label
               htmlFor="reviewer-feedback"
-              className="text-muted-foreground mb-1 block text-[10px] font-semibold uppercase tracking-wider"
+              className="text-muted-foreground mb-1 block text-[10px] font-semibold uppercase tracking-[0.12em]"
             >
               Feedback for regeneration (optional)
             </label>
@@ -212,7 +220,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               onChange={(e) => setFeedback(e.target.value)}
               placeholder="What should the next version do differently?"
               maxLength={4000}
-              className="bg-background placeholder:text-muted-foreground/70 w-full resize-none rounded-md border border-border p-2 text-xs focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-1"
+              className="bg-background placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:ring-primary/20 w-full resize-none rounded-md border border-border p-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2"
               rows={3}
             />
           </div>
@@ -240,10 +248,8 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               </>
             ) : (
               <span
-                className={`text-xs font-medium ${
-                  detail?.status === 'approved'
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-red-600 dark:text-red-400'
+                className={`pill ${
+                  detail?.status === 'approved' ? 'pill-approved' : 'pill-rejected'
                 }`}
               >
                 {detail?.status === 'approved' ? 'Approved' : 'Rejected'}

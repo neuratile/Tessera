@@ -56,8 +56,9 @@ export function FirstRunWizard({ onComplete }: Props) {
   }, [onComplete]);
 
   return (
-    <div className="bg-background flex h-screen w-screen items-center justify-center p-4">
-      <div className="bg-card flex h-[540px] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl">
+    <div className="bg-background relative flex h-screen w-screen items-center justify-center p-4">
+      <div className="bg-mosaic" aria-hidden="true" />
+      <div className="bg-card relative z-10 flex h-[540px] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border shadow-2xl">
         <Header step={step} />
         <div className="flex-1 overflow-y-auto p-8">
           {step === 1 && <StepOne />}
@@ -72,18 +73,28 @@ export function FirstRunWizard({ onComplete }: Props) {
 }
 
 function Header({ step }: { step: Step }) {
+  const labels = ['Welcome', 'Hardware', 'Engine', 'Model'];
   return (
-    <div className="bg-muted/20 shrink-0 border-b border-border p-6">
-      <h1 className="text-primary mb-3 flex items-center gap-2 text-base font-bold tracking-tight">
-        <Server className="size-5" />
-        Testing IDE setup
-      </h1>
+    <div className="bg-surface-3 shrink-0 border-b border-border p-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h1 className="flex items-center gap-2">
+          <span className="font-brand text-primary text-lg">tessera</span>
+          <span
+            className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >
+            setup · step {step} of 4
+          </span>
+        </h1>
+        <span className="text-muted-foreground text-[10px] font-mono">
+          {labels[step - 1]}
+        </span>
+      </div>
       <div className="flex gap-1.5">
         {[1, 2, 3, 4].map((s) => (
           <div
             key={s}
-            className={`h-1.5 flex-1 rounded-full transition-colors ${
-              step >= s ? 'bg-primary' : 'bg-muted'
+            className={`h-1 flex-1 rounded-full transition-colors ${
+              step >= s ? 'bg-primary' : 'bg-surface-2'
             }`}
           />
         ))}
@@ -102,7 +113,7 @@ function Footer({
   finish: () => void;
 }) {
   return (
-    <div className="bg-muted/20 flex shrink-0 items-center justify-between border-t border-border p-6">
+    <div className="bg-surface-3 flex shrink-0 items-center justify-between border-t border-border px-6 py-4">
       <Button
         type="button"
         variant="ghost"
@@ -129,10 +140,10 @@ function Footer({
 
 function StepOne() {
   return (
-    <Section title="Welcome to Testing IDE">
+    <Section title="Welcome to Tessera">
       <p className="text-muted-foreground text-sm">
-        Local-first IDE for generating test plans, test cases, and defect reports against your code
-        with AI you control.
+        Local-first IDE for generating test plans, test cases, defect reports, and bug reports
+        against any codebase — with AI you control.
       </p>
       <ul className="mt-4 space-y-2 text-sm">
         <Bullet>Runs offline by default via Ollama.</Bullet>
@@ -233,13 +244,13 @@ function StepThree() {
         <code className="bg-muted rounded px-1 text-xs">ollama.com</code> and run{' '}
         <code className="bg-muted rounded px-1 text-xs">ollama serve</code>.
       </p>
-      <div className="mt-4 rounded-lg border border-border bg-background p-4">
+      <div className="mt-4 rounded-md border border-border bg-background p-4">
         {pending ? (
           <p className="text-muted-foreground flex items-center gap-2 text-sm">
             <Loader2 className="size-3 animate-spin" /> Probing http://localhost:11434…
           </p>
         ) : result?.ok === true ? (
-          <p className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+          <p className="text-success flex items-center gap-2 text-sm">
             <Check className="size-4" /> {result.message}
             <span className="text-muted-foreground">({result.latencyMs} ms)</span>
           </p>
@@ -351,8 +362,8 @@ function StepFour({ tier }: { tier: HardwareTier | null }) {
         </p>
       ) : null}
       {installedModels !== null && !isInstalled ? (
-        <div className="mt-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2.5 text-xs">
-          <p className="text-yellow-700 dark:text-yellow-400">
+        <div className="border-warning/30 bg-warning/5 mt-3 rounded-md border p-2.5 text-xs">
+          <p className="text-warning">
             {probeFailed
               ? 'Ollama is unreachable. Start the daemon then run:'
               : `Model not pulled yet. Run:`}
@@ -363,7 +374,7 @@ function StepFour({ tier }: { tier: HardwareTier | null }) {
         </div>
       ) : null}
       {saved !== null ? (
-        <p className="mt-3 text-xs text-green-600 dark:text-green-400">Saved {saved} ✓</p>
+        <p className="text-success mt-3 text-xs">Saved {saved} ✓</p>
       ) : null}
       <div className="mt-4">
         <Button type="button" size="sm" variant="outline" onClick={save} disabled={saving}>
@@ -387,7 +398,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function Bullet({ children }: { children: ReactNode }) {
   return (
     <li className="flex items-start gap-2 text-sm">
-      <Check className="mt-0.5 size-4 shrink-0 text-green-500" />
+      <Check className="text-primary mt-0.5 size-4 shrink-0" />
       {children}
     </li>
   );
@@ -395,10 +406,12 @@ function Bullet({ children }: { children: ReactNode }) {
 
 function Card({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
-    <div className="bg-background flex items-start gap-3 rounded-lg border border-border p-3">
+    <div className="bg-background flex items-start gap-3 rounded-md border border-border p-3">
       <span className="text-primary mt-0.5">{icon}</span>
       <div className="min-w-0 text-sm">
-        <p className="text-muted-foreground text-xs uppercase tracking-wider">{label}</p>
+        <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
+          {label}
+        </p>
         <div className="mt-0.5">{children}</div>
       </div>
     </div>
@@ -422,21 +435,23 @@ function ModelOption({
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-start justify-between rounded-lg border p-3 transition-colors ${
-        checked ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/50'
+      className={`flex cursor-pointer items-start justify-between rounded-md border p-3 transition-colors ${
+        checked
+          ? 'border-primary bg-primary/8'
+          : 'border-border bg-background hover:bg-muted/50 hover:border-primary/40'
       }`}
     >
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           {label}
           {recommended ? (
-            <span className="bg-primary text-primary-foreground rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+            <span className="bg-primary text-primary-foreground rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]">
               Recommended
             </span>
           ) : null}
         </div>
         <p className="text-muted-foreground mt-0.5 text-xs">{hint}</p>
-        <code className="text-muted-foreground mt-1 block text-[10px]">{model}</code>
+        <code className="text-muted-foreground mt-1 block font-mono text-[10px]">{model}</code>
       </div>
       <input
         type="radio"
@@ -447,8 +462,8 @@ function ModelOption({
         className="sr-only"
       />
       <span
-        className={`mt-1 size-4 shrink-0 rounded-full border-2 ${
-          checked ? 'border-primary bg-primary/30' : 'border-border'
+        className={`mt-1 size-4 shrink-0 rounded-full border-2 transition-colors ${
+          checked ? 'border-primary bg-primary/40' : 'border-border'
         }`}
       />
     </label>

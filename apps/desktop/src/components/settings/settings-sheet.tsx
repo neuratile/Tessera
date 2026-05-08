@@ -148,34 +148,47 @@ export function SettingsSheet() {
         aria-hidden="true"
       />
       <aside
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-background shadow-2xl"
+        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-card shadow-2xl"
         role="dialog"
         aria-label="Settings"
       >
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-base font-semibold tracking-tight">Settings</h2>
+        <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-4">
+          <h2 className="flex items-center gap-2">
+            <span className="font-brand text-primary text-sm">tessera</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground">
+              Settings
+            </span>
+          </h2>
           <Button type="button" size="icon" variant="ghost" onClick={() => setOpen(false)} aria-label="Close">
             <X className="size-4" />
           </Button>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          <section className="space-y-3">
-            <h3 className="text-sm font-medium">Configured providers</h3>
+          <section className="space-y-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Configured Providers
+            </h3>
             {loading ? (
               <p className="text-muted-foreground text-xs">Loading…</p>
             ) : list.length === 0 ? (
               <p className="text-muted-foreground text-xs">None yet.</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {list.map((c) => (
                   <li
                     key={c.id}
-                    className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-xs"
+                    className="group flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs transition-colors hover:border-primary/40"
                   >
-                    <div className="min-w-0">
-                      <p className="font-medium">{c.provider}</p>
-                      <p className="text-muted-foreground truncate text-[10px]">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className={`size-1.5 rounded-full ${c.isActive ? 'bg-primary' : 'bg-surface-3'}`}
+                        />
+                        <p className="font-medium text-foreground">{c.provider}</p>
+                      </div>
+                      <p className="text-muted-foreground mt-1 truncate font-mono text-[10px]">
                         {c.defaultModel ?? '(no default model)'} · key{' '}
                         {c.hasApiKey ? 'set' : 'missing'} · {c.isActive ? 'active' : 'inactive'}
                       </p>
@@ -196,7 +209,9 @@ export function SettingsSheet() {
           </section>
 
           <section className="space-y-3">
-            <h3 className="text-sm font-medium">Add / update provider</h3>
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Add / Update Provider
+            </h3>
 
             <div className="grid grid-cols-2 gap-2">
               {PROVIDER_OPTIONS.map((p) => (
@@ -204,8 +219,8 @@ export function SettingsSheet() {
                   key={p.id}
                   className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
                     provider === p.id
-                      ? 'border-primary bg-primary/5 text-primary'
-                      : 'border-border bg-card hover:bg-muted/50'
+                      ? 'border-primary bg-primary/8 text-primary'
+                      : 'border-border bg-background hover:bg-muted/50 hover:border-primary/40'
                   }`}
                 >
                   <input
@@ -279,22 +294,28 @@ export function SettingsSheet() {
             </div>
 
             {testResult !== null ? (
-              <p
-                className={`flex items-center gap-1.5 text-xs ${
-                  testResult.ok ? 'text-green-600 dark:text-green-400' : 'text-destructive'
+              <div
+                className={`flex items-start gap-2 rounded-md border p-2 text-xs ${
+                  testResult.ok
+                    ? 'border-success/30 bg-success/5 text-success'
+                    : 'border-destructive/30 bg-destructive/5 text-destructive'
                 }`}
                 role="status"
               >
                 {testResult.ok ? (
-                  <Check className="size-3.5" />
+                  <Check className="mt-0.5 size-3.5 shrink-0" />
                 ) : (
-                  <X className="size-3.5" />
+                  <X className="mt-0.5 size-3.5 shrink-0" />
                 )}
-                {testResult.message}
-                {testResult.ok ? (
-                  <span className="text-muted-foreground">({testResult.latencyMs} ms)</span>
-                ) : null}
-              </p>
+                <span className="min-w-0 flex-1">
+                  {testResult.message}
+                  {testResult.ok ? (
+                    <span className="text-muted-foreground ml-1">
+                      · {testResult.latencyMs} ms
+                    </span>
+                  ) : null}
+                </span>
+              </div>
             ) : null}
 
             {error !== null ? (
