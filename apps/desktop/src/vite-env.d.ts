@@ -10,3 +10,5 @@ declare module 'vite/client' {
     readonly VITE_SENTRY_DSN?: string;
   }
 }
+
+declare const __APP_VERSION__: string;

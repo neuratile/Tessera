@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "AI-powered testing IDE — Tauri backend"
 authors = ["Testing IDE Team"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.81"
 
 [lib]
 name = "testing_ide_lib"
@@ -27,6 +27,7 @@ tree-sitter-typescript = "0.21"
 tree-sitter-javascript = "0.21"
 tree-sitter-python = "0.21"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+sentry = { version = "0.43", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1"

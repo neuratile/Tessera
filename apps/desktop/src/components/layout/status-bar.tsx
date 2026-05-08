@@ -18,23 +18,33 @@ export function StatusBar() {
       <div className="flex items-center gap-3">
         {project ? (
           <>
-            <span className="text-muted-foreground">{project.status}</span>
+            <span className="text-muted-foreground" data-testid="project-status">
+              {project.status}
+            </span>
             <span className="text-muted-foreground">{project.fileCount} files</span>
           </>
         ) : (
           <span className="text-muted-foreground">no project</span>
         )}
         {analysis.status === 'pending' ? (
-          <span className="flex items-center gap-1 text-muted-foreground">
+          <span
+            className="flex items-center gap-1 text-muted-foreground"
+            data-testid="analysis-status"
+          >
             <Loader2 className="size-3 animate-spin" />
             analysing…
           </span>
         ) : analysis.status === 'ready' ? (
-          <span className="text-muted-foreground">
+          <span className="text-muted-foreground" data-testid="analysis-status">
             {analysis.outcome.chunksEmbedded} chunks · {analysis.outcome.filesParsed} parsed
           </span>
         ) : analysis.status === 'error' ? (
-          <span className="text-destructive truncate" role="alert" title={analysis.message}>
+          <span
+            className="text-destructive truncate"
+            role="alert"
+            title={analysis.message}
+            data-testid="analysis-status"
+          >
             analysis failed
           </span>
         ) : null}

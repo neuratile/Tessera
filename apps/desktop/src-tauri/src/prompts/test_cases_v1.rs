@@ -2,8 +2,8 @@
 //!
 //! Generates concrete test cases bound to specific code symbols. Each
 //! case carries title, preconditions, steps, expected result,
-//! priority, category, and traceability back to the source
-//! function/file (rules.md §12.1 — structured output via JSON Schema).
+//! priority, and traceability back to the source function/file
+//! (rules.md §12.1 — structured output via JSON Schema).
 
 use std::fmt::Write as _;
 
@@ -61,8 +61,7 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
 #[must_use]
 pub fn tool() -> ToolSchema {
-    let priority_enum = serde_json::json!(["critical", "high", "medium", "low"]);
-    let category_enum = serde_json::json!(["positive", "negative", "boundary", "error_path"]);
+    let priority_enum = serde_json::json!(["p0", "p1", "p2", "p3"]);
 
     tool_schema(
         TOOL_NAME,
@@ -70,9 +69,9 @@ pub fn tool() -> ToolSchema {
         serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["test_cases"],
+            "required": ["cases"],
             "properties": {
-                "test_cases": {
+                "cases": {
                     "type": "array",
                     "minItems": 1,
                     "items": {
@@ -81,12 +80,9 @@ pub fn tool() -> ToolSchema {
                         "required": [
                             "id",
                             "title",
-                            "category",
                             "priority",
-                            "preconditions",
                             "steps",
-                            "expected_result",
-                            "traceability"
+                            "expectedResult"
                         ],
                         "properties": {
                             "id": {
@@ -95,7 +91,6 @@ pub fn tool() -> ToolSchema {
                                 "description": "Stable id, prefix `TC-`."
                             },
                             "title": { "type": "string", "minLength": 5, "maxLength": 200 },
-                            "category": { "type": "string", "enum": category_enum },
                             "priority": { "type": "string", "enum": priority_enum },
                             "preconditions": {
                                 "type": "array",
@@ -106,25 +101,13 @@ pub fn tool() -> ToolSchema {
                                 "minItems": 1,
                                 "items": { "type": "string", "minLength": 1 }
                             },
-                            "expected_result": { "type": "string", "minLength": 1 },
+                            "expectedResult": { "type": "string", "minLength": 1 },
                             "traceability": {
-                                "type": "object",
-                                "additionalProperties": false,
-                                "required": ["symbol", "kind"],
-                                "properties": {
-                                    "symbol": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "description": "Function / class / module name covered."
-                                    },
-                                    "kind": {
-                                        "type": "string",
-                                        "enum": ["function", "method", "class", "module"]
-                                    },
-                                    "file_hint": {
-                                        "type": "string",
-                                        "description": "Relative file path if known."
-                                    }
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Source reference such as `src/routes/auth.ts#login`."
                                 }
                             }
                         }
@@ -178,39 +161,41 @@ mod tests {
     #[test]
     fn tool_id_pattern_is_tc_prefix() {
         let schema = tool();
-        let pattern = schema.parameters_schema["properties"]["test_cases"]["items"]["properties"]
-            ["id"]["pattern"]
+        let pattern = schema.parameters_schema["properties"]["cases"]["items"]["properties"]["id"]
+            ["pattern"]
             .as_str()
             .expect("pattern");
         assert_eq!(pattern, "^TC-[A-Z0-9_-]+$");
     }
 
     #[test]
-    fn categories_cover_four_axes() {
+    fn priorities_match_shared_schema() {
         let schema = tool();
-        let cats = &schema.parameters_schema["properties"]["test_cases"]["items"]["properties"]
-            ["category"]["enum"];
-        let v: Vec<&str> = cats
+        let priorities = &schema.parameters_schema["properties"]["cases"]["items"]["properties"]
+            ["priority"]["enum"];
+        let values: Vec<&str> = priorities
             .as_array()
             .expect("array")
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(v, vec!["positive", "negative", "boundary", "error_path"]);
+        assert_eq!(values, vec!["p0", "p1", "p2", "p3"]);
     }
 
     #[test]
-    fn traceability_required_with_symbol_and_kind() {
+    fn traceability_is_optional_string_array() {
         let schema = tool();
-        let trace_required = &schema.parameters_schema["properties"]["test_cases"]["items"]
-            ["properties"]["traceability"]["required"];
-        let names: Vec<&str> = trace_required
+        let traceability_items = &schema.parameters_schema["properties"]["cases"]["items"]
+            ["properties"]["traceability"]["items"]["type"];
+        assert_eq!(traceability_items.as_str(), Some("string"));
+
+        let required = &schema.parameters_schema["properties"]["cases"]["items"]["required"];
+        let names: Vec<&str> = required
             .as_array()
             .expect("array")
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert!(names.contains(&"symbol"));
-        assert!(names.contains(&"kind"));
+        assert!(!names.contains(&"traceability"));
     }
 }

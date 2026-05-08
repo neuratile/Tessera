@@ -564,13 +564,15 @@ mod tests {
         r#"{
             "summary": "Plan to verify the auth subsystem covers happy and failure paths.",
             "objectives": ["Verify login", "Verify logout"],
-            "scope_in": ["auth module"],
-            "scope_out": [],
-            "test_types": [
-                {"kind": "unit", "rationale": "Cover pure functions"}
+            "scopeIn": ["auth module"],
+            "scopeOut": [],
+            "strategy": "Use a risk-based mix of API and service-level checks focused on login, logout, and session lifecycle behavior.",
+            "environments": ["local Express server with JSON requests"],
+            "risks": [
+                {"description": "Session tokens may remain active after logout.", "mitigation": "Verify revocation and post-logout access denial."}
             ],
-            "entry_criteria": ["Code merged"],
-            "exit_criteria": ["All tests pass"]
+            "entryCriteria": ["Code merged"],
+            "exitCriteria": ["All tests pass"]
         }"#
     }
 

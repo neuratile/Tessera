@@ -35,3 +35,27 @@ pub fn verify_password(password: &str, password_hash: &str) -> AppResult<()> {
         .verify_password(password.as_bytes(), &parsed)
         .map_err(|_| AppError::Unauthorized("invalid credentials".into()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_and_verify_round_trip() {
+        let hash = hash_password("correct horse battery staple").expect("hash");
+        verify_password("correct horse battery staple", &hash).expect("verify");
+    }
+
+    #[test]
+    fn verify_rejects_wrong_password() {
+        let hash = hash_password("secret-value").expect("hash");
+        let err = verify_password("not-the-secret", &hash).expect_err("must reject");
+        assert_eq!(err.code(), "UNAUTHORIZED");
+    }
+
+    #[test]
+    fn verify_rejects_malformed_hash() {
+        let err = verify_password("secret-value", "not-a-phc-hash").expect_err("must reject");
+        assert_eq!(err.code(), "UNAUTHORIZED");
+    }
+}

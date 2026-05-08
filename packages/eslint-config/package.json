@@ -6,11 +6,15 @@
   "files": [
     "base.cjs",
     "react.cjs",
+    "flat/base.mjs",
+    "flat/react.mjs",
     "README.md"
   ],
   "exports": {
     "./base": "./base.cjs",
-    "./react": "./react.cjs"
+    "./react": "./react.cjs",
+    "./flat/base": "./flat/base.mjs",
+    "./flat/react": "./flat/react.mjs"
   },
   "peerDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.0.0",

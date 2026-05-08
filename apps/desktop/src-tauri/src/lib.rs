@@ -42,6 +42,7 @@ use tauri::Manager;
 /// may not yet be live).
 pub fn run() {
     let cfg = config::AppConfig::from_env().expect("failed to load configuration");
+    let _sentry_guard = utils::telemetry::init_sentry(cfg.sentry_dsn.as_deref());
     utils::telemetry::init(&cfg.log_level).expect("failed to initialize tracing");
 
     tracing::info!(

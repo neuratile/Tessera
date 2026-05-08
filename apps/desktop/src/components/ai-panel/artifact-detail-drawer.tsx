@@ -1,9 +1,10 @@
 import type { ArtifactDetail, ArtifactSummary } from '@testing-ide/shared';
-import { CheckCircle2, Loader2, RefreshCw, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, RefreshCw, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { MarkdownView } from '@/components/markdown/markdown-view';
 import { Button } from '@/components/ui/button';
+import { exportMarkdownDocument } from '@/lib/export-markdown';
 import { artifacts as artifactsIpc, generation, IpcError } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -28,6 +29,8 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [regenerating, setRegenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   const project = useWorkspaceStore((s) => s.project);
   const activeProvider = useAiStore((s) => s.activeProvider);
@@ -124,6 +127,29 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
       }
     })();
   }, [canRegenerate, project, activeProvider, summary, feedback, upsertArtifact]);
+
+  const handleExportMarkdown = useCallback(() => {
+    if (detail === null) {
+      return;
+    }
+
+    setExporting(true);
+    setError(null);
+    setExportStatus(null);
+
+    void (async () => {
+      try {
+        const exportedPath = await exportMarkdownDocument(detail.title, detail.contentMd);
+        if (exportedPath !== null) {
+          setExportStatus('Exported markdown.');
+        }
+      } catch (err) {
+        setError(err instanceof IpcError ? err.message : String(err));
+      } finally {
+        setExporting(false);
+      }
+    })();
+  }, [detail]);
 
   const isPending =
     detail?.status === 'draft' || detail?.status === 'in_review' || detail === null;
@@ -227,6 +253,16 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               type="button"
               size="sm"
               variant="outline"
+              onClick={handleExportMarkdown}
+              disabled={detail === null || exporting}
+            >
+              {exporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              Export markdown
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
               onClick={handleRegenerate}
               disabled={!canRegenerate || regenerating || detail === null}
               className="ml-auto"
@@ -244,6 +280,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               Configure a provider in Settings to enable regeneration.
             </p>
           ) : null}
+          {exportStatus !== null ? <p className="text-muted-foreground text-[10px]">{exportStatus}</p> : null}
         </footer>
       </aside>
     </>

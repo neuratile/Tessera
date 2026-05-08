@@ -4,32 +4,20 @@ expression: "test_plan_v1::tool().parameters_schema"
 ---
 additionalProperties: false
 properties:
-  entry_criteria:
+  entryCriteria:
     items:
       minLength: 1
       type: string
-    minItems: 1
     type: array
   environments:
     items:
-      additionalProperties: false
-      properties:
-        name:
-          minLength: 1
-          type: string
-        purpose:
-          minLength: 1
-          type: string
-      required:
-        - name
-        - purpose
-      type: object
+      minLength: 1
+      type: string
     type: array
-  exit_criteria:
+  exitCriteria:
     items:
       minLength: 1
       type: string
-    minItems: 1
     type: array
   objectives:
     items:
@@ -47,62 +35,37 @@ properties:
         mitigation:
           minLength: 1
           type: string
-        severity:
-          enum:
-            - critical
-            - major
-            - minor
-            - trivial
-          type: string
       required:
         - description
-        - severity
-        - mitigation
       type: object
     type: array
-  scope_in:
+  scopeIn:
     items:
       minLength: 1
       type: string
     minItems: 1
     type: array
-  scope_out:
+  scopeOut:
     items:
       minLength: 1
       type: string
     type: array
+  strategy:
+    maxLength: 2000
+    minLength: 20
+    type: string
   summary:
     maxLength: 1500
     minLength: 40
     type: string
-  test_types:
-    items:
-      additionalProperties: false
-      properties:
-        kind:
-          enum:
-            - unit
-            - integration
-            - end_to_end
-            - performance
-            - security
-            - accessibility
-          type: string
-        rationale:
-          minLength: 1
-          type: string
-      required:
-        - kind
-        - rationale
-      type: object
-    minItems: 1
-    type: array
 required:
   - summary
   - objectives
-  - scope_in
-  - scope_out
-  - test_types
-  - entry_criteria
-  - exit_criteria
+  - scopeIn
+  - scopeOut
+  - strategy
+  - environments
+  - risks
+  - entryCriteria
+  - exitCriteria
 type: object

@@ -4,18 +4,11 @@ expression: "test_cases_v1::tool().parameters_schema"
 ---
 additionalProperties: false
 properties:
-  test_cases:
+  cases:
     items:
       additionalProperties: false
       properties:
-        category:
-          enum:
-            - positive
-            - negative
-            - boundary
-            - error_path
-          type: string
-        expected_result:
+        expectedResult:
           minLength: 1
           type: string
         id:
@@ -29,10 +22,10 @@ properties:
           type: array
         priority:
           enum:
-            - critical
-            - high
-            - medium
-            - low
+            - p0
+            - p1
+            - p2
+            - p3
           type: string
         steps:
           items:
@@ -45,38 +38,20 @@ properties:
           minLength: 5
           type: string
         traceability:
-          additionalProperties: false
-          properties:
-            file_hint:
-              description: Relative file path if known.
-              type: string
-            kind:
-              enum:
-                - function
-                - method
-                - class
-                - module
-              type: string
-            symbol:
-              description: Function / class / module name covered.
-              minLength: 1
-              type: string
-          required:
-            - symbol
-            - kind
-          type: object
+          items:
+            description: "Source reference such as `src/routes/auth.ts#login`."
+            minLength: 1
+            type: string
+          type: array
       required:
         - id
         - title
-        - category
         - priority
-        - preconditions
         - steps
-        - expected_result
-        - traceability
+        - expectedResult
       type: object
     minItems: 1
     type: array
 required:
-  - test_cases
+  - cases
 type: object

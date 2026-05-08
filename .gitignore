@@ -9,6 +9,8 @@ node_modules/
 dist/
 build/
 coverage/
+playwright-report/
+test-results/
 
 # Env files
 .env
@@ -21,6 +23,7 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
 # Rust (`cargo`) — binaries and intermediates stay out of Git
 **/target/

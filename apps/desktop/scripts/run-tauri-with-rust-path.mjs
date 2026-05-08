@@ -7,7 +7,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, delimiter, join } from 'node:path';
+import { dirname, delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -61,8 +61,13 @@ if (!cargoExe) {
   process.exit(1);
 }
 
-const tauriCli = join(desktopRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
-if (!existsSync(tauriCli)) {
+const tauriCliCandidates = [
+  join(desktopRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'),
+  resolve(desktopRoot, '../../node_modules/@tauri-apps/cli/tauri.js'),
+];
+const tauriCli = tauriCliCandidates.find((candidate) => existsSync(candidate));
+
+if (!tauriCli) {
   console.error('[desktop] Missing node_modules/@tauri-apps/cli. Run: npm install');
   process.exit(1);
 }

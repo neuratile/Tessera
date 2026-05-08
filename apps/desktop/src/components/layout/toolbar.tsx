@@ -1,5 +1,5 @@
 import type { Project } from '@testing-ide/shared';
-import { Clock, FolderOpen, Settings } from 'lucide-react';
+import { Clock, FolderOpen, Loader2, Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -11,17 +11,43 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 /**
  * Top toolbar above the three-panel workspace. Hosts the "Open folder"
  * action (native dialog), the recent-projects popover (re-opens a row
- * persisted by `create_project`), and the Settings sheet trigger.
+ * persisted by `create_project`), a manual Analyze button, and the
+ * Settings sheet trigger.
  */
 export function Toolbar() {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const project = useWorkspaceStore((s) => s.project);
   const setProject = useWorkspaceStore((s) => s.setProject);
+  const updateProject = useWorkspaceStore((s) => s.updateProject);
   const setTree = useWorkspaceStore((s) => s.setTree);
   const setTreeLoading = useWorkspaceStore((s) => s.setTreeLoading);
   const setTreeError = useWorkspaceStore((s) => s.setTreeError);
+  const analysisState = useWorkspaceStore((s) => s.analysis);
   const setAnalysis = useWorkspaceStore((s) => s.setAnalysis);
-  const updateProject = useWorkspaceStore((s) => s.updateProject);
+
+  const runAnalysis = useCallback(
+    (target: Project) => {
+      setAnalysis({ status: 'pending' });
+      void (async () => {
+        try {
+          const outcome = await analysisIpc.analyzeProject(target.id);
+          try {
+            const refreshed = await projects.getProject(target.id);
+            updateProject(refreshed);
+          } catch {
+            // Non-fatal: stale project values are cosmetic.
+          }
+          setAnalysis({ status: 'ready', outcome });
+        } catch (err) {
+          setAnalysis({
+            status: 'error',
+            message: err instanceof IpcError ? err.message : String(err),
+          });
+        }
+      })();
+    },
+    [setAnalysis, updateProject],
+  );
 
   const loadProject = useCallback(
     (target: Project, options: { skipAnalysisIfReady: boolean }) => {
@@ -48,29 +74,15 @@ export function Toolbar() {
           options.skipAnalysisIfReady && target.status === 'ready' && target.fileCount > 0;
         if (alreadyReady) return;
 
-        setAnalysis({ status: 'pending' });
-        try {
-          const outcome = await analysisIpc.analyzeProject(target.id);
-          try {
-            const refreshed = await projects.getProject(target.id);
-            updateProject(refreshed);
-          } catch {
-            // Non-fatal: analysis succeeded; stale project values are cosmetic.
-          }
-          setAnalysis({ status: 'ready', outcome });
-        } catch (err) {
-          setAnalysis({
-            status: 'error',
-            message: err instanceof IpcError ? err.message : String(err),
-          });
-        }
+        runAnalysis(target);
       })();
     },
-    [setAnalysis, setProject, setTree, setTreeError, setTreeLoading, updateProject],
+    [runAnalysis, setProject, setTree, setTreeError, setTreeLoading],
   );
 
   const handleOpenFolder = useCallback(() => {
     setTreeError(null);
+    setAnalysis({ status: 'idle' });
     void (async () => {
       let path: string | null;
       try {
@@ -93,7 +105,14 @@ export function Toolbar() {
       // hit the chunker).
       loadProject(created, { skipAnalysisIfReady: false });
     })();
-  }, [loadProject, setTreeError]);
+  }, [loadProject, setAnalysis, setTreeError]);
+
+  const handleAnalyze = useCallback(() => {
+    if (project === null) return;
+    runAnalysis(project);
+  }, [project, runAnalysis]);
+
+  const isAnalyzing = analysisState.status === 'pending';
 
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-3">
@@ -113,6 +132,18 @@ export function Toolbar() {
         <Button type="button" size="sm" variant="ghost" onClick={handleOpenFolder}>
           <FolderOpen className="size-4" />
           Open folder
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={handleAnalyze}
+          disabled={project === null || isAnalyzing}
+          aria-label="Analyze project"
+          data-testid="analyze-project"
+        >
+          {isAnalyzing ? <Loader2 className="size-4 animate-spin" /> : null}
+          {isAnalyzing ? 'Analyzing…' : 'Analyze'}
         </Button>
         <Button
           type="button"

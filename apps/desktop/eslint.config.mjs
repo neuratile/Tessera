@@ -1,35 +1,13 @@
-import eslint from '@eslint/js';
-import reactHooks from 'eslint-plugin-react-hooks';
-import reactRefresh from 'eslint-plugin-react-refresh';
-import tseslint from 'typescript-eslint';
+import createReactConfig from '../../packages/eslint-config/flat/react.mjs';
 
-export default tseslint.config(
-  {
-    ignores: ['eslint.config.mjs', 'dist', 'node_modules', 'src-tauri', 'scripts/**'],
-  },
-  eslint.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
-  {
-    languageOptions: {
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
-  {
-    plugins: { 'react-hooks': reactHooks },
-    rules: reactHooks.configs.recommended.rules,
-  },
-  {
-    plugins: { 'react-refresh': reactRefresh },
-    rules: { 'react-refresh/only-export-components': 'warn' },
-  },
-  {
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-    },
-  },
-);
+export default createReactConfig({
+  tsconfigRootDir: import.meta.dirname,
+  ignores: [
+    'eslint.config.mjs',
+    'playwright-report',
+    'src-tauri',
+    'scripts/**',
+    'test-results',
+    'tests/golden/fixtures/**',
+  ],
+});

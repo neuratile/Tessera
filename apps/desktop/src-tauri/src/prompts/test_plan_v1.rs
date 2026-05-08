@@ -1,7 +1,7 @@
 //! Prompt template: full-project test plan, version 1.
 //!
 //! Produces the high-level test strategy document — scope,
-//! objectives, test types, environments, risk matrix, entry / exit
+//! objectives, strategy, environments, risk matrix, entry / exit
 //! criteria. Consumed by the artifact-review UI; downstream prompts
 //! (`test_cases_v1`) generate the individual cases that satisfy this
 //! plan.
@@ -62,16 +62,6 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
 #[must_use]
 pub fn tool() -> ToolSchema {
-    let severity_enum = serde_json::json!(["critical", "major", "minor", "trivial"]);
-    let test_type_enum = serde_json::json!([
-        "unit",
-        "integration",
-        "end_to_end",
-        "performance",
-        "security",
-        "accessibility"
-    ]);
-
     tool_schema(
         TOOL_NAME,
         "Emit a structured test plan for the supplied project.",
@@ -81,11 +71,13 @@ pub fn tool() -> ToolSchema {
             "required": [
                 "summary",
                 "objectives",
-                "scope_in",
-                "scope_out",
-                "test_types",
-                "entry_criteria",
-                "exit_criteria"
+                "scopeIn",
+                "scopeOut",
+                "strategy",
+                "environments",
+                "risks",
+                "entryCriteria",
+                "exitCriteria"
             ],
             "properties": {
                 "summary": { "type": "string", "minLength": 40, "maxLength": 1500 },
@@ -94,61 +86,38 @@ pub fn tool() -> ToolSchema {
                     "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
-                "scope_in": {
+                "scopeIn": {
                     "type": "array",
                     "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
-                "scope_out": {
+                "scopeOut": {
                     "type": "array",
                     "items": { "type": "string", "minLength": 1 }
                 },
-                "test_types": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["kind", "rationale"],
-                        "properties": {
-                            "kind": { "type": "string", "enum": test_type_enum },
-                            "rationale": { "type": "string", "minLength": 1 }
-                        }
-                    }
-                },
+                "strategy": { "type": "string", "minLength": 20, "maxLength": 2000 },
                 "environments": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["name", "purpose"],
-                        "properties": {
-                            "name": { "type": "string", "minLength": 1 },
-                            "purpose": { "type": "string", "minLength": 1 }
-                        }
-                    }
+                    "items": { "type": "string", "minLength": 1 }
                 },
                 "risks": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["description", "severity", "mitigation"],
+                        "required": ["description"],
                         "properties": {
                             "description": { "type": "string", "minLength": 1 },
-                            "severity": { "type": "string", "enum": severity_enum },
                             "mitigation": { "type": "string", "minLength": 1 }
                         }
                     }
                 },
-                "entry_criteria": {
+                "entryCriteria": {
                     "type": "array",
-                    "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
-                "exit_criteria": {
+                "exitCriteria": {
                     "type": "array",
-                    "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 }
             }
@@ -242,23 +211,22 @@ mod tests {
         let names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(names.contains(&"summary"));
         assert!(names.contains(&"objectives"));
-        assert!(names.contains(&"scope_in"));
-        assert!(names.contains(&"test_types"));
-        assert!(names.contains(&"entry_criteria"));
-        assert!(names.contains(&"exit_criteria"));
+        assert!(names.contains(&"scopeIn"));
+        assert!(names.contains(&"strategy"));
+        assert!(names.contains(&"entryCriteria"));
+        assert!(names.contains(&"exitCriteria"));
     }
 
     #[test]
-    fn risk_severity_enum_is_four_levels() {
+    fn risks_only_require_description() {
         let schema = tool();
-        let severity = &schema.parameters_schema["properties"]["risks"]["items"]["properties"]
-            ["severity"]["enum"];
-        let levels: Vec<&str> = severity
+        let required = &schema.parameters_schema["properties"]["risks"]["items"]["required"];
+        let names: Vec<&str> = required
             .as_array()
             .expect("array")
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(levels, vec!["critical", "major", "minor", "trivial"]);
+        assert_eq!(names, vec!["description"]);
     }
 }

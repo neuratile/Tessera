@@ -54,6 +54,38 @@ pub fn init(filter_directive: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Initializes native Sentry reporting when a DSN is configured.
+///
+/// Returns a guard that must stay alive for the duration of the process. The
+/// Tauri entrypoint keeps it in a stack binding until shutdown.
+#[must_use]
+pub(crate) fn init_sentry(dsn: Option<&str>) -> Option<sentry::ClientInitGuard> {
+    let dsn = normalize_sentry_dsn(dsn)?;
+
+    Some(sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            environment: Some(default_sentry_environment().into()),
+            attach_stacktrace: true,
+            debug: cfg!(debug_assertions),
+            ..Default::default()
+        },
+    )))
+}
+
+fn normalize_sentry_dsn(dsn: Option<&str>) -> Option<&str> {
+    dsn.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn default_sentry_environment() -> &'static str {
+    if cfg!(debug_assertions) {
+        "development"
+    } else {
+        "production"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +100,24 @@ mod tests {
     fn init_is_idempotent() {
         init("info").expect("first init must succeed");
         init("info").expect("second init must be a no-op");
+    }
+
+    #[test]
+    fn normalize_sentry_dsn_discards_missing_or_blank_values() {
+        assert_eq!(normalize_sentry_dsn(None), None);
+        assert_eq!(normalize_sentry_dsn(Some("   ")), None);
+        assert_eq!(
+            normalize_sentry_dsn(Some(" https://example.test/123 ")),
+            Some("https://example.test/123")
+        );
+    }
+
+    #[test]
+    fn default_sentry_environment_matches_build_mode() {
+        #[cfg(debug_assertions)]
+        assert_eq!(default_sentry_environment(), "development");
+
+        #[cfg(not(debug_assertions))]
+        assert_eq!(default_sentry_environment(), "production");
     }
 }

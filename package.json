@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.9.0",
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
-    "bootstrap:ollama": "node --experimental-strip-types tools/scripts/bootstrap-ollama.ts"
+    "dev": "node ./node_modules/turbo/bin/turbo run dev",
+    "build": "node ./node_modules/turbo/bin/turbo run build",
+    "lint": "node ./node_modules/turbo/bin/turbo run lint",
+    "test": "node ./node_modules/turbo/bin/turbo run test",
+    "typecheck": "node ./node_modules/turbo/bin/turbo run typecheck",
+    "bootstrap:ollama": "node --experimental-strip-types tools/scripts/bootstrap-ollama.ts",
+    "services:up": "docker compose up -d postgres ollama",
+    "services:down": "docker compose down"
   },
   "devDependencies": {
     "turbo": "^2.5.0"

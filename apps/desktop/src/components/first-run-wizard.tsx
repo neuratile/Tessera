@@ -107,13 +107,13 @@ function Footer({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => setStep((Math.max(1, step - 1) as Step))}
+        onClick={() => setStep(Math.max(1, step - 1) as Step)}
         disabled={step === 1}
       >
         Back
       </Button>
       {step < 4 ? (
-        <Button type="button" size="sm" onClick={() => setStep(((step + 1) as Step))}>
+        <Button type="button" size="sm" onClick={() => setStep((step + 1) as Step)}>
           Continue
           <ArrowRight className="size-4" />
         </Button>
@@ -423,9 +423,7 @@ function ModelOption({
   return (
     <label
       className={`flex cursor-pointer items-start justify-between rounded-lg border p-3 transition-colors ${
-        checked
-          ? 'border-primary bg-primary/5'
-          : 'border-border bg-card hover:bg-muted/50'
+        checked ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/50'
       }`}
     >
       <div className="min-w-0">

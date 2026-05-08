@@ -143,3 +143,69 @@ pub fn decode_refresh_token(token: &str, secret: &[u8], leeway_secs: u64) -> App
 
     Ok(data.claims)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_secret() -> &'static [u8] {
+        b"0123456789abcdef0123456789abcdef"
+    }
+
+    fn test_user_id() -> Uuid {
+        Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").expect("uuid")
+    }
+
+    #[test]
+    fn access_token_round_trips() {
+        let token = encode_access_token(&test_user_id(), "user@example.com", 300, test_secret())
+            .expect("encode");
+
+        let claims = decode_access_token(&token, test_secret(), 0).expect("decode");
+        assert_eq!(claims.sub, test_user_id().to_string());
+        assert_eq!(claims.email, "user@example.com");
+        assert_eq!(claims.kind, None);
+        assert!(claims.jti.is_some());
+    }
+
+    #[test]
+    fn refresh_token_round_trips() {
+        let token = encode_refresh_token(&test_user_id(), "user@example.com", 3_600, test_secret())
+            .expect("encode");
+
+        let claims = decode_refresh_token(&token, test_secret(), 0).expect("decode");
+        assert_eq!(claims.sub, test_user_id().to_string());
+        assert_eq!(claims.email, "user@example.com");
+        assert_eq!(claims.kind.as_deref(), Some(REFRESH_KIND));
+        assert!(claims.jti.is_some());
+    }
+
+    #[test]
+    fn access_decoder_rejects_refresh_tokens() {
+        let refresh =
+            encode_refresh_token(&test_user_id(), "user@example.com", 3_600, test_secret())
+                .expect("encode");
+
+        let err = decode_access_token(&refresh, test_secret(), 0).expect_err("must reject");
+        assert_eq!(err.code(), "UNAUTHORIZED");
+    }
+
+    #[test]
+    fn refresh_decoder_rejects_access_tokens() {
+        let access = encode_access_token(&test_user_id(), "user@example.com", 300, test_secret())
+            .expect("encode");
+
+        let err = decode_refresh_token(&access, test_secret(), 0).expect_err("must reject");
+        assert_eq!(err.code(), "UNAUTHORIZED");
+    }
+
+    #[test]
+    fn decoders_reject_wrong_secret() {
+        let access = encode_access_token(&test_user_id(), "user@example.com", 300, test_secret())
+            .expect("encode");
+
+        let err = decode_access_token(&access, b"abcdef0123456789abcdef0123456789", 0)
+            .expect_err("must reject");
+        assert_eq!(err.code(), "UNAUTHORIZED");
+    }
+}
