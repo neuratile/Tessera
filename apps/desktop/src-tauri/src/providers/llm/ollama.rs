@@ -21,8 +21,11 @@ use crate::utils::provider_base_url::normalize_ollama_base_url;
 pub const PROVIDER_NAME: &str = "ollama";
 
 /// Conservative default — long generations against a slow local model
-/// must not be cut off.
-const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
+/// must not be cut off. 5 minutes covers cold-start model loads on
+/// memory-constrained CI runners (GitHub Actions free tier evicts the
+/// previously-loaded model when a second model is loaded, so the next
+/// call pays the full reload cost) plus the actual tool-call response.
+const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 
 /// Ollama provider. Holds an HTTP client and the resolved base URL.
 #[derive(Debug, Clone)]
