@@ -24,6 +24,7 @@ import { COMMAND, dispatchCommand, type CommandId } from './command-bus';
  *  - `Cmd/Ctrl + Shift + A` Analyze Project
  *  - `Cmd/Ctrl + G`       Regenerate Last artifact
  *  - `Cmd/Ctrl + Shift + G` Open GitHub Repo
+ *  - `Cmd/Ctrl + K`       Open Command Palette
  */
 
 type Match = { id: CommandId; preventDefault: boolean };
@@ -59,6 +60,8 @@ function matchShortcut(event: KeyboardEvent): Match | null {
       return { id: COMMAND.ViewToggleAiPanel, preventDefault: true };
     case 'g':
       return { id: COMMAND.AiRegenerate, preventDefault: true };
+    case 'k':
+      return { id: COMMAND.PaletteOpen, preventDefault: true };
     default:
       return null;
   }

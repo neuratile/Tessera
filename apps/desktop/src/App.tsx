@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ZodError } from 'zod';
 
 import { AiPanel } from '@/components/ai-panel/ai-panel';
+import { CommandPalette } from '@/components/command-palette';
 import { EditorPanel } from '@/components/editor/editor-panel';
 import { FileExplorer } from '@/components/file-explorer/file-explorer';
 import { FirstRunWizard } from '@/components/first-run-wizard';
@@ -48,6 +49,7 @@ function formatZodError(err: ZodError): string {
 export function App() {
   const [showWizard, setShowWizard] = useState<boolean>(() => !readOnboardingFlag());
   const [showDevPanel, setShowDevPanel] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
 
   // Wire the native menu → command-bus bridge and the renderer-side
@@ -81,6 +83,12 @@ export function App() {
       window.open('https://github.com/Rajveerx11/Tessera', '_blank', 'noopener');
     }, []),
   );
+  useCommand(
+    COMMAND.PaletteOpen,
+    useCallback(() => {
+      setPaletteOpen(true);
+    }, []),
+  );
 
   if (showWizard) {
     return <FirstRunWizard onComplete={() => setShowWizard(false)} />;
@@ -90,6 +98,7 @@ export function App() {
     <>
       <AppShell sidebar={<FileExplorer />} editor={<EditorPanel />} aiPanel={<AiPanel />} />
       <SettingsSheet />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ToastViewport />
       <DevPanelToggle open={showDevPanel} onToggle={() => setShowDevPanel((v) => !v)} />
       {showDevPanel ? <DevPanel /> : null}

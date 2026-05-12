@@ -31,6 +31,13 @@ export const COMMAND = {
   AiRegenerate: 'ai/regenerate',
   HelpDocs: 'help/docs',
   HelpGithub: 'help/github',
+  /**
+   * Open the renderer-side command palette (`Cmd/Ctrl+K`). Not
+   * routed through the native menu — Tauri's menu API has no
+   * predefined "command palette" item and we want the shortcut
+   * captured even when the menu bar lost focus.
+   */
+  PaletteOpen: 'palette/open',
 } as const;
 
 export type CommandId = (typeof COMMAND)[keyof typeof COMMAND];

@@ -212,6 +212,29 @@ export function AiPanel() {
     [project, activeProvider, setGeneration, upsertArtifact],
   );
 
+  // Command palette generation bridge — palette dispatches a window
+  // event with the desired artifact type rather than fanning through
+  // the bus (the bus is per-id and we'd need five literals). One
+  // listener routes any of the five generator types into the same
+  // `handleGenerate` the on-screen buttons invoke.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      const known: ReadonlyArray<GenerationArtifactType> = [
+        'context-md',
+        'test-plan',
+        'test-cases',
+        'defect-report',
+        'bug-report',
+      ];
+      if (known.includes(detail as GenerationArtifactType)) {
+        handleGenerate(detail as GenerationArtifactType);
+      }
+    };
+    window.addEventListener('palette:generate', handler);
+    return () => window.removeEventListener('palette:generate', handler);
+  }, [handleGenerate]);
+
   // Regenerate-last command: re-runs `handleGenerate` against the
   // most recent artifact type chosen via the button grid. Silently
   // no-ops on the very first session before any generator has been
