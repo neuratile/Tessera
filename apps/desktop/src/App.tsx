@@ -10,6 +10,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { SettingsSheet } from '@/components/settings/settings-sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ToastViewport } from '@/components/ui/toast-viewport';
 import { useAppMenuEvents } from '@/lib/app-menu';
 import { COMMAND, useCommand } from '@/lib/command-bus';
 import { useGlobalShortcuts } from '@/lib/global-shortcuts';
@@ -89,6 +90,7 @@ export function App() {
     <>
       <AppShell sidebar={<FileExplorer />} editor={<EditorPanel />} aiPanel={<AiPanel />} />
       <SettingsSheet />
+      <ToastViewport />
       <DevPanelToggle open={showDevPanel} onToggle={() => setShowDevPanel((v) => !v)} />
       {showDevPanel ? <DevPanel /> : null}
     </>

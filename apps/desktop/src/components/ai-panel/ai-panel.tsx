@@ -7,6 +7,7 @@ import {
   FileText,
   Loader2,
   RefreshCw,
+  Search,
   XCircle,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -66,6 +67,19 @@ export function AiPanel() {
   const appendPartial = useAiStore((s) => s.appendPartial);
 
   const [openArtifact, setOpenArtifact] = useState<ArtifactSummary | null>(null);
+  const [queueFilter, setQueueFilter] = useState('');
+
+  // Case-insensitive substring match across title + artifact-type +
+  // model. Empty query → full queue. Memoised so we don't re-scan on
+  // every render of the streaming preview / partial buffer.
+  const filteredQueue = useMemo(() => {
+    const needle = queueFilter.trim().toLowerCase();
+    if (needle.length === 0) return reviewQueue;
+    return reviewQueue.filter((a) => {
+      const hay = `${a.title} ${a.artifactType} ${a.model}`.toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [reviewQueue, queueFilter]);
 
   // Subscribe to streaming events on mount. Backend emits on every
   // `generate_artifact` invocation; the listener filters via the
@@ -330,9 +344,26 @@ export function AiPanel() {
             Review Queue
           </p>
           <span className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {reviewQueue.length} {reviewQueue.length === 1 ? 'item' : 'items'}
+            {filteredQueue.length}
+            {queueFilter.length > 0 ? ` / ${reviewQueue.length}` : ''}{' '}
+            {reviewQueue.length === 1 ? 'item' : 'items'}
           </span>
         </div>
+
+        {reviewQueue.length > 0 ? (
+          <div className="relative mb-2">
+            <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
+            <input
+              type="search"
+              value={queueFilter}
+              onChange={(e) => setQueueFilter(e.target.value)}
+              placeholder="Filter artifacts…"
+              aria-label="Filter review queue"
+              className="bg-background border-border placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/40 h-7 w-full rounded-md border pl-7 pr-2 font-mono text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2"
+            />
+          </div>
+        ) : null}
+
         {artifactsError !== null ? (
           <p className="text-destructive text-xs" role="alert">
             {artifactsError}
@@ -344,9 +375,13 @@ export function AiPanel() {
           <p className="text-muted-foreground text-xs">
             No artifacts yet. Pick a generator above.
           </p>
+        ) : filteredQueue.length === 0 ? (
+          <p className="text-muted-foreground text-xs">
+            No artifacts match <code className="font-mono">{queueFilter}</code>.
+          </p>
         ) : (
           <ul className="space-y-2">
-            {reviewQueue.map((a) => (
+            {filteredQueue.map((a) => (
               <ArtifactRow
                 key={a.id}
                 artifact={a}

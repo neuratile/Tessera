@@ -1,11 +1,12 @@
 import type { Project } from '@testing-ide/shared';
-import { Check, Clock, FolderOpen, Loader2, Settings, X } from 'lucide-react';
+import { Clock, FolderOpen, Loader2, Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { COMMAND, useCommand } from '@/lib/command-bus';
 import { analysis as analysisIpc, filesystem, IpcError, projects } from '@/lib/ipc';
 import { useEditorStore } from '@/stores/editor-store';
+import { toast } from '@/stores/toast-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -122,11 +123,10 @@ export function Toolbar() {
 
   const isAnalyzing = analysisState.status === 'pending';
 
-  // Transient toast next to the Analyze button so terminal-state
-  // changes are visible to users who don't watch the bottom status
-  // bar. Auto-dismisses after 6 s. Re-fires on every transition out
-  // of `pending`, including back-to-back analyses.
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // Push analysis terminal-state into the global toast stack so the
+  // bottom-right viewport renders it consistently with every other
+  // notification source. Re-fires on every transition out of
+  // `pending`, including back-to-back analyses.
   const lastStatusRef = useRef(analysisState.status);
   useEffect(() => {
     const previous = lastStatusRef.current;
@@ -134,19 +134,14 @@ export function Toolbar() {
     if (previous !== 'pending') return;
     if (analysisState.status === 'ready') {
       const o = analysisState.outcome;
-      setToast({
-        kind: 'ok',
-        text: `Indexed ${o.chunksEmbedded} chunks · ${o.filesParsed}/${o.filesDiscovered} files`,
-      });
+      toast.ok(
+        `Indexed ${o.chunksEmbedded} chunks · ${o.filesParsed}/${o.filesDiscovered} files`,
+        { title: 'Analyze complete' },
+      );
     } else if (analysisState.status === 'error') {
-      setToast({ kind: 'err', text: analysisState.message });
+      toast.err(analysisState.message, { title: 'Analyze failed' });
     }
   }, [analysisState]);
-  useEffect(() => {
-    if (toast === null) return;
-    const handle = window.setTimeout(() => setToast(null), 6000);
-    return () => window.clearTimeout(handle);
-  }, [toast]);
 
   return (
     <header className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-card px-3">
@@ -193,20 +188,6 @@ export function Toolbar() {
           {isAnalyzing ? <Loader2 className="size-4 animate-spin" /> : null}
           {isAnalyzing ? 'Analyzing…' : 'Analyze'}
         </Button>
-        {toast !== null ? (
-          <span
-            role="status"
-            className={`ml-1 flex max-w-[260px] items-center gap-1 truncate rounded-md px-2 py-1 text-xs ${
-              toast.kind === 'ok'
-                ? 'bg-success/10 text-success'
-                : 'bg-destructive/10 text-destructive'
-            }`}
-            title={toast.text}
-          >
-            {toast.kind === 'ok' ? <Check className="size-3.5 shrink-0" /> : <X className="size-3.5 shrink-0" />}
-            <span className="truncate">{toast.text}</span>
-          </span>
-        ) : null}
         <Button
           type="button"
           size="icon"
