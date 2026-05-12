@@ -1,6 +1,6 @@
 import type { Project } from '@testing-ide/shared';
 import { Clock, FolderOpen, Loader2, Settings } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { COMMAND, useCommand } from '@/lib/command-bus';
@@ -257,6 +257,62 @@ function RecentProjectsButton({
     });
   };
 
+  // Keyboard nav for the listbox — arrow keys move the highlight,
+  // Enter selects, Escape closes. Highlight is reset to 0 when the
+  // list refreshes so an upstream delete cannot leave it pointing
+  // past the end of the array.
+  const [highlight, setHighlight] = useState(0);
+  useEffect(() => {
+    setHighlight(0);
+  }, [list]);
+
+  const select = useCallback(
+    (project: Project) => {
+      onSelect(project);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+
+  const onListKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const items = list ?? [];
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setHighlight((h) => Math.min(items.length - 1, h + 1));
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setHighlight((h) => Math.max(0, h - 1));
+        return;
+      }
+      if (event.key === 'Home') {
+        event.preventDefault();
+        setHighlight(0);
+        return;
+      }
+      if (event.key === 'End') {
+        event.preventDefault();
+        setHighlight(Math.max(0, items.length - 1));
+        return;
+      }
+      if (event.key === 'Enter') {
+        const target = items[highlight];
+        if (target !== undefined) {
+          event.preventDefault();
+          select(target);
+        }
+      }
+    },
+    [list, highlight, select],
+  );
+
   return (
     <div ref={containerRef} className="relative">
       <Button
@@ -271,7 +327,16 @@ function RecentProjectsButton({
         Recent
       </Button>
       {open ? (
-        <div className="bg-card absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-md border border-border shadow-lg">
+        <div
+          className="bg-card absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-md border border-border shadow-lg outline-none"
+          tabIndex={-1}
+          onKeyDown={onListKeyDown}
+          // Focus the popover on first render so Arrow / Enter / Esc
+          // are captured without the user clicking inside first.
+          ref={(node) => {
+            if (node !== null && open) node.focus();
+          }}
+        >
           <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
             <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
               Recent projects
@@ -298,34 +363,37 @@ function RecentProjectsButton({
                 None yet. Open a folder to start.
               </p>
             ) : (
-              <ul role="listbox">
-                {list.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={activeId === p.id}
-                      onClick={() => {
-                        onSelect(p);
-                        setOpen(false);
-                      }}
-                      className={`hover:bg-muted/50 flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition-colors ${
-                        activeId === p.id ? 'bg-muted/30' : ''
-                      }`}
-                    >
-                      <span className="truncate font-medium">{p.name}</span>
-                      <span
-                        className="text-muted-foreground truncate text-[10px]"
-                        title={p.rootPath}
+              <ul role="listbox" aria-label="Recent projects">
+                {list.map((p, index) => {
+                  const isHighlighted = index === highlight;
+                  return (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={activeId === p.id}
+                        onMouseMove={() => {
+                          if (!isHighlighted) setHighlight(index);
+                        }}
+                        onClick={() => select(p)}
+                        className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition-colors ${
+                          isHighlighted ? 'bg-primary/10 text-primary' : ''
+                        } ${activeId === p.id && !isHighlighted ? 'bg-muted/30' : ''}`}
                       >
-                        {p.rootPath}
-                      </span>
-                      <span className="text-muted-foreground text-[10px]">
-                        {p.fileCount} files · {p.status}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                        <span className="truncate font-medium">{p.name}</span>
+                        <span
+                          className="text-muted-foreground truncate text-[10px]"
+                          title={p.rootPath}
+                        >
+                          {p.rootPath}
+                        </span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {p.fileCount} files · {p.status}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

@@ -22,6 +22,7 @@ import {
   providers,
   streaming,
 } from '@/lib/ipc';
+import { extractStreamingPreview } from '@/lib/partial-json';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -59,6 +60,7 @@ export function AiPanel() {
   const artifactsError = useAiStore((s) => s.artifactsError);
   const activeProvider = useAiStore((s) => s.activeProvider);
   const setActiveProvider = useAiStore((s) => s.setActiveProvider);
+  const setProviders = useAiStore((s) => s.setProviders);
   const setGeneration = useAiStore((s) => s.setGeneration);
   const setArtifacts = useAiStore((s) => s.setArtifacts);
   const upsertArtifact = useAiStore((s) => s.upsertArtifact);
@@ -110,23 +112,29 @@ export function AiPanel() {
 
   // Pull the active provider config the first time the panel renders
   // and after a project loads. The generation panel cannot run without
-  // one, so we surface a clear message when none is configured.
+  // one, so we surface a clear message when none is configured. The
+  // full list is also cached on the store so the status-bar provider
+  // switcher can render it without re-fetching on every render.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const list = await providers.listProviderConfigs();
         if (cancelled) return;
+        setProviders(list);
         const active = list.find((c) => c.isActive) ?? list[0] ?? null;
         setActiveProvider(active);
       } catch {
-        if (!cancelled) setActiveProvider(null);
+        if (!cancelled) {
+          setProviders([]);
+          setActiveProvider(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [setActiveProvider]);
+  }, [setActiveProvider, setProviders]);
 
   // Refresh the review queue whenever the project changes.
   const refreshArtifacts = useCallback(() => {
@@ -349,9 +357,7 @@ export function AiPanel() {
               Generating {generationStatus.artifactType}…
             </p>
             {generationStatus.partial.length > 0 ? (
-              <pre className="bg-muted text-muted-foreground max-h-32 overflow-y-auto rounded p-2 font-mono text-[10px] leading-snug">
-                {trimPartialPreview(generationStatus.partial)}
-              </pre>
+              <StreamingPreview buffer={generationStatus.partial} />
             ) : null}
           </div>
         ) : generationStatus.status === 'error' ? (
@@ -509,6 +515,35 @@ function trimPartialPreview(buffer: string): string {
   const MAX = 800;
   if (buffer.length <= MAX) return buffer;
   return `…${buffer.slice(-MAX)}`;
+}
+
+/**
+ * Streaming preview block. Tries to extract a human-readable
+ * "preview" field from the partial tool-call JSON (`summary`,
+ * `description`, `title`, etc. — see
+ * `lib/partial-json::PREVIEW_KEYS`) and renders it as prose with a
+ * blinking caret. Falls back to the trailing raw-JSON tail when no
+ * preview key has streamed in yet, so the user always sees motion
+ * rather than a frozen "Generating…" line.
+ */
+function StreamingPreview({ buffer }: { buffer: string }) {
+  const prose = useMemo(() => extractStreamingPreview(buffer), [buffer]);
+  if (prose !== null && prose.length > 0) {
+    return (
+      <div className="bg-muted text-foreground max-h-32 overflow-y-auto rounded p-2 text-[11px] leading-snug">
+        <p className="text-muted-foreground mb-1 text-[9px] font-semibold uppercase tracking-[0.1em]">
+          Live preview
+        </p>
+        <span className="whitespace-pre-wrap break-words">{prose}</span>
+        <span aria-hidden="true" className="bg-primary ml-0.5 inline-block h-3 w-1 animate-pulse" />
+      </div>
+    );
+  }
+  return (
+    <pre className="bg-muted text-muted-foreground max-h-32 overflow-y-auto rounded p-2 font-mono text-[10px] leading-snug">
+      {trimPartialPreview(buffer)}
+    </pre>
+  );
 }
 
 function StatusBadge({ status }: { status: ArtifactSummary['status'] }) {

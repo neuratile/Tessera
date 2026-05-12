@@ -33,6 +33,10 @@ export type AiState = {
   artifacts: ArtifactSummary[];
   loadingArtifacts: boolean;
   artifactsError: string | null;
+  /** All configured providers, populated on first AI-panel mount and
+   *  on every provider mutation (save / delete / set-active). Read by
+   *  the status-bar provider switcher and AI panel itself. */
+  providers: ProviderConfigView[];
   /** Active provider chosen by the user. `null` means "first active row
    *  from `list_provider_configs`". */
   activeProvider: ProviderConfigView | null;
@@ -46,6 +50,7 @@ export type AiState = {
   upsertArtifact: (artifact: ArtifactSummary) => void;
   setLoadingArtifacts: (loading: boolean) => void;
   setArtifactsError: (error: string | null) => void;
+  setProviders: (providers: ProviderConfigView[]) => void;
   setActiveProvider: (provider: ProviderConfigView | null) => void;
   reset: () => void;
 };
@@ -55,6 +60,7 @@ export const useAiStore = create<AiState>()((set) => ({
   artifacts: [],
   loadingArtifacts: false,
   artifactsError: null,
+  providers: [],
   activeProvider: null,
 
   setGeneration: (generation) => set({ generation }),
@@ -82,6 +88,7 @@ export const useAiStore = create<AiState>()((set) => ({
     }),
   setLoadingArtifacts: (loadingArtifacts) => set({ loadingArtifacts }),
   setArtifactsError: (artifactsError) => set({ artifactsError, loadingArtifacts: false }),
+  setProviders: (providers) => set({ providers }),
   setActiveProvider: (activeProvider) => set({ activeProvider }),
   reset: () =>
     set({
