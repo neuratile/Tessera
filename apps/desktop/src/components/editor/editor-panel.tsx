@@ -116,15 +116,32 @@ export function EditorPanel() {
 
   function TabStrip() {
     return (
-      <div className="bg-muted/30 flex shrink-0 overflow-x-auto border-b border-border">
+      // Tab strip uses ARIA tablist semantics so the close button
+      // can sit inside each tab as a real `<button>`. Outer is a
+      // `<div role="tab">` (not a `<button>`) because nesting two
+      // `<button>` elements is invalid HTML — the parent button
+      // would swallow `Enter` events the close button should own.
+      <div
+        role="tablist"
+        aria-label="Open files"
+        className="bg-muted/30 flex shrink-0 overflow-x-auto border-b border-border"
+      >
         {tabs.map((tab) => {
           const isActive = tab.id === activeId;
           return (
-            <button
+            <div
               key={tab.id}
-              type="button"
+              role="tab"
+              tabIndex={isActive ? 0 : -1}
+              aria-selected={isActive}
               onClick={() => setActive(tab.id)}
-              className={`group flex min-w-fit max-w-[220px] cursor-pointer items-center gap-2 border-r border-border px-3 py-1.5 text-xs transition-colors ${
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setActive(tab.id);
+                }
+              }}
+              className={`group flex min-w-fit max-w-[220px] cursor-pointer items-center gap-2 border-r border-border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
                 isActive
                   ? 'border-t-primary bg-background text-foreground border-t-2'
                   : 'text-muted-foreground hover:bg-muted/50 border-t-2 border-t-transparent'
@@ -132,12 +149,20 @@ export function EditorPanel() {
               title={tab.relativePath}
             >
               <span className="truncate">{tab.name}</span>
-              <span
-                role="button"
+              <button
+                type="button"
                 aria-label={`Close ${tab.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(tab.id);
+                }}
+                onKeyDown={(e) => {
+                  // Stop the parent tab's Enter / Space handler from
+                  // re-activating the tab when the user closes it
+                  // via the keyboard.
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.stopPropagation();
+                  }
                 }}
                 className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-0.5"
               >
@@ -146,8 +171,8 @@ export function EditorPanel() {
                 ) : (
                   <X className="size-3" />
                 )}
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>

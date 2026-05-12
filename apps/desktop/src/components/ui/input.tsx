@@ -9,7 +9,12 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(({ className, type,
     <input
       type={type}
       className={cn(
-        'border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none focus-visible:ring-1 disabled:cursor-not-allowed disabled:opacity-50',
+        // Compact density — h-8 matches the desktop button default
+        // and Stitch's row-height-standard token. Drops the legacy
+        // shadow + bumps focus-ring contrast so the field reads
+        // clearly on the dark `bg-card` surfaces that host the
+        // settings / wizard / drawer forms.
+        'border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-primary/40 focus-visible:border-primary flex h-8 w-full rounded-md border px-2.5 py-1 text-xs transition-colors file:border-0 file:bg-transparent file:text-xs file:font-medium focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       ref={ref}

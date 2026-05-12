@@ -127,9 +127,9 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<FsEntry>) {
           node.select();
         }
       }}
-      className={`group flex cursor-pointer select-none items-center gap-1.5 px-2 font-mono text-[11px] transition-colors hover:bg-muted/60 ${
+      className={`group relative flex cursor-pointer select-none items-center gap-1.5 px-2 font-mono text-[11px] transition-colors hover:bg-muted/60 ${
         isSelected
-          ? 'bg-primary/10 text-primary border-l-2 border-primary -ml-[2px] pl-[6px]'
+          ? 'bg-primary/10 text-primary before:bg-primary before:absolute before:inset-y-0 before:left-0 before:w-0.5'
           : 'text-foreground'
       }`}
     >

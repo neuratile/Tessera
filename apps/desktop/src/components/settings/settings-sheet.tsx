@@ -6,7 +6,9 @@ import { Check, Loader2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useDialogTitleId } from '@/lib/dialog-title';
 import { IpcError, providers } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -138,22 +140,12 @@ export function SettingsSheet() {
   const requiresKey =
     PROVIDER_OPTIONS.find((p) => p.id === provider)?.requiresKey ?? false;
 
-  if (!open) return null;
+  const titleId = useDialogTitleId();
 
   return (
-    <>
-      <div
-        className="bg-background/80 fixed inset-0 z-40 backdrop-blur-sm"
-        onClick={() => setOpen(false)}
-        aria-hidden="true"
-      />
-      <aside
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-card shadow-2xl"
-        role="dialog"
-        aria-label="Settings"
-      >
-        <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-4">
-          <h2 className="flex items-center gap-2">
+    <Dialog open={open} onClose={() => setOpen(false)} labelledBy={titleId}>
+      <header className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-card px-4">
+          <h2 id={titleId} className="flex items-center gap-2">
             <span className="font-brand text-primary text-sm">tessera</span>
             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground">
               Settings
@@ -341,7 +333,6 @@ export function SettingsSheet() {
             </div>
           </section>
         </div>
-      </aside>
-    </>
+    </Dialog>
   );
 }

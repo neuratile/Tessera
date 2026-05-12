@@ -149,7 +149,7 @@ export function Toolbar() {
   }, [toast]);
 
   return (
-    <header className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-card px-3">
+    <header className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-card px-3">
       <div className="flex min-w-0 items-center gap-2.5">
         <img
           src="/tessera-logo.png"
@@ -198,7 +198,7 @@ export function Toolbar() {
             role="status"
             className={`ml-1 flex max-w-[260px] items-center gap-1 truncate rounded-md px-2 py-1 text-xs ${
               toast.kind === 'ok'
-                ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                ? 'bg-success/10 text-success'
                 : 'bg-destructive/10 text-destructive'
             }`}
             title={toast.text}

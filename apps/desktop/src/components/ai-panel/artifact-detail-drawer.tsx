@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { MarkdownView } from '@/components/markdown/markdown-view';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
+import { useDialogTitleId } from '@/lib/dialog-title';
 import { exportMarkdownDocument } from '@/lib/export-markdown';
 import { artifacts as artifactsIpc, generation, IpcError } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
@@ -153,20 +155,11 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
 
   const isPending =
     detail?.status === 'draft' || detail?.status === 'in_review' || detail === null;
+  const titleId = useDialogTitleId();
 
   return (
-    <>
-      <div
-        className="bg-background/80 fixed inset-0 z-40 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <aside
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l border-border bg-card shadow-2xl"
-        role="dialog"
-        aria-label={`Review ${summary.title}`}
-      >
-        <header className="flex items-start justify-between gap-2 border-b border-border bg-card px-4 py-3">
+    <Dialog open onClose={onClose} labelledBy={titleId} widthClass="max-w-2xl">
+      <header className="flex items-start justify-between gap-2 border-b border-border bg-card px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
@@ -177,6 +170,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               </span>
             </div>
             <h2
+              id={titleId}
               className="mt-1 truncate font-mono text-sm font-semibold text-foreground"
               title={summary.title}
             >
@@ -288,7 +282,6 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
           ) : null}
           {exportStatus !== null ? <p className="text-muted-foreground text-[10px]">{exportStatus}</p> : null}
         </footer>
-      </aside>
-    </>
+    </Dialog>
   );
 }
