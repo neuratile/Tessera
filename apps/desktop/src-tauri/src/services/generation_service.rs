@@ -190,16 +190,38 @@ pub async fn generate(
     };
     let aggregated = drive_stream(deps.llm.as_ref(), llm_request, on_event.as_mut()).await?;
 
-    if aggregated.tool_args.trim().is_empty() {
+    // 5. Parse the structured payload. Preferred path is the tool
+    // call; fall back to salvaging a JSON object from free text when
+    // the model ignored the `tools` field (common with small Ollama
+    // models). When both are empty, surface a clear "swap to a
+    // tool-capable model" error instead of an opaque "0 chars".
+    let raw_json = if !aggregated.tool_args.trim().is_empty() {
+        aggregated.tool_args.clone()
+    } else if let Some(salvaged) = salvage_json_from_text(&aggregated.text) {
+        tracing::warn!(
+            model = %request.model,
+            text_len = aggregated.text_len,
+            "model emitted JSON as free text instead of invoking the tool — salvaging"
+        );
+        salvaged
+    } else if aggregated.text_len == 0 {
         return Err(AppError::InvalidInput(format!(
-            "model did not invoke `{}` — got {} chars of free text instead",
-            tool_schema.name, aggregated.text_len
+            "model `{}` returned an empty response. Tool calling may not be \
+             supported by this model — try `qwen2.5-coder:7b`, `qwen2.5:14b`, \
+             or a cloud model like `gpt-4o-mini` / `claude-3-5-sonnet`.",
+            request.model
         )));
-    }
+    } else {
+        let preview: String = aggregated.text.chars().take(200).collect();
+        return Err(AppError::InvalidInput(format!(
+            "model `{}` did not invoke `{}` and emitted {} chars of free text \
+             that does not contain a JSON object. Preview: {}",
+            request.model, tool_schema.name, aggregated.text_len, preview
+        )));
+    };
 
-    // 5. Parse + validate against the JSON Schema.
     let structured_data: JsonValue =
-        serde_json::from_str(&aggregated.tool_args).map_err(AppError::Serde)?;
+        serde_json::from_str(&raw_json).map_err(AppError::Serde)?;
     validate_tool_output(&tool_schema, &structured_data)?;
     let input_tokens = aggregated.input_tokens;
     let output_tokens = aggregated.output_tokens;
@@ -247,6 +269,12 @@ pub async fn generate(
 /// inside the clippy `too_many_lines` budget.
 struct StreamAggregate {
     tool_args: String,
+    /// Accumulated free-text response. Most prompts force a tool
+    /// call, so this is normally empty — but small / non-tool-trained
+    /// models (e.g. `gemma:2b`, `llama3.2:1b`) ignore the `tools`
+    /// field and emit a JSON object as plain text. The salvage path
+    /// in [`generate`] tries to parse this as JSON before failing.
+    text: String,
     text_len: usize,
     input_tokens: u32,
     output_tokens: u32,
@@ -258,6 +286,7 @@ async fn drive_stream(
     mut sink: Option<&mut StreamSink>,
 ) -> AppResult<StreamAggregate> {
     let mut tool_args = String::new();
+    let mut text = String::new();
     let mut text_len: usize = 0;
     let mut input_tokens = 0_u32;
     let mut output_tokens = 0_u32;
@@ -265,10 +294,11 @@ async fn drive_stream(
     let mut stream = llm.stream(request);
     while let Some(item) = stream.next().await {
         match item? {
-            LlmChunk::TextDelta(text) => {
-                text_len = text_len.saturating_add(text.len());
+            LlmChunk::TextDelta(delta) => {
+                text_len = text_len.saturating_add(delta.len());
+                text.push_str(&delta);
                 if let Some(s) = sink.as_deref_mut() {
-                    s(StreamEvent::Text(text));
+                    s(StreamEvent::Text(delta));
                 }
             }
             LlmChunk::ToolCallStart { .. } => {}
@@ -296,10 +326,51 @@ async fn drive_stream(
 
     Ok(StreamAggregate {
         tool_args,
+        text,
         text_len,
         input_tokens,
         output_tokens,
     })
+}
+
+/// Try to extract a JSON object from a raw text response. Small
+/// models often ignore the `tools` field and emit the JSON as plain
+/// text — sometimes wrapped in a ```json fence, sometimes prefixed
+/// with prose, sometimes with a trailing comment. This salvage path
+/// finds the outermost balanced `{...}` and returns it for downstream
+/// schema validation.
+fn salvage_json_from_text(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    // Locate first `{` that begins a balanced object — many models
+    // wrap the JSON in markdown fences or chatty preamble.
+    let start = bytes.iter().position(|&b| b == b'{')?;
+    let mut depth = 0_i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(text[start..=i].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 async fn retrieve_chunks(
@@ -907,5 +978,50 @@ mod tests {
         let v = serde_json::json!({ "summary": "ok" });
         let err = validate_tool_output(&schema, &v).expect_err("must reject");
         assert_eq!(err.code(), "INVALID_INPUT");
+    }
+
+    #[test]
+    fn salvage_json_returns_none_for_empty_text() {
+        assert!(salvage_json_from_text("").is_none());
+        assert!(salvage_json_from_text("no braces here").is_none());
+    }
+
+    #[test]
+    fn salvage_json_extracts_bare_object() {
+        let text = "{\"summary\":\"hello\"}";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\"summary\":\"hello\"}"),
+        );
+    }
+
+    #[test]
+    fn salvage_json_strips_markdown_fence_and_prose() {
+        let text = "Here is the test plan:\n```json\n{\"summary\":\"ok\",\"goals\":[]}\n```\nAll done.";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\"summary\":\"ok\",\"goals\":[]}"),
+        );
+    }
+
+    #[test]
+    fn salvage_json_handles_braces_inside_strings() {
+        // The naive depth counter would close after the `}` in the
+        // string. The state machine ignores braces inside JSON
+        // strings, so we get the full object back.
+        let text = "{\"note\":\"contains } brace\",\"k\":\"v\"}";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\"note\":\"contains } brace\",\"k\":\"v\"}"),
+        );
+    }
+
+    #[test]
+    fn salvage_json_handles_nested_objects() {
+        let text = "preamble {\"outer\":{\"inner\":{\"deep\":1}}} trailing";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\"outer\":{\"inner\":{\"deep\":1}}}"),
+        );
     }
 }
