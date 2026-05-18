@@ -335,10 +335,10 @@ async fn drive_stream(
 
 /// Try to extract a JSON object from a raw text response. Small
 /// models often ignore the `tools` field and emit the JSON as plain
-/// text — sometimes wrapped in a ```json fence, sometimes prefixed
-/// with prose, sometimes with a trailing comment. This salvage path
-/// finds the outermost balanced `{...}` and returns it for downstream
-/// schema validation.
+/// text — sometimes wrapped in a `json` fenced code block, sometimes
+/// prefixed with prose, sometimes with a trailing comment. This
+/// salvage path finds the outermost balanced `{...}` and returns it
+/// for downstream schema validation.
 fn salvage_json_from_text(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     // Locate first `{` that begins a balanced object — many models

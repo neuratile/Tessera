@@ -18,7 +18,7 @@
 //!    / Linux). We add `File / Edit / View / AI / Help` on top of
 //!    that so the bar is consistent.
 //!  - Edit + View pick up the predefined OS bindings (Cut, Copy,
-//!    Paste, Select-All, Reload, Toggle DevTools) so the user gets
+//!    Paste, Select-All, Reload, Toggle `DevTools`) so the user gets
 //!    the muscle-memory shortcuts for free without us managing
 //!    accelerators on three platforms.
 
