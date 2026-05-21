@@ -558,27 +558,14 @@ fn estimate_prompt_tokens(messages: &[Message]) -> u32 {
 /// `"type": "array"`, and inserts `[]` when the model left them out.
 /// Non-array or already-present fields are never touched.
 pub(crate) fn normalize_missing_arrays(data: &mut JsonValue, tool: &ToolSchema) {
-    let obj = match data.as_object_mut() {
-        Some(o) => o,
-        None => return,
-    };
-    let schema_obj = match tool.parameters_schema.as_object() {
-        Some(o) => o,
-        None => return,
-    };
-    let required = match schema_obj.get("required").and_then(|v| v.as_array()) {
-        Some(r) => r,
-        None => return,
-    };
-    let properties = match schema_obj.get("properties").and_then(|v| v.as_object()) {
-        Some(p) => p,
-        None => return,
+    let Some(obj) = data.as_object_mut() else { return };
+    let Some(schema_obj) = tool.parameters_schema.as_object() else { return };
+    let Some(required) = schema_obj.get("required").and_then(|v| v.as_array()) else { return };
+    let Some(properties) = schema_obj.get("properties").and_then(|v| v.as_object()) else {
+        return;
     };
     for key_val in required {
-        let key = match key_val.as_str() {
-            Some(k) => k,
-            None => continue,
-        };
+        let Some(key) = key_val.as_str() else { continue };
         if obj.contains_key(key) {
             continue;
         }
