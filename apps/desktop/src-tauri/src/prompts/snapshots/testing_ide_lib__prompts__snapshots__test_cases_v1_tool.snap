@@ -31,7 +31,6 @@ properties:
           items:
             minLength: 1
             type: string
-          minItems: 1
           type: array
         title:
           maxLength: 200
@@ -50,7 +49,6 @@ properties:
         - steps
         - expectedResult
       type: object
-    minItems: 1
     type: array
 required:
   - cases

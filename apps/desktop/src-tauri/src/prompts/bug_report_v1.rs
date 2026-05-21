@@ -74,8 +74,7 @@ pub fn tool() -> ToolSchema {
             "properties": {
                 "bugs": {
                     "type": "array",
-                    "minItems": 1,
-                    "items": {
+                                        "items": {
                         "type": "object",
                         "additionalProperties": false,
                         "required": [
@@ -101,8 +100,7 @@ pub fn tool() -> ToolSchema {
                             },
                             "steps_to_reproduce": {
                                 "type": "array",
-                                "minItems": 1,
-                                "items": { "type": "string", "minLength": 1 }
+                                                                "items": { "type": "string", "minLength": 1 }
                             },
                             "expected_behavior": { "type": "string", "minLength": 1 },
                             "actual_behavior": { "type": "string", "minLength": 1 },

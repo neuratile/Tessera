@@ -83,12 +83,10 @@ pub fn tool() -> ToolSchema {
                 "summary": { "type": "string", "minLength": 1, "maxLength": 1500 },
                 "objectives": {
                     "type": "array",
-                    "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
                 "scopeIn": {
                     "type": "array",
-                    "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
                 "scopeOut": {

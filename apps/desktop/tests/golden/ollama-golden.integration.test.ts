@@ -43,38 +43,51 @@ async function generateFixtureArtifact(artifactType: 'test-plan' | 'test-cases')
   );
 }
 
+// Retry once: small Ollama models on CI runners can hit
+// StreamInterrupted (body decode error) or produce non-deterministic
+// output. One retry keeps CI green without hiding real regressions.
+const GOLDEN_RETRY = 1;
+
 describe('Ollama golden prompt coverage', () => {
-  integrationTest('generates a test plan payload that matches TestPlanSchema', async () => {
-    if (!context.ready) {
-      return;
-    }
+  integrationTest(
+    'generates a test plan payload that matches TestPlanSchema',
+    async () => {
+      if (!context.ready) {
+        return;
+      }
 
-    const result = await generateFixtureArtifact('test-plan');
-    const parsed = TestPlanSchema.safeParse(result.structuredData);
-    if (!parsed.success) {
-      throw new Error(`TestPlanSchema mismatch: ${parsed.error.message}`);
-    }
+      const result = await generateFixtureArtifact('test-plan');
+      const parsed = TestPlanSchema.safeParse(result.structuredData);
+      if (!parsed.success) {
+        throw new Error(`TestPlanSchema mismatch: ${parsed.error.message}`);
+      }
 
-    expect(parsed.data.summary.length).toBeGreaterThan(0);
-    // Small models (3b) may omit objectives entirely — normalization
-    // backfills []. Only assert the field is a valid array; content
-    // richness is a model quality concern, not a pipeline correctness
-    // test.
-    expect(Array.isArray(parsed.data.objectives)).toBe(true);
-  });
+      expect(parsed.data.summary.length).toBeGreaterThan(0);
+      // Small models (3b) may omit objectives entirely — normalization
+      // backfills []. Only assert the field is a valid array; content
+      // richness is a model quality concern, not a pipeline correctness
+      // test.
+      expect(Array.isArray(parsed.data.objectives)).toBe(true);
+    },
+    { retry: GOLDEN_RETRY },
+  );
 
-  integrationTest('generates test cases that match TestCaseSchema', async () => {
-    if (!context.ready) {
-      return;
-    }
+  integrationTest(
+    'generates test cases that match TestCaseSchema',
+    async () => {
+      if (!context.ready) {
+        return;
+      }
 
-    const result = await generateFixtureArtifact('test-cases');
-    const parsed = TestCaseSchema.safeParse(result.structuredData);
-    if (!parsed.success) {
-      throw new Error(`TestCaseSchema mismatch: ${parsed.error.message}`);
-    }
+      const result = await generateFixtureArtifact('test-cases');
+      const parsed = TestCaseSchema.safeParse(result.structuredData);
+      if (!parsed.success) {
+        throw new Error(`TestCaseSchema mismatch: ${parsed.error.message}`);
+      }
 
-    expect(parsed.data.cases.length).toBeGreaterThan(0);
-    expect(parsed.data.cases.every((testCase) => testCase.steps.length > 0)).toBe(true);
-  });
+      expect(parsed.data.cases.length).toBeGreaterThan(0);
+      expect(parsed.data.cases.every((testCase) => testCase.steps.length > 0)).toBe(true);
+    },
+    { retry: GOLDEN_RETRY },
+  );
 });

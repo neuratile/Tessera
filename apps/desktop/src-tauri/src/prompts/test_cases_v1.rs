@@ -73,8 +73,7 @@ pub fn tool() -> ToolSchema {
             "properties": {
                 "cases": {
                     "type": "array",
-                    "minItems": 1,
-                    "items": {
+                                        "items": {
                         "type": "object",
                         "additionalProperties": false,
                         "required": [
@@ -98,8 +97,7 @@ pub fn tool() -> ToolSchema {
                             },
                             "steps": {
                                 "type": "array",
-                                "minItems": 1,
-                                "items": { "type": "string", "minLength": 1 }
+                                                                "items": { "type": "string", "minLength": 1 }
                             },
                             "expectedResult": { "type": "string", "minLength": 1 },
                             "traceability": {

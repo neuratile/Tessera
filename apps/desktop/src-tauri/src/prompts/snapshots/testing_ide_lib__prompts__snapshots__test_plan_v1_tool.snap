@@ -23,7 +23,6 @@ properties:
     items:
       minLength: 1
       type: string
-    minItems: 1
     type: array
   risks:
     items:
@@ -43,7 +42,6 @@ properties:
     items:
       minLength: 1
       type: string
-    minItems: 1
     type: array
   scopeOut:
     items:

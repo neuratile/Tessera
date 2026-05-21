@@ -91,7 +91,6 @@ pub fn tool() -> ToolSchema {
                 "key_modules": {
                     "type": "array",
                     "description": "Top 3-10 modules / files that drive the system's behavior.",
-                    "minItems": 1,
                     "maxItems": 20,
                     "items": {
                         "type": "object",

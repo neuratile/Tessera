@@ -56,7 +56,6 @@ properties:
           items:
             minLength: 1
             type: string
-          minItems: 1
           type: array
         title:
           maxLength: 200
@@ -71,7 +70,6 @@ properties:
         - actual_behavior
         - root_cause
       type: object
-    minItems: 1
     type: array
 required:
   - bugs
