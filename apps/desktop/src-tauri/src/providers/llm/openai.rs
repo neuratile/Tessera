@@ -62,7 +62,14 @@ impl OpenAiProvider {
             });
         }
 
-        let mut auth_value = HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|_| {
+        // Build the header value from raw bytes rather than via
+        // `format!("Bearer {api_key}")` so the key never lands in a
+        // formatter buffer. `set_sensitive(true)` is called before the
+        // value can be observed by any logging path.
+        let mut header_bytes = Vec::with_capacity(7 + api_key.len());
+        header_bytes.extend_from_slice(b"Bearer ");
+        header_bytes.extend_from_slice(api_key.as_bytes());
+        let mut auth_value = HeaderValue::from_bytes(&header_bytes).map_err(|_| {
             LlmError::AuthFailed {
                 provider: PROVIDER_NAME,
                 message: "API key contains invalid characters for an HTTP header".into(),

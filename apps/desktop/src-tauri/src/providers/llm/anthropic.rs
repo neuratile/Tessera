@@ -196,6 +196,17 @@ impl LlmProvider for AnthropicProvider {
                     }
                 }
             }
+
+            // Drain any complete-but-unterminated event left in the buffer
+            // when the server closes the connection without a final
+            // `\n\n`. Without this the last `message_stop` (and thus the
+            // `Chunk::Done`) can be silently dropped.
+            let trailing = buffer.trim();
+            if !trailing.is_empty() {
+                for chunk in parse_sse_event(trailing, &mut state)? {
+                    yield chunk;
+                }
+            }
         };
 
         Box::pin(s)
@@ -268,8 +279,22 @@ fn message_to_anthropic(msg: &Message) -> serde_json::Value {
                 content_blocks.push(serde_json::json!({"type": "text", "text": text}));
             }
             super::types::Content::ToolUse { id, name, args } => {
-                let parsed_args: serde_json::Value =
-                    serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+                // If the previously-captured streaming args do not parse,
+                // fall back to an empty object rather than `null`. Many
+                // Anthropic tool schemas reject `null` for `input` and
+                // would 400 the whole follow-up call; an empty object
+                // lets the model see the tool was invoked and re-issue
+                // arguments in the next turn.
+                let parsed_args: serde_json::Value = serde_json::from_str(args)
+                    .unwrap_or_else(|err| {
+                        tracing::warn!(
+                            tool_id = %id,
+                            tool_name = %name,
+                            error = %err,
+                            "tool_use args failed to parse as JSON; substituting empty object"
+                        );
+                        serde_json::json!({})
+                    });
                 content_blocks.push(serde_json::json!({
                     "type": "tool_use",
                     "id": id,
@@ -453,6 +478,26 @@ fn translate_event(event: AnthropicEvent, state: &mut AnthropicStreamState) -> V
                             json_fragment: partial_json,
                         });
                     }
+                } else if !partial_json.is_empty() {
+                    tracing::warn!(
+                        index = index,
+                        "InputJsonDelta arrived for unknown content_block index; synthesizing tool id"
+                    );
+                    // Synthesize an id so downstream aggregators can still
+                    // collect the fragment instead of silently dropping
+                    // it. The aggregator buffers by id, so a stable
+                    // per-index synthetic id keeps subsequent deltas in
+                    // the same bucket.
+                    let synthetic_id = format!("orphan_tool_{index}");
+                    state.tool_ids.insert(index, synthetic_id.clone());
+                    out.push(Chunk::ToolCallStart {
+                        id: synthetic_id.clone(),
+                        name: String::new(),
+                    });
+                    out.push(Chunk::ToolCallArgsDelta {
+                        id: synthetic_id,
+                        json_fragment: partial_json,
+                    });
                 }
             }
             AnthropicDelta::Unknown => {}

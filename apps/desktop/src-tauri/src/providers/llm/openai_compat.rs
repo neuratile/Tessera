@@ -91,6 +91,17 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
                 }
             }
         }
+
+        // The connection closed. Some servers omit the trailing `\n\n`
+        // on the last event, leaving a complete-but-unterminated payload
+        // in the buffer. Parse it so callers do not silently lose the
+        // final delta or `[DONE]` sentinel.
+        let trailing = buffer.trim();
+        if !trailing.is_empty() {
+            for chunk in parse_sse_event(provider, trailing)? {
+                yield chunk;
+            }
+        }
     };
 
     Box::pin(s)

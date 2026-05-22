@@ -54,8 +54,12 @@ pub async fn create_project(
 }
 
 #[tauri::command]
-pub async fn list_projects(pool: State<'_, SqlitePool>) -> Result<Vec<ProjectResponse>, String> {
-    project_service::list_projects(&pool)
+pub async fn list_projects(
+    pool: State<'_, SqlitePool>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<ProjectResponse>, String> {
+    project_service::list_projects(&pool, limit, offset)
         .await
         .map(|v| v.into_iter().map(ProjectResponse::from).collect())
         .map_err(|e| e.to_string())

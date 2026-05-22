@@ -42,11 +42,23 @@ pub async fn register(
 ) -> AppResult<TokenPair> {
     validate_register(dto)?;
     let email = canonical_email(&dto.email)?;
+
+    // Always compute an Argon2 hash so the request path's wall-clock
+    // cost does not betray whether the email already existed. Without
+    // this, a remote attacker can enumerate registered emails by
+    // comparing response timings (cheap fast-fail when the email is
+    // taken vs slow Argon2 hash when it is free).
+    let password_hash = auth::hash_password(&dto.password)?;
+
     if user_repo::email_exists(pool, &email).await? {
-        return Err(AppError::InvalidInput("email already registered".into()));
+        // Generic message — do not distinguish "already registered"
+        // from validation failures emitted by `validate_register`.
+        // The frontend treats `INVALID_INPUT` uniformly.
+        return Err(AppError::InvalidInput(
+            "could not create account with the provided credentials".into(),
+        ));
     }
 
-    let password_hash = auth::hash_password(&dto.password)?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let name_trimmed = dto.name.as_ref().map(|n| n.trim().to_string());

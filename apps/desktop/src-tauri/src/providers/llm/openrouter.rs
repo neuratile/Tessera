@@ -99,7 +99,13 @@ impl OpenRouterProvider {
             });
         }
 
-        let mut auth_value = HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|_| {
+        // Build the header from raw bytes rather than via `format!` so
+        // the API key never traverses a formatter buffer. Marked
+        // sensitive immediately so any HTTP debug logging redacts it.
+        let mut header_bytes = Vec::with_capacity(7 + api_key.len());
+        header_bytes.extend_from_slice(b"Bearer ");
+        header_bytes.extend_from_slice(api_key.as_bytes());
+        let mut auth_value = HeaderValue::from_bytes(&header_bytes).map_err(|_| {
             LlmError::AuthFailed {
                 provider: PROVIDER_NAME,
                 message: "API key contains invalid characters for an HTTP header".into(),

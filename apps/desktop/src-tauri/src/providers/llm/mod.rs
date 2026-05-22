@@ -92,6 +92,20 @@ pub trait LlmProvider: Send + Sync {
                         .find(|(slot_id, _, _)| slot_id == &id)
                     {
                         slot.2.push_str(&json_fragment);
+                    } else {
+                        // No prior `ToolCallStart` carried this id. Some
+                        // OpenAI-compat providers split tool-call name and
+                        // arguments across chunks where the name is only
+                        // present in the first chunk; if a later chunk
+                        // arrives with a different (synthetic) id, the
+                        // args would otherwise be silently dropped. Create
+                        // a slot with an empty name so the aggregator
+                        // still captures the JSON fragment.
+                        tracing::warn!(
+                            tool_id = %id,
+                            "ToolCallArgsDelta arrived without matching ToolCallStart; creating placeholder slot"
+                        );
+                        tool_buffers.push((id, String::new(), json_fragment));
                     }
                 }
                 Chunk::Done {

@@ -194,32 +194,54 @@ pub async fn insert(pool: &SqlitePool, row: ArtifactInsert) -> AppResult<String>
     let structured_text = serde_json::to_string(&row.structured_data)?;
     let metadata_text = serde_json::to_string(&row.generation_metadata)?;
 
-    let next_version = match row.parent_id.as_deref() {
-        Some(parent) => max_version_in_chain(pool, parent).await? + 1,
-        None => 1,
-    };
+    // Acquire a single connection and run BEGIN IMMEDIATE so the
+    // version-lookup SELECT and the INSERT share one SQLite write
+    // lock. Without this, two concurrent inserts on the same
+    // parent_id chain race and both assign version = N+1, violating
+    // the (parent_id, version) lineage uniqueness invariant.
+    let mut conn = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
 
-    sqlx::query(
-        "INSERT INTO artifacts \
-         (id, project_id, artifact_type, title, content_md, structured_data, \
-          generation_metadata, status, version, parent_id, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(&row.project_id)
-    .bind(row.artifact_type.as_str())
-    .bind(&row.title)
-    .bind(&row.content_md)
-    .bind(&structured_text)
-    .bind(&metadata_text)
-    .bind(next_version)
-    .bind(row.parent_id.as_deref())
-    .bind(&now)
-    .bind(&now)
-    .execute(pool)
-    .await?;
+    let inner = async {
+        let next_version = match row.parent_id.as_deref() {
+            Some(parent) => max_version_in_chain(&mut *conn, parent).await? + 1,
+            None => 1,
+        };
 
-    Ok(id)
+        sqlx::query(
+            "INSERT INTO artifacts \
+             (id, project_id, artifact_type, title, content_md, structured_data, \
+              generation_metadata, status, version, parent_id, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(&row.project_id)
+        .bind(row.artifact_type.as_str())
+        .bind(&row.title)
+        .bind(&row.content_md)
+        .bind(&structured_text)
+        .bind(&metadata_text)
+        .bind(next_version)
+        .bind(row.parent_id.as_deref())
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut *conn)
+        .await?;
+
+        Ok::<(), AppError>(())
+    }
+    .await;
+
+    match inner {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(id)
+        }
+        Err(e) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(e)
+        }
+    }
 }
 
 /// Fetch a single artifact by id, decoding the JSON columns.
@@ -251,13 +273,21 @@ pub async fn fetch(pool: &SqlitePool, id: &str) -> AppResult<Artifact> {
 ///
 /// Returns [`AppError::Database`] for SQLx-level failures and
 /// [`AppError::Serde`] for any row whose JSON columns fail to decode.
-pub async fn list_for_project(pool: &SqlitePool, project_id: &str) -> AppResult<Vec<Artifact>> {
+pub async fn list_for_project(
+    pool: &SqlitePool,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<Artifact>> {
     let rows: Vec<ArtifactRow> = sqlx::query_as(
         "SELECT id, project_id, artifact_type, title, content_md, structured_data, \
                 generation_metadata, status, version, parent_id, created_at, updated_at \
-         FROM artifacts WHERE project_id = ? ORDER BY created_at DESC",
+         FROM artifacts WHERE project_id = ? ORDER BY created_at DESC \
+         LIMIT ? OFFSET ?",
     )
     .bind(project_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -358,7 +388,10 @@ pub async fn list_version_chain(
         .collect()
 }
 
-async fn max_version_in_chain(pool: &SqlitePool, parent_id: &str) -> AppResult<i64> {
+async fn max_version_in_chain<'e, E>(executor: E, parent_id: &str) -> AppResult<i64>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     // Walk up to the root by following parent_id, then take the max
     // version across the whole chain. Bounded depth in practice; the
     // recursive CTE keeps it to one round-trip.
@@ -376,9 +409,14 @@ async fn max_version_in_chain(pool: &SqlitePool, parent_id: &str) -> AppResult<i
          SELECT MAX(version) FROM artifacts WHERE id IN (SELECT id FROM roots)",
     )
     .bind(parent_id)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
-    Ok(row.0.unwrap_or(0))
+    // NULL here means the recursive walk hit no rows — caller passed
+    // a parent_id that does not exist. Surface as NotFound instead of
+    // silently treating the lineage as empty (which would produce a
+    // colliding version=1 on the next insert).
+    row.0
+        .ok_or_else(|| AppError::NotFound(format!("artifact {parent_id}")))
 }
 
 /// Internal row shape for sqlx decoding. Strings stay strings here;
@@ -583,7 +621,7 @@ mod tests {
         second.title = "second".into();
         let id2 = insert(&pool, second).await.expect("second");
 
-        let list = list_for_project(&pool, "p1").await.expect("list");
+        let list = list_for_project(&pool, "p1", 100, 0).await.expect("list");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, id2);
         assert_eq!(list[1].id, id1);

@@ -1,4 +1,4 @@
--- Migration 0002 — Phase 4 compatibility contract.
+-- Migration 0003 — Phase 4 compatibility contract.
 --
 -- Keeps the existing richer schema intact while adding compatibility
 -- columns requested by the phase checklist / API contracts:
