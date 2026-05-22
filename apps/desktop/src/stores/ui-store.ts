@@ -35,7 +35,7 @@ function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen'> {
     const parsed: unknown = JSON.parse(raw);
     const sizes =
       typeof parsed === 'object' && parsed !== null && 'panelSizes' in parsed
-        ? (parsed as { panelSizes: unknown }).panelSizes
+        ? parsed.panelSizes
         : null;
     return {
       panelSizes: isPanelSizes(sizes) ? sizes : DEFAULT_PANEL_SIZES,
