@@ -81,7 +81,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
-          releaseName: 'Testing IDE ${{ github.ref_name }}'
+          releaseName: 'Tessera ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install.'
           releaseDraft: true
           prerelease: false
