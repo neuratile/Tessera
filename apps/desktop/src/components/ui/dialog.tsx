@@ -64,7 +64,8 @@ export function Dialog({
   // dialog opened. Avoids a confusing keyboard state after closing.
   useEffect(() => {
     if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const active = document.activeElement;
+    const previouslyFocused = active instanceof HTMLElement ? active : null;
     // Move focus into the dialog on mount so screen readers
     // announce its content immediately. We don't auto-focus the
     // first input on purpose — the user may have opened the dialog

@@ -108,13 +108,21 @@ pub async fn fetch(pool: &SqlitePool, id: &str) -> AppResult<Project> {
         .and_then(decode_row)
 }
 
-pub async fn list_for_user(pool: &SqlitePool, user_id: &str) -> AppResult<Vec<Project>> {
+pub async fn list_for_user(
+    pool: &SqlitePool,
+    user_id: &str,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<Project>> {
     let rows: Vec<ProjectRow> = sqlx::query_as(
         "SELECT id, user_id, name, root_path, file_count, total_size_bytes, \
                 status, language_breakdown, created_at, updated_at \
-         FROM projects WHERE user_id = ? ORDER BY created_at DESC",
+         FROM projects WHERE user_id = ? ORDER BY created_at DESC \
+         LIMIT ? OFFSET ?",
     )
     .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -347,7 +355,9 @@ mod tests {
         .await
         .expect("second");
 
-        let list = list_for_user(&pool, DEFAULT_USER_ID).await.expect("list");
+        let list = list_for_user(&pool, DEFAULT_USER_ID, 100, 0)
+            .await
+            .expect("list");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].name, "second");
         assert_eq!(list[1].name, "first");

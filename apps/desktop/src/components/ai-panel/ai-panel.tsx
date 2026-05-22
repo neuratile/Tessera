@@ -226,17 +226,20 @@ export function AiPanel() {
   // listener routes any of the five generator types into the same
   // `handleGenerate` the on-screen buttons invoke.
   useEffect(() => {
+    const known: ReadonlyArray<GenerationArtifactType> = [
+      'context-md',
+      'test-plan',
+      'test-cases',
+      'defect-report',
+      'bug-report',
+    ];
+    const isGenerationArtifactType = (v: unknown): v is GenerationArtifactType =>
+      typeof v === 'string' && (known as ReadonlyArray<string>).includes(v);
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail;
-      const known: ReadonlyArray<GenerationArtifactType> = [
-        'context-md',
-        'test-plan',
-        'test-cases',
-        'defect-report',
-        'bug-report',
-      ];
-      if (known.includes(detail as GenerationArtifactType)) {
-        handleGenerate(detail as GenerationArtifactType);
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (isGenerationArtifactType(detail)) {
+        handleGenerate(detail);
       }
     };
     window.addEventListener('palette:generate', handler);

@@ -64,8 +64,10 @@ pub async fn save_provider_config(
 #[tauri::command]
 pub async fn list_provider_configs(
     pool: State<'_, SqlitePool>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<ProviderConfigView>, String> {
-    provider_config_service::list_configs(&pool)
+    provider_config_service::list_configs(&pool, limit, offset)
         .await
         .map_err(|e| e.to_string())
 }
@@ -132,10 +134,20 @@ struct OllamaTagsEntry {
 /// List the locally pulled Ollama models. Returns an error when the
 /// daemon is unreachable; the UI uses presence/absence of the chosen
 /// model to decide whether to surface an `ollama pull <model>` hint.
+///
+/// `base_url` falls back to the configured `AppConfig::ollama_base_url`
+/// when omitted. This avoids the previous behavior of silently routing
+/// to `http://localhost:11434` even when the user had configured a
+/// remote daemon.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-pub async fn list_ollama_models(base_url: Option<String>) -> Result<Vec<OllamaModel>, String> {
-    let base = base_url.as_deref().unwrap_or("http://localhost:11434");
+pub async fn list_ollama_models(
+    cfg: State<'_, AppConfig>,
+    base_url: Option<String>,
+) -> Result<Vec<OllamaModel>, String> {
+    let base = base_url
+        .as_deref()
+        .unwrap_or(cfg.ollama_base_url.as_str());
     let url = format!("{}/api/tags", base.trim_end_matches('/'));
 
     let client = reqwest::Client::builder()

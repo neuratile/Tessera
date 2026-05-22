@@ -111,7 +111,7 @@ async fn run_pipeline(
 
     for f in &report.files {
         let abs_path = root.join(&f.relative_path);
-        let content = std::fs::read(&abs_path).unwrap_or_default();
+        let content = tokio::fs::read(&abs_path).await.unwrap_or_default();
         let hash = format!("{:x}", Sha256::digest(&content));
 
         let lang_str = match f.language {
@@ -141,7 +141,10 @@ async fn run_pipeline(
     let mut files_parsed: usize = 0;
     let mut all_chunk_inserts = Vec::new();
 
-    for (idx, discovered) in report.files.iter().enumerate() {
+    // Zip discovered files with their assigned ids so the file_id
+    // lookup stays in sync even when we skip non-source/non-test
+    // files mid-loop.
+    for (discovered, file_id) in report.files.iter().zip(file_ids.iter()) {
         if discovered.file_type != FileType::Source && discovered.file_type != FileType::Test {
             continue;
         }
@@ -150,7 +153,7 @@ async fn run_pipeline(
         }
 
         let abs_path = root.join(&discovered.relative_path);
-        let source = match std::fs::read_to_string(&abs_path) {
+        let source = match tokio::fs::read_to_string(&abs_path).await {
             Ok(s) => s,
             Err(e) => {
                 warn!(path = %discovered.relative_path, error = %e, "skip non-utf8 file");
@@ -168,7 +171,6 @@ async fn run_pipeline(
         files_parsed += 1;
 
         let chunks = chunking_service::chunk_source(&source, &parsed);
-        let file_id = &file_ids[idx];
 
         for chunk in chunks {
             all_chunk_inserts.push((project_id.to_string(), file_id.clone(), chunk));

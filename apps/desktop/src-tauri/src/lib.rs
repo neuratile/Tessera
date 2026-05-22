@@ -87,6 +87,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::init_db,
+            commands::frontend_log,
             // Auth commands (Phase 6)
             commands::auth::register,
             commands::auth::login,

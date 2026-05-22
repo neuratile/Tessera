@@ -146,7 +146,12 @@ pub async fn insert_batch(pool: &SqlitePool, inserts: Vec<ChunkInsert>) -> AppRe
         .bind(&insert.chunk.content)
         .bind(i64::from(insert.chunk.start_line))
         .bind(i64::from(insert.chunk.end_line))
-        .bind(i64::try_from(insert.chunk.token_count).unwrap_or(i64::MAX))
+        .bind(i64::try_from(insert.chunk.token_count).map_err(|_| {
+            AppError::InvalidInput(format!(
+                "chunk token_count {} exceeds i64::MAX",
+                insert.chunk.token_count
+            ))
+        })?)
         .bind(&blob)
         .bind(i64::from(insert.embedding_dim))
         .bind(&insert.embedding_provider)
@@ -211,32 +216,47 @@ pub async fn search_similar(
         return Ok(Vec::new());
     }
 
-    let mut hits: Vec<ChunkHit> = rows
-        .into_iter()
-        .filter_map(
-            |(id, file_id, chunk_type, name, content, start_line, end_line, token_count, blob)| {
-                let embedding = decode_embedding(&blob, embedding_dim)?;
-                let v_norm = vector_norm(&embedding);
-                if v_norm == 0.0 {
-                    return None;
-                }
-                let dot = dot_product(query_embedding, &embedding);
-                let similarity = dot / (q_norm * v_norm);
-                let kind = str_to_chunk_kind(&chunk_type)?;
-                Some(ChunkHit {
-                    id,
-                    file_id,
-                    kind,
-                    name: name.unwrap_or_default(),
-                    start_line: u32::try_from(start_line).unwrap_or(0),
-                    end_line: u32::try_from(end_line).unwrap_or(0),
-                    content,
-                    token_count: u32::try_from(token_count).unwrap_or(0),
-                    similarity,
-                })
-            },
-        )
-        .collect();
+    let mut hits: Vec<ChunkHit> = Vec::new();
+    for (id, file_id, chunk_type, name, content, start_line, end_line, token_count, blob) in rows {
+        let Some(embedding) = decode_embedding(&blob, embedding_dim) else {
+            continue;
+        };
+        let v_norm = vector_norm(&embedding);
+        if v_norm == 0.0 {
+            continue;
+        }
+        let dot = dot_product(query_embedding, &embedding);
+        let similarity = dot / (q_norm * v_norm);
+        let Some(kind) = str_to_chunk_kind(&chunk_type) else {
+            continue;
+        };
+        let start_line_u32 = u32::try_from(start_line).map_err(|_| {
+            AppError::Database(sqlx::Error::Decode(
+                format!("chunk {id} has out-of-range start_line {start_line}").into(),
+            ))
+        })?;
+        let end_line_u32 = u32::try_from(end_line).map_err(|_| {
+            AppError::Database(sqlx::Error::Decode(
+                format!("chunk {id} has out-of-range end_line {end_line}").into(),
+            ))
+        })?;
+        let token_count_u32 = u32::try_from(token_count).map_err(|_| {
+            AppError::Database(sqlx::Error::Decode(
+                format!("chunk {id} has out-of-range token_count {token_count}").into(),
+            ))
+        })?;
+        hits.push(ChunkHit {
+            id,
+            file_id,
+            kind,
+            name: name.unwrap_or_default(),
+            start_line: start_line_u32,
+            end_line: end_line_u32,
+            content,
+            token_count: token_count_u32,
+            similarity,
+        });
+    }
 
     // Higher similarity first.
     hits.sort_by(|a, b| {

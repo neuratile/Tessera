@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useEffect } from 'react';
 
 import { dispatchCommand, isCommandId } from './command-bus';
+import { logToBackend } from './ipc/system';
 
 /**
  * Bridge from the native menu bar to the renderer's command bus.
@@ -26,11 +27,17 @@ export function useAppMenuEvents(): void {
       const id = event.payload;
       if (isCommandId(id)) {
         dispatchCommand(id);
-      } else {
-        // Unknown id from Rust — log so a renaming mismatch surfaces
-        // during development instead of silently dropping clicks.
-        console.warn(`[app:menu] unknown command id: ${String(id)}`);
+        return;
       }
+      // Forward unknown ids to the Rust tracing subscriber so a rename
+      // mismatch between menu.rs and command-bus.ts surfaces during
+      // development without violating the "no console.log in frontend"
+      // rule.
+      void logToBackend(
+        'warn',
+        'app-menu',
+        `unknown command id from native menu: ${String(id)}`,
+      );
     })
       .then((u) => {
         if (cancelled) {
@@ -39,8 +46,12 @@ export function useAppMenuEvents(): void {
           unlisten = u;
         }
       })
-      .catch((error: unknown) => {
-        console.warn('[app:menu] failed to install listener:', error);
+      .catch((err: unknown) => {
+        // A failure here leaves the native menu wired but inert — every
+        // click silently does nothing. Surface to Rust-side tracing so
+        // the failure is at least visible in logs / Sentry.
+        const message = err instanceof Error ? err.message : String(err);
+        void logToBackend('error', 'app-menu', `listen('app:menu') failed: ${message}`);
       });
 
     return () => {

@@ -73,9 +73,23 @@ pub async fn save_config(
     .await
 }
 
+/// Default page size for the configs list. Provider configs are
+/// few-per-user in practice (one per LLM provider) but the cap keeps
+/// the IPC payload bounded.
+pub const DEFAULT_PAGE_LIMIT: i64 = 100;
+/// Hard cap on caller-supplied page sizes.
+pub const MAX_PAGE_LIMIT: i64 = 1_000;
+
 /// List all provider configs for the local user (keys masked).
-pub async fn list_configs(pool: &SqlitePool) -> AppResult<Vec<ProviderConfigView>> {
-    let rows = provider_config_repo::list_for_user(pool, DEFAULT_USER_ID).await?;
+pub async fn list_configs(
+    pool: &SqlitePool,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> AppResult<Vec<ProviderConfigView>> {
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+    let offset = offset.unwrap_or(0).max(0);
+    let rows =
+        provider_config_repo::list_for_user(pool, DEFAULT_USER_ID, limit, offset).await?;
     Ok(rows
         .into_iter()
         .map(|r| ProviderConfigView {
@@ -211,7 +225,7 @@ mod tests {
         .await
         .expect("save");
 
-        let list = list_configs(&pool).await.expect("list");
+        let list = list_configs(&pool, None, None).await.expect("list");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].provider, "openai");
         assert!(list[0].has_api_key);

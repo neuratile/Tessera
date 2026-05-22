@@ -132,13 +132,21 @@ pub async fn fetch_for_user_provider(
     Ok(row.map(decode_row))
 }
 
-pub async fn list_for_user(pool: &SqlitePool, user_id: &str) -> AppResult<Vec<ProviderConfigRow>> {
+pub async fn list_for_user(
+    pool: &SqlitePool,
+    user_id: &str,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<ProviderConfigRow>> {
     let rows: Vec<RawRow> = sqlx::query_as(
         "SELECT id, user_id, provider, api_key_encrypted, api_key_nonce, \
                 base_url, default_model, is_active, created_at, updated_at \
-         FROM user_provider_configs WHERE user_id = ? ORDER BY provider ASC",
+         FROM user_provider_configs WHERE user_id = ? ORDER BY provider ASC \
+         LIMIT ? OFFSET ?",
     )
     .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -313,7 +321,9 @@ mod tests {
         .await
         .expect("anthropic");
 
-        let list = list_for_user(&pool, DEFAULT_USER_ID).await.expect("list");
+        let list = list_for_user(&pool, DEFAULT_USER_ID, 100, 0)
+            .await
+            .expect("list");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].provider, "anthropic");
         assert_eq!(list[1].provider, "openai");

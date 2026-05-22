@@ -29,15 +29,12 @@ if (!container) {
  */
 function isTauriRuntime(): boolean {
   if (typeof window === 'undefined') return false;
-  const w = window as unknown as {
-    __TAURI_INTERNALS__?: unknown;
-    __TAURI__?: unknown;
-    __TESTING_IDE_E2E__?: unknown;
-  };
+  const hasOwn = (key: string): boolean =>
+    Reflect.get(window, key) !== undefined;
   return (
-    w.__TAURI_INTERNALS__ !== undefined ||
-    w.__TAURI__ !== undefined ||
-    w.__TESTING_IDE_E2E__ !== undefined
+    hasOwn('__TAURI_INTERNALS__') ||
+    hasOwn('__TAURI__') ||
+    hasOwn('__TESTING_IDE_E2E__')
   );
 }
 

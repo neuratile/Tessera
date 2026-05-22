@@ -193,17 +193,37 @@ pub async fn insert(pool: &SqlitePool, row: ArtifactInsert) -> AppResult<String>
     let now = Utc::now().to_rfc3339();
     let structured_text = serde_json::to_string(&row.structured_data)?;
     let metadata_text = serde_json::to_string(&row.generation_metadata)?;
+    let parent = row.parent_id.as_deref();
 
-    let next_version = match row.parent_id.as_deref() {
-        Some(parent) => max_version_in_chain(pool, parent).await? + 1,
-        None => 1,
-    };
-
-    sqlx::query(
+    // Single INSERT ... SELECT statement so version computation and the
+    // write happen atomically under SQLite's per-statement write lock —
+    // no explicit transaction, no BEGIN IMMEDIATE, no manual ROLLBACK.
+    // This is cancellation-safe: if the awaiting future is dropped
+    // (e.g. Tauri IPC timeout, window close) the connection returns to
+    // the pool with no lingering transaction state because no
+    // transaction was ever opened.
+    //
+    // The trailing `WHERE ? IS NULL OR EXISTS(...)` guards against the
+    // caller supplying a parent_id that does not exist; SQLite returns
+    // rows_affected = 0 in that case and the caller surface NotFound.
+    let result = sqlx::query(
         "INSERT INTO artifacts \
          (id, project_id, artifact_type, title, content_md, structured_data, \
           generation_metadata, status, version, parent_id, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)",
+         SELECT ?, ?, ?, ?, ?, ?, ?, 'draft', \
+                CASE WHEN ? IS NULL THEN 1 \
+                     ELSE COALESCE(( \
+                       WITH RECURSIVE chain(id) AS ( \
+                         SELECT id FROM artifacts WHERE id = ? \
+                         UNION \
+                         SELECT a.id FROM artifacts a JOIN chain c ON a.parent_id = c.id \
+                       ) \
+                       SELECT MAX(version) FROM artifacts WHERE id IN (SELECT id FROM chain) \
+                     ), 0) + 1 \
+                END, \
+                ?, ?, ? \
+         FROM (SELECT 1) AS dummy \
+         WHERE ? IS NULL OR EXISTS (SELECT 1 FROM artifacts WHERE id = ?)",
     )
     .bind(&id)
     .bind(&row.project_id)
@@ -212,13 +232,20 @@ pub async fn insert(pool: &SqlitePool, row: ArtifactInsert) -> AppResult<String>
     .bind(&row.content_md)
     .bind(&structured_text)
     .bind(&metadata_text)
-    .bind(next_version)
-    .bind(row.parent_id.as_deref())
+    .bind(parent) // CASE WHEN ? IS NULL
+    .bind(parent) // recursive CTE seed
+    .bind(parent) // parent_id column
     .bind(&now)
     .bind(&now)
+    .bind(parent) // WHERE outer
+    .bind(parent) // EXISTS check
     .execute(pool)
     .await?;
 
+    if result.rows_affected() == 0 {
+        let missing = parent.unwrap_or("<unknown>");
+        return Err(AppError::NotFound(format!("artifact {missing}")));
+    }
     Ok(id)
 }
 
@@ -251,13 +278,21 @@ pub async fn fetch(pool: &SqlitePool, id: &str) -> AppResult<Artifact> {
 ///
 /// Returns [`AppError::Database`] for SQLx-level failures and
 /// [`AppError::Serde`] for any row whose JSON columns fail to decode.
-pub async fn list_for_project(pool: &SqlitePool, project_id: &str) -> AppResult<Vec<Artifact>> {
+pub async fn list_for_project(
+    pool: &SqlitePool,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> AppResult<Vec<Artifact>> {
     let rows: Vec<ArtifactRow> = sqlx::query_as(
         "SELECT id, project_id, artifact_type, title, content_md, structured_data, \
                 generation_metadata, status, version, parent_id, created_at, updated_at \
-         FROM artifacts WHERE project_id = ? ORDER BY created_at DESC",
+         FROM artifacts WHERE project_id = ? ORDER BY created_at DESC \
+         LIMIT ? OFFSET ?",
     )
     .bind(project_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -356,29 +391,6 @@ pub async fn list_version_chain(
             })
         })
         .collect()
-}
-
-async fn max_version_in_chain(pool: &SqlitePool, parent_id: &str) -> AppResult<i64> {
-    // Walk up to the root by following parent_id, then take the max
-    // version across the whole chain. Bounded depth in practice; the
-    // recursive CTE keeps it to one round-trip.
-    let row: (Option<i64>,) = sqlx::query_as(
-        "WITH RECURSIVE chain(id) AS ( \
-             SELECT id FROM artifacts WHERE id = ? \
-             UNION \
-             SELECT a.id FROM artifacts a JOIN chain c ON a.parent_id = c.id \
-         ), \
-         roots AS ( \
-             SELECT id FROM chain UNION SELECT parent_id AS id \
-             FROM artifacts WHERE id IN (SELECT id FROM chain) \
-                AND parent_id IS NOT NULL \
-         ) \
-         SELECT MAX(version) FROM artifacts WHERE id IN (SELECT id FROM roots)",
-    )
-    .bind(parent_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(row.0.unwrap_or(0))
 }
 
 /// Internal row shape for sqlx decoding. Strings stay strings here;
@@ -583,7 +595,7 @@ mod tests {
         second.title = "second".into();
         let id2 = insert(&pool, second).await.expect("second");
 
-        let list = list_for_project(&pool, "p1").await.expect("list");
+        let list = list_for_project(&pool, "p1", 100, 0).await.expect("list");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, id2);
         assert_eq!(list[1].id, id1);

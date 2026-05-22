@@ -18,20 +18,27 @@ export type UiState = {
   setSettingsOpen: (open: boolean) => void;
 };
 
+function isPanelSizes(value: unknown): value is PanelSizes {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((s) => typeof s === 'number' && Number.isFinite(s))
+  );
+}
+
 function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen'> {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
       return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false };
     }
-    const parsed = JSON.parse(raw) as { panelSizes?: unknown; settingsOpen?: unknown };
-    const sizes = Array.isArray(parsed.panelSizes) ? parsed.panelSizes : null;
-    const valid =
-      sizes !== null &&
-      sizes.length === 3 &&
-      sizes.every((s) => typeof s === 'number' && Number.isFinite(s));
+    const parsed: unknown = JSON.parse(raw);
+    const sizes =
+      typeof parsed === 'object' && parsed !== null && 'panelSizes' in parsed
+        ? (parsed as { panelSizes: unknown }).panelSizes
+        : null;
     return {
-      panelSizes: valid ? (sizes as PanelSizes) : DEFAULT_PANEL_SIZES,
+      panelSizes: isPanelSizes(sizes) ? sizes : DEFAULT_PANEL_SIZES,
       settingsOpen: false,
     };
   } catch {

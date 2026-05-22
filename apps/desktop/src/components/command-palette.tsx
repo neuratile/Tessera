@@ -203,7 +203,8 @@ export function CommandPalette({ open, onClose }: Props) {
   // (Tauri windows lose focus quickly without this).
   useEffect(() => {
     if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const active = document.activeElement;
+    const previouslyFocused = active instanceof HTMLElement ? active : null;
     setQuery('');
     setHighlight(0);
     // Microtask defer so the input renders before we focus it.

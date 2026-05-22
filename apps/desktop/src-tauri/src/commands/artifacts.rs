@@ -93,13 +93,24 @@ impl From<Artifact> for ArtifactDetail {
     }
 }
 
+/// Default page size for the artifacts list endpoint. Keeps the IPC
+/// payload bounded so the renderer cannot pull thousands of artifacts
+/// (each carrying generation metadata) in a single round-trip.
+const DEFAULT_PAGE_LIMIT: i64 = 100;
+/// Hard cap on caller-supplied page sizes.
+const MAX_PAGE_LIMIT: i64 = 1_000;
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub async fn list_artifacts(
     pool: State<'_, SqlitePool>,
     project_id: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<ArtifactSummary>, String> {
-    artifact_repo::list_for_project(&pool, &project_id)
+    let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+    let offset = offset.unwrap_or(0).max(0);
+    artifact_repo::list_for_project(&pool, &project_id, limit, offset)
         .await
         .map(|v| v.into_iter().map(ArtifactSummary::from).collect())
         .map_err(|e| e.to_string())

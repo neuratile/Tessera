@@ -7,6 +7,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
+use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -62,8 +63,13 @@ impl CryptoKey {
     /// Returns `AppError::Internal` if AES-GCM encryption fails
     /// (should not happen with valid key + nonce).
     pub fn encrypt(&self, plaintext: &[u8]) -> AppResult<(Vec<u8>, Vec<u8>)> {
+        // OsRng pulls directly from the OS CSPRNG without the thread-local
+        // ReseedingRng layer used by `thread_rng()` — matches the source
+        // already used for Argon2 salts in `auth/password.rs` so all
+        // cryptographic randomness in this crate comes from the same
+        // documented entropy source.
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = self

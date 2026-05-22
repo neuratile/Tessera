@@ -59,6 +59,39 @@ pub fn greet(name: String) -> String {
     format!("Hello, {safe}! (from Testing IDE Rust backend)")
 }
 
+/// Upper bound on frontend-supplied log message length so a misbehaving
+/// renderer cannot flood the Rust-side tracing subscriber.
+const MAX_FRONTEND_LOG_CHARS: usize = 2_048;
+
+/// Bridge frontend warnings / errors into the Rust-side tracing
+/// subscriber. The renderer is forbidden from calling `console.*`
+/// (rules.md "no console.log in frontend") so this is the supported
+/// channel for surfacing browser-context failures (listener install
+/// errors, unexpected event payloads, etc.) into the structured log
+/// stream.
+///
+/// `level` accepts `"warn"` and `"error"`; any other value maps to
+/// `warn` so the renderer cannot silently downgrade.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn frontend_log(level: String, source: String, message: String) {
+    let safe_message: String = message.chars().take(MAX_FRONTEND_LOG_CHARS).collect();
+    let safe_source: String = source.chars().take(MAX_FRONTEND_LOG_CHARS).collect();
+    if level.as_str() == "error" {
+        tracing::error!(
+            source = %safe_source,
+            origin = "frontend",
+            "{safe_message}"
+        );
+    } else {
+        tracing::warn!(
+            source = %safe_source,
+            origin = "frontend",
+            "{safe_message}"
+        );
+    }
+}
+
 /// Confirms the database file location and that the managed pool can execute a query.
 ///
 /// The database file and migrations are applied during app

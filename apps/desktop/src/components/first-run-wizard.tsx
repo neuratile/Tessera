@@ -15,6 +15,32 @@ type Props = {
 
 type Step = 1 | 2 | 3 | 4;
 
+function previousStep(step: Step): Step {
+  switch (step) {
+    case 1:
+      return 1;
+    case 2:
+      return 1;
+    case 3:
+      return 2;
+    case 4:
+      return 3;
+  }
+}
+
+function nextStep(step: Step): Step {
+  switch (step) {
+    case 1:
+      return 2;
+    case 2:
+      return 3;
+    case 3:
+      return 4;
+    case 4:
+      return 4;
+  }
+}
+
 /**
  * Four-step onboarding flow shown the first time the desktop app launches.
  *
@@ -124,13 +150,13 @@ function Footer({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => setStep(Math.max(1, step - 1) as Step)}
+        onClick={() => setStep(previousStep(step))}
         disabled={step === 1}
       >
         Back
       </Button>
       {step < 4 ? (
-        <Button type="button" size="sm" onClick={() => setStep((step + 1) as Step)}>
+        <Button type="button" size="sm" onClick={() => setStep(nextStep(step))}>
           Continue
           <ArrowRight className="size-4" />
         </Button>
