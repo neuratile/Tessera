@@ -234,7 +234,16 @@ pub async fn insert(pool: &SqlitePool, row: ArtifactInsert) -> AppResult<String>
 
     match inner {
         Ok(()) => {
-            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            // If COMMIT itself fails, the BEGIN IMMEDIATE write lock
+            // is still held on this pooled connection. Without an
+            // explicit ROLLBACK the next caller to acquire this
+            // connection would observe an already-open transaction
+            // and either deadlock or see SQLite's "cannot start a
+            // transaction within a transaction" error.
+            if let Err(commit_err) = sqlx::query("COMMIT").execute(&mut *conn).await {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(AppError::Database(commit_err));
+            }
             Ok(id)
         }
         Err(e) => {
