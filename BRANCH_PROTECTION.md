@@ -108,21 +108,8 @@ If any of those four signals are missing, re-check the rule above.
 
 ---
 
-## 5. Local hooks (one-time per developer)
+## 5. Local hooks
 
-Every developer runs once after cloning:
-
-```bash
-pnpm install      # installs husky + wires .husky/* via the `prepare` script
-```
-
-That's it. From the next commit onward:
-
-- `git commit` runs `.husky/pre-commit` (conflict-marker scan, large-
-  file guard).
-- `git push` runs `.husky/pre-push` → `tools/scripts/pre-push.sh`
-  (typecheck + lint + tests + clippy when cargo is installed).
-
-Bypass with `--no-verify` only in genuine emergencies. Branch
-protection on master makes the bypass useless anyway — the PR will
-still be gated by CI.
+Per-developer hook setup is automatic on `pnpm install` and is a contributor
+concern, not an admin one — see [`CONTRIBUTING.md`](./CONTRIBUTING.md). Branch
+protection makes a `--no-verify` bypass useless anyway: the PR is still gated by CI.

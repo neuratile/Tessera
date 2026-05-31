@@ -213,8 +213,6 @@ service/command boundary. The existing
 - `rules.md` §5.2 (provider abstraction), §5.3 (typed errors),
   §12.1 (versioned prompts), §12.2 (streaming first-class),
   §13 (anti-pattern: SDK leaks)
-- `plan/initial-plan.md` — Provider Configuration UI section
-- `plan/tech-stack.md` — Approved providers
 - ADR-0001 — embedding storage (downstream consumer of
   `EmbeddingProvider`)
 - Future ADR-0002 — sqlite-vec vec0 migration trigger

@@ -71,7 +71,7 @@ packages/
 
 rules/rules.md       Canonical engineering rulebook (§1–12) — read before adding patterns
 docs/AGENT_WORKFLOW.md  PR/branch/CI contract
-plan/                Phase planning docs (project history)
+plan/                Roadmap (ROADMAP.md) + design docs for multi-day work
 ```
 
 ### Rust backend layering (commands → services → repositories → db)

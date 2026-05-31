@@ -287,18 +287,5 @@ The `auto-merge` label was missing or removed. Re-apply it.
 | Merge button greyed out                        | `BRANCH_PROTECTION.md` §1                  |
 | Auto-merge label exists but nothing happens    | `.github/workflows/auto-merge.yml`         |
 | Engineering / architecture decision            | `rules/rules.md`                           |
-| Phase plans / intent                           | `plan/`                                    |
+| Project context / architecture overview        | `CLAUDE.md`                                |
 | Setup instructions                             | `README.md`                                |
-
----
-
-## 8. Changelog of this workflow
-
-| Date       | Change                                                       |
-|------------|--------------------------------------------------------------|
-| 2026-05-08 | Initial version. Husky + lint-staged removed (lint-staged
-              left out — pnpm workspace had no clean root ESLint
-              install path, full `pnpm lint` runs in pre-push instead).
-              CODEOWNERS, PR template, auto-merge workflow,
-              `BRANCH_PROTECTION.md` admin runbook landed in the same
-              PR. |

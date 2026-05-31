@@ -16,7 +16,7 @@ vector used by RAG retrieval. Two design axes are in play:
 2. **Search algorithm** — sqlite-vec ANN index (HNSW-style) versus
    brute-force cosine over the candidate set.
 
-The `initial-plan.md` first-cut suggested `VECTOR(1024)`. Realities that
+The initial plan's first cut suggested `VECTOR(1024)`. Realities that
 forced a re-evaluation:
 
 - The provider abstraction (`rules.md` §5.2 + §12.2) covers four LLM
@@ -98,12 +98,11 @@ Concretely:
 2. **sqlite-vec `vec0` from day one**: deferred. Worth doing eventually,
    too much FFI-wiring risk for Phase 1 foundation.
 3. **External vector DB (Qdrant, Chroma)**: rejected. Conflicts with
-   `rules.md` §1.8 (local-first) and tech-stack.md (sqlite-vec embedded).
+   `rules.md` §1.8 (local-first) and the embedded `sqlite-vec` stack.
 
 ## References
 
 - `rules.md` §1.8 (local-first), §2.3 (migrations), §5.2 (provider
   abstraction), §12.3 (RAG / embeddings)
-- `plan/initial-plan.md` — RAG flow + embedding providers
 - `apps/desktop/src-tauri/migrations/0001_init.sql` — schema
 - `apps/desktop/src-tauri/src/db/mod.rs` — pool init, deferral note

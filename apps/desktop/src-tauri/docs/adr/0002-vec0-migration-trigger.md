@@ -200,7 +200,7 @@ brute-force cosine. The BLOB column is canonical — no data is lost.
 4. **HNSW via a third-party crate (`instant-distance`, etc.)** —
    rejected. Pulls a non-trivial dep tree, requires a separate
    on-disk format we'd have to keep in sync with the BLOB column,
-   and `sqlite-vec` is the documented happy path in tech-stack.md.
+   and `sqlite-vec` is the documented happy path.
 
 ## References
 

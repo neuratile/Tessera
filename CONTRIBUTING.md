@@ -1,109 +1,43 @@
 # Contributing
 
-Short rules. Read once. The full agent / contributor workflow lives
-in [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) — read that
-before opening a PR. Branch-protection setup lives in
-[`BRANCH_PROTECTION.md`](./BRANCH_PROTECTION.md) (admin only).
+Short version. The full change-management contract — hard rules, AI-agent
+guardrails, failure modes — lives in [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md);
+read it before opening a PR. Admin branch-protection setup is in
+[`BRANCH_PROTECTION.md`](./BRANCH_PROTECTION.md).
 
 ## One-time setup
 
 ```bash
 git clone https://github.com/Rajveerx11/Tessera.git tessera
 cd tessera
-corepack enable
-corepack pnpm install      # also installs Husky hooks via `prepare`
+corepack enable && corepack pnpm install   # also wires Husky hooks via `prepare`
 ```
 
-After this, `git commit` and `git push` automatically run the local
-guards — no manual hook install needed.
+After this, `git commit` and `git push` run the local guards automatically.
 
-## Branch / commit / PR
+## The loop
 
-- Branch from `master`. Name: `feat/<short>`, `fix/<short>`,
-  `chore/<short>`, etc.
-- Conventional Commits. Body explains **why**, not what.
-- Open a PR against `master`. CI must be green before merge. Branch
-  protection blocks merging until reviews + checks pass.
+- Branch from `master`: `feat/<short>`, `fix/<short>`, `chore/<short>`, …
+- [Conventional Commits](https://www.conventionalcommits.org/). Body explains **why**, not what.
+- Open a PR against `master`. Branch protection blocks merge until reviews + checks pass.
 
-## Pre-push gauntlet (runs automatically)
-
-`git push` triggers `.husky/pre-push` → `tools/scripts/pre-push.sh`,
-which mirrors the required CI checks:
-
-1. conflict-marker scan
-2. `pnpm typecheck`
-3. `pnpm lint`
-4. `pnpm test` (Vitest + Rust unit tests)
-5. `cargo clippy` + `cargo test --lib` (only if cargo is installed)
-
-To run it manually before pushing:
-
-```bash
-pnpm guard:pre-push
-```
-
-Failing locally is faster than failing in CI. Do not bypass with
-`--no-verify` unless the user explicitly asked you to — branch
-protection will reject the PR anyway.
+`git push` triggers the pre-push gauntlet (`tools/scripts/pre-push.sh`), mirroring
+required CI: conflict-marker scan → `pnpm typecheck` → `pnpm lint` → `pnpm test` →
+`cargo clippy` + `cargo test --lib` (if cargo is installed). Run it early with
+`pnpm guard:pre-push`. Don't bypass with `--no-verify` — branch protection rejects
+the PR anyway.
 
 ## Merge conflicts
 
-Master has been broken **three times** by commits that included
-unresolved `<<<<<<<` / `=======` / `>>>>>>>` markers. The
-`conflict-marker-check` CI job and the local pre-commit hook both
-catch this; do not bypass them.
-
-Correct flow when `git pull` (or `git rebase`) reports conflicts:
-
-```bash
-git pull --rebase origin master    # rebase, do not merge
-
-# Conflict reported. Stop.
-git status                          # lists "both modified" files
-
-# For each unmerged file:
-#  - open in editor
-#  - delete every <<<<<<< / ======= / >>>>>>> line
-#  - keep the resolved content
-#  - save
-
-git add <resolved-files>
-git rebase --continue
-pnpm guard:pre-push
-git push --force-with-lease
-```
-
-Never `git commit -a` while a rebase is unresolved — that ships
-markers to remote.
-
-## Don't push directly to master
-
-Even before branch protection is enforced server-side, treat `master`
-as PR-only. Direct pushes that skip the gate are how the marker bug
-keeps recurring.
+Rebase, don't merge (`git pull --rebase origin master`). Resolve **every**
+`<<<<<<<` / `=======` / `>>>>>>>` marker before `git rebase --continue` — the
+pre-commit hook and the `conflict-marker-check` CI job both block markers (master
+has been broken this way before). Walkthrough: [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) §6.
 
 ## Rules
 
-Follow [`rules/rules.md`](./rules/rules.md). Highlights:
-
-- TypeScript strict; no `any`; Zod at every external boundary.
-- Rust `#![deny(clippy::all)] + #![warn(clippy::pedantic)]`. No
-  `unwrap()` / `expect()` in production paths.
-- All SQL parameterized via `sqlx::bind`. No string concat.
-- API keys encrypted at rest (AES-GCM). Never logged.
-- LLM output is untrusted. Never feed it to `dangerouslySetInnerHTML`
-  or `rehype-raw`.
-
-## Plan docs
-
-Multi-day work needs a plan in `/plan` first. PR description links
-the plan. Reviewer reads the plan before the diff.
-
-## See also
-
-- [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) — full workflow,
-  hard rules, AI-agent-specific guardrails
-- [`BRANCH_PROTECTION.md`](./BRANCH_PROTECTION.md) — admin runbook for
-  the GitHub branch-protection settings
-- [`rules/rules.md`](./rules/rules.md) — engineering rules
-- `plan/` — phase plans and design docs
+Follow [`rules/rules.md`](./rules/rules.md). Highlights: strict TypeScript, no `any`,
+Zod at every boundary · Rust `clippy::pedantic`, no `unwrap()`/`expect()` in
+production · parameterized SQL only · API keys encrypted at rest, never logged ·
+LLM output is untrusted — never feed it to `dangerouslySetInnerHTML`. Multi-day
+work gets a plan in `/plan` first, linked from the PR.
