@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useDialogTitleId } from '@/lib/dialog-title';
 import { exportMarkdownDocument } from '@/lib/export-markdown';
-import { artifacts as artifactsIpc, generation, IpcError } from '@/lib/ipc';
+import { artifacts as artifactsIpc, generation, getErrorMessage } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -68,7 +68,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         const d = await artifactsIpc.getArtifact(summary.id);
         if (!cancelled) setDetail(d);
       } catch (err) {
-        if (!cancelled) setError(err instanceof IpcError ? err.message : String(err));
+        if (!cancelled) setError(getErrorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -128,7 +128,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         const d = await artifactsIpc.getArtifact(compareId);
         if (!cancelled) setCompareDetail(d);
       } catch (err) {
-        if (!cancelled) setError(err instanceof IpcError ? err.message : String(err));
+        if (!cancelled) setError(getErrorMessage(err));
       } finally {
         if (!cancelled) setCompareLoading(false);
       }
@@ -152,7 +152,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         upsertArtifact({ ...summary, status: 'approved' });
         if (detail !== null) setDetail({ ...detail, status: 'approved' });
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       }
     })();
   }, [summary, detail, upsertArtifact]);
@@ -164,7 +164,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         upsertArtifact({ ...summary, status: 'rejected' });
         if (detail !== null) setDetail({ ...detail, status: 'rejected' });
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       }
     })();
   }, [summary, detail, upsertArtifact]);
@@ -211,7 +211,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         setDetail(fresh);
         setFeedback('');
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setRegenerating(false);
       }
@@ -234,7 +234,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
           setExportStatus('Exported markdown.');
         }
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setExporting(false);
       }

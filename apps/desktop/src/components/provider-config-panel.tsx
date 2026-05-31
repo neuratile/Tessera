@@ -11,7 +11,7 @@ import type { ZodError } from 'zod';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { IpcError, providers } from '@/lib/ipc';
+import { getErrorMessage, providers } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 
 type ProviderFormState = {
@@ -141,7 +141,7 @@ export function ProviderConfigPanel() {
         setConfigs(rows);
       })
       .catch((error: unknown) => {
-        setListError(error instanceof IpcError ? error.message : String(error));
+        setListError(getErrorMessage(error));
       })
       .finally(() => {
         setIsLoading(false);
@@ -206,7 +206,7 @@ export function ProviderConfigPanel() {
         loadConfigs();
       })
       .catch((error: unknown) => {
-        setSaveError(error instanceof IpcError ? error.message : String(error));
+        setSaveError(getErrorMessage(error));
       })
       .finally(() => {
         setIsSaving(false);
@@ -227,7 +227,7 @@ export function ProviderConfigPanel() {
           loadConfigs();
         })
         .catch((error: unknown) => {
-          setListError(error instanceof IpcError ? error.message : String(error));
+          setListError(getErrorMessage(error));
         })
         .finally(() => {
           setDeletingConfigId(null);
@@ -247,7 +247,7 @@ export function ProviderConfigPanel() {
         setConnectionResult(result);
       })
       .catch((error: unknown) => {
-        setTestError(error instanceof IpcError ? error.message : String(error));
+        setTestError(getErrorMessage(error));
       })
       .finally(() => {
         setIsTesting(false);

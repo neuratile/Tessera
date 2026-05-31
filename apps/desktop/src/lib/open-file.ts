@@ -1,4 +1,4 @@
-import { filesystem, IpcError } from '@/lib/ipc';
+import { filesystem, getErrorMessage } from '@/lib/ipc';
 import { useEditorStore, type EditorTab } from '@/stores/editor-store';
 import type { FsEntry } from '@/stores/workspace-store';
 
@@ -33,7 +33,7 @@ export function openFileInEditor(entry: FsEntry): void {
       const text = await filesystem.readFileText(entry.absolutePath);
       useEditorStore.getState().setContent(entry.relativePath, text);
     } catch (err) {
-      const message = err instanceof IpcError ? err.message : String(err);
+      const message = getErrorMessage(err);
       useEditorStore.getState().setError(entry.relativePath, message);
     } finally {
       useEditorStore.getState().setLoading(entry.relativePath, false);

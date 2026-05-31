@@ -15,7 +15,7 @@ import { ToastViewport } from '@/components/ui/toast-viewport';
 import { useAppMenuEvents } from '@/lib/app-menu';
 import { COMMAND, useCommand } from '@/lib/command-bus';
 import { useGlobalShortcuts } from '@/lib/global-shortcuts';
-import { auth, IpcError, system } from '@/lib/ipc';
+import { auth, getErrorMessage, system } from '@/lib/ipc';
 import type { InitDbResponse } from '@/lib/ipc/system';
 import { readOnboardingFlag } from '@/lib/onboarding';
 import { useAuthStore } from '@/stores/auth-store';
@@ -145,7 +145,7 @@ function DevPanel() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setInitError(err instanceof IpcError ? err.message : String(err));
+        setInitError(getErrorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -160,7 +160,7 @@ function DevPanel() {
         setGreeting(msg);
       })
       .catch((err: unknown) => {
-        setGreetError(err instanceof IpcError ? err.message : String(err));
+        setGreetError(getErrorMessage(err));
       });
   }, []);
 
@@ -182,7 +182,7 @@ function DevPanel() {
         setSessionUser(null);
       })
       .catch((err: unknown) => {
-        setAuthError(err instanceof IpcError ? err.message : String(err));
+        setAuthError(getErrorMessage(err));
       });
   }, [email, password, name, setTokens]);
 
@@ -200,7 +200,7 @@ function DevPanel() {
         setSessionUser(null);
       })
       .catch((err: unknown) => {
-        setAuthError(err instanceof IpcError ? err.message : String(err));
+        setAuthError(getErrorMessage(err));
       });
   }, [email, password, setTokens]);
 
@@ -217,7 +217,7 @@ function DevPanel() {
         setSessionUser(null);
       })
       .catch((err: unknown) => {
-        setAuthError(err instanceof IpcError ? err.message : String(err));
+        setAuthError(getErrorMessage(err));
       });
   }, [refreshToken, setTokens]);
 
@@ -233,7 +233,7 @@ function DevPanel() {
         setSessionUser(u);
       })
       .catch((err: unknown) => {
-        setAuthError(err instanceof IpcError ? err.message : String(err));
+        setAuthError(getErrorMessage(err));
       });
   }, [accessToken]);
 

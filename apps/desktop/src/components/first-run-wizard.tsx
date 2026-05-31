@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { recommendTier, type HardwareTier } from '@/lib/hardware-tier';
-import { health, IpcError, providers } from '@/lib/ipc';
+import { getErrorMessage, health, providers } from '@/lib/ipc';
 import { markOnboardingComplete } from '@/lib/onboarding';
 
 type Props = {
@@ -67,7 +67,7 @@ export function FirstRunWizard({ onComplete }: Props) {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setHealthError(err instanceof IpcError ? err.message : String(err));
+        setHealthError(getErrorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -255,7 +255,7 @@ function StepThree() {
         if (!cancelled) {
           setResult({
             ok: false,
-            message: err instanceof IpcError ? err.message : String(err),
+            message: getErrorMessage(err),
             latencyMs: 0,
             models: [],
           });
@@ -349,7 +349,7 @@ function StepFour({ tier }: { tier: HardwareTier | null }) {
         });
         setSaved(model);
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setSaving(false);
       }

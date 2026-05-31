@@ -23,3 +23,14 @@ export function asMessage(err: unknown): string {
   if (typeof err === 'string') return err;
   return JSON.stringify(err);
 }
+
+/**
+ * Extract a user-facing message from an unknown rejection in UI code.
+ *
+ * An `IpcError` already carries a formatted `[command] message`, so use
+ * it verbatim; anything else is stringified. This mirrors the pattern
+ * previously inlined across every component error handler.
+ */
+export function getErrorMessage(err: unknown): string {
+  return err instanceof IpcError ? err.message : String(err);
+}

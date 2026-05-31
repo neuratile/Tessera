@@ -18,7 +18,7 @@ import { COMMAND, useCommand } from '@/lib/command-bus';
 import {
   artifacts as artifactsIpc,
   generation,
-  IpcError,
+  getErrorMessage,
   providers,
   streaming,
 } from '@/lib/ipc';
@@ -148,7 +148,7 @@ export function AiPanel() {
         const list = await artifactsIpc.listArtifacts(project.id);
         setArtifacts(list);
       } catch (err) {
-        setArtifactsError(err instanceof IpcError ? err.message : String(err));
+        setArtifactsError(getErrorMessage(err));
       } finally {
         setLoadingArtifacts(false);
       }
@@ -212,7 +212,7 @@ export function AiPanel() {
         } catch (err) {
           setGeneration({
             status: 'error',
-            message: err instanceof IpcError ? err.message : String(err),
+            message: getErrorMessage(err),
           });
         }
       })();
@@ -269,7 +269,7 @@ export function AiPanel() {
           await artifactsIpc.approveArtifact(artifact.id);
           upsertArtifact({ ...artifact, status: 'approved' });
         } catch (err) {
-          setArtifactsError(err instanceof IpcError ? err.message : String(err));
+          setArtifactsError(getErrorMessage(err));
         }
       })();
     },
@@ -283,7 +283,7 @@ export function AiPanel() {
           await artifactsIpc.rejectArtifact(artifact.id);
           upsertArtifact({ ...artifact, status: 'rejected' });
         } catch (err) {
-          setArtifactsError(err instanceof IpcError ? err.message : String(err));
+          setArtifactsError(getErrorMessage(err));
         }
       })();
     },

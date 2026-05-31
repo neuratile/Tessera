@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, File, Folder, FolderOpen } from 'lucide-reac
 import { useEffect, useRef, useState } from 'react';
 import { Tree, type NodeRendererProps } from 'react-arborist';
 
-import { filesystem, IpcError } from '@/lib/ipc';
+import { filesystem, getErrorMessage } from '@/lib/ipc';
 import { openFileInEditor } from '@/lib/open-file';
 import { useWorkspaceStore, type FsEntry } from '@/stores/workspace-store';
 
@@ -51,7 +51,7 @@ export function FileExplorer() {
         );
         setChildren(target.relativePath, children);
       } catch (err) {
-        setTreeError(err instanceof IpcError ? err.message : String(err));
+        setTreeError(getErrorMessage(err));
       }
     })();
   };

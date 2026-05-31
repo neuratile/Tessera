@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useDialogTitleId } from '@/lib/dialog-title';
-import { IpcError, providers } from '@/lib/ipc';
+import { getErrorMessage, providers } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -64,7 +64,7 @@ export function SettingsSheet() {
         const active = next.find((c) => c.isActive) ?? next[0] ?? null;
         setActiveProvider(active);
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
@@ -92,7 +92,7 @@ export function SettingsSheet() {
         setApiKey('');
         refresh();
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setSaving(false);
       }
@@ -113,7 +113,7 @@ export function SettingsSheet() {
       } catch (err) {
         setTestResult({
           ok: false,
-          message: err instanceof IpcError ? err.message : String(err),
+          message: getErrorMessage(err),
           latencyMs: 0,
           models: [],
         });
@@ -130,7 +130,7 @@ export function SettingsSheet() {
           await providers.deleteProviderConfig(id);
           refresh();
         } catch (err) {
-          setError(err instanceof IpcError ? err.message : String(err));
+          setError(getErrorMessage(err));
         }
       })();
     },

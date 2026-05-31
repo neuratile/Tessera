@@ -2,7 +2,7 @@ import type { ProviderConfigView } from '@testing-ide/shared';
 import { Check, ChevronUp, Cpu, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { IpcError, providers as providersIpc } from '@/lib/ipc';
+import { getErrorMessage, providers as providersIpc } from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { toast } from '@/stores/toast-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -135,7 +135,7 @@ function ProviderSwitcher() {
           toast.ok(`Provider set to ${row.provider}`, { title: 'Provider' });
           setOpen(false);
         } catch (err) {
-          toast.err(err instanceof IpcError ? err.message : String(err), {
+          toast.err(getErrorMessage(err), {
             title: 'Provider switch failed',
           });
         } finally {

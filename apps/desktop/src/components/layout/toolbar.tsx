@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 
 import { Button } from '@/components/ui/button';
 import { COMMAND, useCommand } from '@/lib/command-bus';
-import { analysis as analysisIpc, filesystem, IpcError, projects } from '@/lib/ipc';
+import { analysis as analysisIpc, filesystem, getErrorMessage, projects } from '@/lib/ipc';
 import { useEditorStore } from '@/stores/editor-store';
 import { toast } from '@/stores/toast-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -43,7 +43,7 @@ export function Toolbar() {
         } catch (err) {
           setAnalysis({
             status: 'error',
-            message: err instanceof IpcError ? err.message : String(err),
+            message: getErrorMessage(err),
           });
         }
       })();
@@ -64,7 +64,7 @@ export function Toolbar() {
           const entries = await filesystem.readDirectoryEntries(target.rootPath, '');
           setTree(entries);
         } catch (err) {
-          setTreeError(err instanceof IpcError ? err.message : String(err));
+          setTreeError(getErrorMessage(err));
         } finally {
           setTreeLoading(false);
         }
@@ -90,7 +90,7 @@ export function Toolbar() {
       try {
         path = await filesystem.pickFolder();
       } catch (err) {
-        setTreeError(err instanceof IpcError ? err.message : String(err));
+        setTreeError(getErrorMessage(err));
         return;
       }
       if (path === null) return; // user cancelled
@@ -99,7 +99,7 @@ export function Toolbar() {
         const name = deriveProjectName(path);
         created = await projects.createProject(name, path);
       } catch (err) {
-        setTreeError(err instanceof IpcError ? err.message : String(err));
+        setTreeError(getErrorMessage(err));
         return;
       }
       // Fresh-create flow always runs analysis even if backend stamped
@@ -242,7 +242,7 @@ function RecentProjectsButton({
         const next = await projects.listProjects();
         setList(next);
       } catch (err) {
-        setError(err instanceof IpcError ? err.message : String(err));
+        setError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }

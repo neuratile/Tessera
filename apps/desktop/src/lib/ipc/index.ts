@@ -21,4 +21,4 @@ export * as providers from './providers';
 export * as streaming from './streaming';
 export * as system from './system';
 
-export { IpcError } from './error';
+export { IpcError, getErrorMessage } from './error';
