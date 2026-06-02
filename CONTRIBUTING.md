@@ -21,11 +21,12 @@ After this, `git commit` and `git push` run the local guards automatically.
 - [Conventional Commits](https://www.conventionalcommits.org/). Body explains **why**, not what.
 - Open a PR against `master`. Branch protection blocks merge until reviews + checks pass.
 
-`git push` triggers the pre-push gauntlet (`tools/scripts/pre-push.sh`), mirroring
-required CI: conflict-marker scan → `pnpm typecheck` → `pnpm lint` → `pnpm test` →
-`cargo clippy` + `cargo test --lib` (if cargo is installed). Run it early with
-`pnpm guard:pre-push`. Don't bypass with `--no-verify` — branch protection rejects
-the PR anyway.
+`git push` triggers the pre-push gauntlet (`tools/scripts/pre-push.sh`): conflict-marker
+scan → `pnpm typecheck` → `pnpm lint` → desktop frontend tests →
+`cargo clippy` + `cargo test --lib` (if cargo is installed). CI still runs the full
+workspace `pnpm test`, so Rust stays required on GitHub even when it is skipped locally.
+Run it early with `pnpm guard:pre-push`. Don't bypass with `--no-verify` — branch
+protection rejects the PR anyway.
 
 ## Merge conflicts
 

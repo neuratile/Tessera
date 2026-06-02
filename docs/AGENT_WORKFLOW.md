@@ -99,7 +99,7 @@ That script runs:
 1. conflict-marker scan
 2. `pnpm typecheck`
 3. `pnpm lint`
-4. `pnpm test` (Vitest + Rust unit tests)
+4. `pnpm --filter @testing-ide/desktop run test:frontend`
 5. `cargo clippy --locked --all-targets --lib -- -D warnings`
    plus `cargo test --locked --lib` (only if `cargo` is installed)
 
@@ -129,7 +129,7 @@ CI matrix runs the same checks GitHub will require for merge:
 | `conflict-marker-check`     | No `<<<<<<<` / `=======` / `>>>>>>>` anywhere           |
 | `lint`                      | ESLint clean across the monorepo                        |
 | `typecheck`                 | TypeScript clean across the monorepo                    |
-| `unit-test`                 | Vitest + Rust unit tests pass                           |
+| `unit-test`                 | Vitest + Rust unit tests pass in CI                     |
 | `integration-test (ubuntu)` | Live Ollama suite passes (chat + embeddings + golden)   |
 | `release-build`             | `tauri build` succeeds on Windows / macOS / Linux       |
 
@@ -178,7 +178,7 @@ removes the manual click.
 | No files larger than 5 MB committed                        | pre-commit                           |
 | No TypeScript errors                                       | pre-push + CI                        |
 | No ESLint errors                                           | pre-push + CI                        |
-| No failing Vitest / Rust unit tests                        | pre-push + CI                        |
+| No failing frontend unit tests locally; no failing Rust unit tests in CI | pre-push + CI          |
 | No `clippy::pedantic` warnings (Rust)                      | CI (`-D warnings`)                   |
 | No `.env` / secrets / API keys committed                   | reviewer + manual scan               |
 | No new IPC command without a Zod schema in `packages/shared/` | reviewer (rules.md §12.3.1)         |
