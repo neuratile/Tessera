@@ -1,6 +1,8 @@
 import type { AnalysisOutcome, Project } from '@testing-ide/shared';
 import { create } from 'zustand';
 
+import { filesystem, getErrorMessage } from '@/lib/ipc';
+
 /**
  * Workspace store: tracks the currently-open project and the in-memory
  * file tree built from the Tauri filesystem walk. The Phase 6 backend
@@ -50,6 +52,8 @@ export type WorkspaceState = {
   /** Replace the children of the entry at `relativePath`. Used after a
    *  lazy directory expand. */
   setChildren: (relativePath: string, children: FsEntry[]) => void;
+  /** Re-reads the loaded directory structure from disk recursively. */
+  refreshTree: () => Promise<void>;
   reset: () => void;
 };
 
@@ -63,6 +67,42 @@ function replaceChildren(entries: FsEntry[], target: string, children: FsEntry[]
     }
     return entry;
   });
+}
+
+async function refreshTreeHelper(
+  oldEntries: FsEntry[],
+  currentPath: string,
+  relativePrefix: string,
+): Promise<FsEntry[]> {
+  let newEntries: FsEntry[];
+  try {
+    newEntries = await filesystem.readDirectoryEntries(currentPath, relativePrefix);
+  } catch (err) {
+    console.warn(`Failed to refresh directory ${currentPath}:`, err);
+    return [];
+  }
+
+  const oldMap = new Map<string, FsEntry>();
+  for (const entry of oldEntries) {
+    oldMap.set(entry.relativePath, entry);
+  }
+
+  return Promise.all(
+    newEntries.map(async (entry) => {
+      if (entry.kind === 'directory') {
+        const oldEntry = oldMap.get(entry.relativePath);
+        if (oldEntry && oldEntry.children !== undefined) {
+          const refreshedChildren = await refreshTreeHelper(
+            oldEntry.children,
+            entry.absolutePath,
+            entry.relativePath,
+          );
+          return { ...entry, children: refreshedChildren };
+        }
+      }
+      return entry;
+    })
+  );
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
@@ -89,6 +129,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
   setAnalysis: (analysis) => set({ analysis }),
   setChildren: (relativePath, children) =>
     set((state) => ({ tree: replaceChildren(state.tree, relativePath, children) })),
+  refreshTree: async () => {
+    const { project, tree } = useWorkspaceStore.getState();
+    if (project === null) return;
+    try {
+      const refreshed = await refreshTreeHelper(tree, project.rootPath, '');
+      set({ tree: refreshed, treeError: null });
+    } catch (err) {
+      set({ treeError: getErrorMessage(err) });
+    }
+  },
   reset: () =>
     set({
       project: null,
