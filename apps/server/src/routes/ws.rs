@@ -68,6 +68,12 @@ async fn authenticate(
     )
     .ok()?;
 
+    // Refresh tokens must not grant realtime access — mirror the HTTP
+    // AuthUser extractor's token-kind check.
+    if claims.claims.kind.as_deref() == Some("refresh") {
+        return None;
+    }
+
     let user_id = Uuid::parse_str(&claims.claims.sub).ok()?;
 
     // Verify membership in the board's team.

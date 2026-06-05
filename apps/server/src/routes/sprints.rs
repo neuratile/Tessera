@@ -168,10 +168,19 @@ async fn start_sprint(
         return Err(ApiError::Validation("only planned sprints can be started".into()));
     }
 
-    // Check for already active sprints on the board
+    // The guard and the UPDATE must be atomic: lock the board row first so
+    // two concurrent start requests on the same board are serialized and
+    // cannot both observe "no active sprint" (TOCTOU).
+    let mut tx = state.db.begin().await?;
+
+    sqlx::query("SELECT id FROM boards WHERE id = $1 FOR UPDATE")
+        .bind(sprint_info_board_id)
+        .execute(&mut *tx)
+        .await?;
+
     let active_exists: i64 = sqlx::query_scalar("SELECT count(*) FROM sprints WHERE board_id = $1 AND status = 'active'")
         .bind(sprint_info_board_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
 
     if active_exists > 0 {
@@ -183,14 +192,17 @@ async fn start_sprint(
         r#"
         UPDATE sprints
         SET status = 'active', start_date = COALESCE(start_date, $1)
-        WHERE id = $2
+        WHERE id = $2 AND status = 'planned'
         RETURNING id, board_id, name, goal, start_date, end_date, status, created_at
         "#,
     )
     .bind(now)
     .bind(sprint_id)
-    .fetch_one(&state.db)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::Validation("only planned sprints can be started".into()))?;
+
+    tx.commit().await?;
 
     // Broadcast WebSocket event
     state.ws_hub.broadcast(sprint_info_board_id, "sprint_started", auth.user_id, serde_json::json!({ "id": sprint_id }));
