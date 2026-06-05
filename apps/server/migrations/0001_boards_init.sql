@@ -75,7 +75,9 @@ CREATE TABLE board_columns (
     color     TEXT    NOT NULL DEFAULT '#6b7280',
     position  INTEGER NOT NULL,
     wip_limit INTEGER,
-    UNIQUE (board_id, position)
+    -- Deferred so multi-row reorders inside a transaction don't trip the
+    -- constraint on intermediate states (checked at COMMIT instead).
+    UNIQUE (board_id, position) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_board_columns_board_id ON board_columns (board_id);

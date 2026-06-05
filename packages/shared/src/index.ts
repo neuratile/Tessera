@@ -28,3 +28,4 @@ export * from './schemas/test-case.schema';
 export * from './schemas/test-plan.schema';
 export * from './schemas/user.schema';
 export * from './schemas/ollama-status.schema';
+export * from './schemas/board.schema';

@@ -18,7 +18,7 @@ export type BoardUser = {
 export type Team = {
   id: string;
   name: string;
-  description: string;
+  description?: string;
   inviteCode: string;
   createdBy: string;
   createdAt: string;
@@ -39,7 +39,7 @@ export type Board = {
   teamId: string;
   name: string;
   key: string;
-  description: string;
+  description?: string;
   boardType: BoardType;
   issueCounter: number;
   createdAt: string;
@@ -59,9 +59,9 @@ export type Sprint = {
   id: string;
   boardId: string;
   name: string;
-  goal: string;
-  startDate: string;
-  endDate: string;
+  goal?: string;
+  startDate?: string;
+  endDate?: string;
   status: SprintStatus;
   createdAt: string;
 }
@@ -107,9 +107,9 @@ export type ActivityLog = {
   issueId: string;
   userId: string;
   action: string;
-  field: string;
-  oldValue: string;
-  newValue: string;
+  field?: string;
+  oldValue?: string;
+  newValue?: string;
   user?: BoardUser;
   createdAt: string;
 }
