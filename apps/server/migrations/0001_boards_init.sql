@@ -9,7 +9,10 @@ CREATE TABLE users (
     email         TEXT        NOT NULL UNIQUE,
     display_name  TEXT        NOT NULL,
     avatar_url    TEXT,
-    password_hash TEXT        NOT NULL,
+    -- Nullable: Supabase Auth keeps credentials in auth.users and the
+    -- desktop client mirrors profiles here without a password hash. Only
+    -- the self-hosted Axum auth path populates this column.
+    password_hash TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

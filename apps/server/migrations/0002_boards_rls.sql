@@ -82,7 +82,20 @@ ALTER TABLE issue_labels  ENABLE ROW LEVEL SECURITY;
 -- ============================================================
 -- USERS — profiles are readable by any signed-in user (needed for
 -- assignee/reporter/member joins); users manage only their own row.
+--
+-- Column-level grants hide password_hash: RLS row policies cannot
+-- restrict columns, so a USING(true) SELECT policy alone would let any
+-- authenticated client read every user's hash via PostgREST
+-- (e.g. GET /users?select=email,password_hash).
 -- ============================================================
+
+REVOKE ALL ON users FROM anon, authenticated;
+GRANT SELECT (id, email, display_name, avatar_url, created_at, updated_at)
+    ON users TO authenticated;
+GRANT INSERT (id, email, display_name, avatar_url)
+    ON users TO authenticated;
+GRANT UPDATE (email, display_name, avatar_url, updated_at)
+    ON users TO authenticated;
 
 CREATE POLICY users_select ON users
     FOR SELECT TO authenticated USING (true);
