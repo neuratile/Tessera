@@ -29,12 +29,18 @@ pub struct CreateSprint {
 }
 
 /// Payload for updating a sprint.
+///
+/// Nullable fields use `Option<Option<T>>`: an explicit `null` clears the
+/// value, omission leaves it unchanged (see `models::double_option`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSprint {
     pub name: Option<String>,
-    pub goal: Option<String>,
-    pub start_date: Option<DateTime<Utc>>,
-    pub end_date: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub goal: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub start_date: Option<Option<DateTime<Utc>>>,
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub end_date: Option<Option<DateTime<Utc>>>,
 }
 

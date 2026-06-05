@@ -29,6 +29,8 @@ pub struct BoardColumn {
     pub color: String,
     pub position: i32,
     pub wip_limit: Option<i32>,
+    /// Marks the column whose issues count as completed for sprint completion.
+    pub is_done: bool,
 }
 
 /// Payload for creating a board.
@@ -62,11 +64,15 @@ fn default_color() -> String {
 }
 
 /// Payload for updating a board.
+///
+/// `description` is nullable: an explicit `null` clears it, omission leaves
+/// it unchanged (see `models::double_option`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateBoard {
     pub name: Option<String>,
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub description: Option<Option<String>>,
     pub board_type: Option<String>,
 }
 

@@ -61,7 +61,9 @@ where
             .map_err(|e| ApiError::Validation(format!("failed to read request body: {e}")))?;
 
         if let Ok(json_str) = std::str::from_utf8(&bytes) {
-            tracing::info!("Raw request JSON payload: {}", json_str);
+            // debug level: request bodies contain user content and must not
+            // reach production logs at the default INFO level.
+            tracing::debug!("Raw request JSON payload: {}", json_str);
         }
 
         let value = serde_json::from_slice::<T>(&bytes)

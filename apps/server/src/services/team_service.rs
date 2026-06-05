@@ -8,10 +8,15 @@ use crate::error::{ApiError, ApiResult};
 use crate::models::team::{CreateTeam, Team};
 use crate::models::user::UserProfile;
 
-/// Generate a short, unique invite code.
+/// Generate a unique invite code.
+///
+/// 20 hex chars drawn from two UUIDv4s (~76 bits of entropy). Joining with a
+/// code grants full team membership, so the space must withstand online
+/// brute force; 8 chars (32 bits) was guessable.
 fn generate_invite_code() -> String {
-    // Generate an 8-character uppercase alphanumeric code from a UUID
-    Uuid::new_v4().to_string().replace('-', "")[..8].to_uppercase()
+    let a = Uuid::new_v4().simple().to_string();
+    let b = Uuid::new_v4().simple().to_string();
+    format!("{}{}", &a[..10], &b[..10]).to_uppercase()
 }
 
 /// Create a new team and add the creator as an admin member.
@@ -262,6 +267,22 @@ pub async fn update_member_role(
     let requester_role = check_membership(pool, requester_id, team_id).await?;
     if requester_role != "admin" {
         return Err(ApiError::Forbidden("only admins can update member roles".into()));
+    }
+
+    // Prevent demoting the last admin — mirrors the guard in remove_member.
+    // Otherwise the team would be left with no one able to manage it.
+    let target_role = check_membership(pool, user_id_to_update, team_id).await?;
+    if target_role == "admin" && new_role != "admin" {
+        let admin_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM team_members WHERE team_id = $1 AND role = 'admin'",
+        )
+        .bind(team_id)
+        .fetch_one(pool)
+        .await?;
+
+        if admin_count <= 1 {
+            return Err(ApiError::Validation("cannot demote the last admin of the team".into()));
+        }
     }
 
     sqlx::query("UPDATE team_members SET role = $1 WHERE team_id = $2 AND user_id = $3")

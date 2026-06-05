@@ -57,20 +57,21 @@ pub async fn create_board(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Create default columns
+    // Create default columns; "Done" carries the is_done marker used by
+    // sprint completion to decide which issues count as finished.
     let defaults = vec![
-        ("To Do", "#94a3b8", 0),
-        ("In Progress", "#38bdf8", 1),
-        ("In Review", "#c084fc", 2),
-        ("Done", "#34d399", 3),
+        ("To Do", "#94a3b8", 0, false),
+        ("In Progress", "#38bdf8", 1, false),
+        ("In Review", "#c084fc", 2, false),
+        ("Done", "#34d399", 3, true),
     ];
 
-    for (col_name, col_color, pos) in defaults {
+    for (col_name, col_color, pos, is_done) in defaults {
         let col_id = Uuid::new_v4();
         sqlx::query(
             r#"
-            INSERT INTO board_columns (id, board_id, name, color, position, wip_limit)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO board_columns (id, board_id, name, color, position, wip_limit, is_done)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
         )
         .bind(col_id)
@@ -79,6 +80,7 @@ pub async fn create_board(
         .bind(col_color)
         .bind(pos)
         .bind(None::<i32>)
+        .bind(is_done)
         .execute(&mut *tx)
         .await?;
     }
@@ -133,7 +135,8 @@ pub async fn update_board(
     }
 
     let name = payload.name.unwrap_or(board.name);
-    let description = payload.description.or(board.description);
+    // Outer None = leave unchanged, Some(None) = clear, Some(Some(v)) = set.
+    let description = payload.description.unwrap_or(board.description);
     let board_type = payload.board_type.unwrap_or(board.board_type);
     let now = Utc::now();
 
@@ -177,7 +180,7 @@ pub async fn list_columns(pool: &PgPool, user_id: Uuid, board_id: Uuid) -> ApiRe
     let board = get_board(pool, user_id, board_id).await?;
     
     let columns = sqlx::query_as::<_, BoardColumn>(
-        "SELECT id, board_id, name, color, position, wip_limit FROM board_columns WHERE board_id = $1 ORDER BY position ASC",
+        "SELECT id, board_id, name, color, position, wip_limit, is_done FROM board_columns WHERE board_id = $1 ORDER BY position ASC",
     )
     .bind(board.id)
     .fetch_all(pool)
@@ -196,7 +199,7 @@ pub async fn update_column(
     wip_limit: Option<i32>,
 ) -> ApiResult<BoardColumn> {
     let column = sqlx::query_as::<_, BoardColumn>(
-        "SELECT id, board_id, name, color, position, wip_limit FROM board_columns WHERE id = $1",
+        "SELECT id, board_id, name, color, position, wip_limit, is_done FROM board_columns WHERE id = $1",
     )
     .bind(column_id)
     .fetch_optional(pool)
@@ -214,7 +217,7 @@ pub async fn update_column(
         UPDATE board_columns
         SET name = $1, color = $2, wip_limit = $3
         WHERE id = $4
-        RETURNING id, board_id, name, color, position, wip_limit
+        RETURNING id, board_id, name, color, position, wip_limit, is_done
         "#,
     )
     .bind(name)
@@ -256,7 +259,7 @@ pub async fn create_column(
         r#"
         INSERT INTO board_columns (id, board_id, name, color, position, wip_limit)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, board_id, name, color, position, wip_limit
+        RETURNING id, board_id, name, color, position, wip_limit, is_done
         "#,
     )
     .bind(col_id)
@@ -275,7 +278,7 @@ pub async fn create_column(
 /// Delete a board column.
 pub async fn delete_column(pool: &PgPool, user_id: Uuid, column_id: Uuid) -> ApiResult<()> {
     let column = sqlx::query_as::<_, BoardColumn>(
-        "SELECT id, board_id, name, color, position, wip_limit FROM board_columns WHERE id = $1",
+        "SELECT id, board_id, name, color, position, wip_limit, is_done FROM board_columns WHERE id = $1",
     )
     .bind(column_id)
     .fetch_optional(pool)
@@ -289,16 +292,61 @@ pub async fn delete_column(pool: &PgPool, user_id: Uuid, column_id: Uuid) -> Api
     }
 
     let mut tx = pool.begin().await?;
-    
+
+    // The issues FK is ON DELETE RESTRICT — dropping a column with issues
+    // would error. Move its issues to a fallback column (the leftmost other
+    // column) first, appended after the fallback's existing issues so their
+    // relative order is preserved. Refuse to delete the last column: there
+    // would be nowhere for the issues to go.
+    let fallback_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM board_columns WHERE board_id = $1 AND id <> $2 ORDER BY position ASC LIMIT 1 FOR UPDATE",
+    )
+    .bind(column.board_id)
+    .bind(column_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let fallback_id = fallback_id.ok_or_else(|| {
+        ApiError::Validation("cannot delete the only column on a board".into())
+    })?;
+
+    let fallback_max: Option<i32> =
+        sqlx::query_scalar("SELECT MAX(position) FROM issues WHERE column_id = $1")
+            .bind(fallback_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let base = fallback_max.map_or(0, |p| p + 1);
+
+    sqlx::query(
+        r#"
+        WITH moved AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY position) - 1 AS rn
+            FROM issues WHERE column_id = $1
+        )
+        UPDATE issues i
+        SET column_id = $2, position = $3 + m.rn
+        FROM moved m
+        WHERE i.id = m.id
+        "#,
+    )
+    .bind(column_id)
+    .bind(fallback_id)
+    .bind(base)
+    .execute(&mut *tx)
+    .await?;
+
+    // Delete first, then close the gap. The UNIQUE (board_id, position)
+    // constraint is DEFERRABLE INITIALLY DEFERRED, so intermediate states
+    // inside the transaction are allowed; deleting first also keeps the
+    // statement-level state conflict-free.
+    sqlx::query("DELETE FROM board_columns WHERE id = $1")
+        .bind(column_id)
+        .execute(&mut *tx)
+        .await?;
+
     // Shift subsequent columns down
     sqlx::query("UPDATE board_columns SET position = position - 1 WHERE board_id = $1 AND position > $2")
         .bind(column.board_id)
         .bind(column.position)
-        .execute(&mut *tx)
-        .await?;
-
-    sqlx::query("DELETE FROM board_columns WHERE id = $1")
-        .bind(column_id)
         .execute(&mut *tx)
         .await?;
 
@@ -320,7 +368,11 @@ pub async fn reorder_columns(
     }
 
     let mut tx = pool.begin().await?;
-    
+
+    // Row-by-row position updates produce duplicate positions on intermediate
+    // states. UNIQUE (board_id, position) is DEFERRABLE INITIALLY DEFERRED, so
+    // the constraint is only checked at COMMIT, where the final permutation is
+    // guaranteed to be consistent.
     for (pos, col_id) in column_ids.iter().enumerate() {
         sqlx::query("UPDATE board_columns SET position = $1 WHERE id = $2 AND board_id = $3")
             .bind(pos as i32)

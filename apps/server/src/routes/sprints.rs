@@ -2,7 +2,7 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -115,9 +115,10 @@ async fn update_sprint(
     }
 
     let name = payload.name.unwrap_or(current_name);
-    let goal = payload.goal.or(current_goal);
-    let start_date = payload.start_date.or(current_start_date);
-    let end_date = payload.end_date.or(current_end_date);
+    // Outer None = leave unchanged, Some(None) = clear, Some(Some(v)) = set.
+    let goal = payload.goal.unwrap_or(current_goal);
+    let start_date = payload.start_date.unwrap_or(current_start_date);
+    let end_date = payload.end_date.unwrap_or(current_end_date);
 
     let sprint = sqlx::query_as::<_, Sprint>(
         r#"
@@ -168,10 +169,19 @@ async fn start_sprint(
         return Err(ApiError::Validation("only planned sprints can be started".into()));
     }
 
-    // Check for already active sprints on the board
+    // The guard and the UPDATE must be atomic: lock the board row first so
+    // two concurrent start requests on the same board are serialized and
+    // cannot both observe "no active sprint" (TOCTOU).
+    let mut tx = state.db.begin().await?;
+
+    sqlx::query("SELECT id FROM boards WHERE id = $1 FOR UPDATE")
+        .bind(sprint_info_board_id)
+        .execute(&mut *tx)
+        .await?;
+
     let active_exists: i64 = sqlx::query_scalar("SELECT count(*) FROM sprints WHERE board_id = $1 AND status = 'active'")
         .bind(sprint_info_board_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
 
     if active_exists > 0 {
@@ -183,14 +193,17 @@ async fn start_sprint(
         r#"
         UPDATE sprints
         SET status = 'active', start_date = COALESCE(start_date, $1)
-        WHERE id = $2
+        WHERE id = $2 AND status = 'planned'
         RETURNING id, board_id, name, goal, start_date, end_date, status, created_at
         "#,
     )
     .bind(now)
     .bind(sprint_id)
-    .fetch_one(&state.db)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::Validation("only planned sprints can be started".into()))?;
+
+    tx.commit().await?;
 
     // Broadcast WebSocket event
     state.ws_hub.broadcast(sprint_info_board_id, "sprint_started", auth.user_id, serde_json::json!({ "id": sprint_id }));
@@ -231,11 +244,15 @@ async fn complete_sprint(
     let mut tx = state.db.begin().await?;
 
     // 1. Move incomplete issues to backlog (sprint_id = NULL)
-    // Find the Done column (column with highest position on the board)
-    let done_column_id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1 ORDER BY position DESC LIMIT 1")
-        .bind(sprint_info_board_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    // The Done column is marked explicitly via is_done — position is not a
+    // safe anchor once users append columns after "Done". Fall back to the
+    // highest position only for legacy boards without the flag set.
+    let done_column_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM board_columns WHERE board_id = $1 ORDER BY is_done DESC, position DESC LIMIT 1",
+    )
+    .bind(sprint_info_board_id)
+    .fetch_optional(&mut *tx)
+    .await?;
 
     if let Some(done_col_id) = done_column_id {
         sqlx::query("UPDATE issues SET sprint_id = NULL WHERE sprint_id = $1 AND column_id != $2")
@@ -278,7 +295,7 @@ async fn complete_sprint(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/boards/{board_id}/sprints", get(list_sprints).post(create_sprint))
-        .route("/sprints/{id}", post(update_sprint).patch(update_sprint)) // PUT/PATCH
+        .route("/sprints/{id}", put(update_sprint).patch(update_sprint)) // PUT/PATCH
         .route("/sprints/{id}/start", post(start_sprint))
         .route("/sprints/{id}/complete", post(complete_sprint))
 }

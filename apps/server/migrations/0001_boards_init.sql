@@ -9,7 +9,10 @@ CREATE TABLE users (
     email         TEXT        NOT NULL UNIQUE,
     display_name  TEXT        NOT NULL,
     avatar_url    TEXT,
-    password_hash TEXT        NOT NULL,
+    -- Nullable: Supabase Auth keeps credentials in auth.users and the
+    -- desktop client mirrors profiles here without a password hash. Only
+    -- the self-hosted Axum auth path populates this column.
+    password_hash TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -24,7 +27,10 @@ CREATE TABLE teams (
     name        TEXT        NOT NULL,
     description TEXT,
     invite_code TEXT        NOT NULL UNIQUE,
-    created_by  UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    -- RESTRICT: deleting a user must not cascade-wipe every team they created
+    -- (teams -> boards -> columns/sprints/issues -> comments/activity_logs).
+    -- Ownership must be transferred before the account can be removed.
+    created_by  UUID        NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -75,7 +81,13 @@ CREATE TABLE board_columns (
     color     TEXT    NOT NULL DEFAULT '#6b7280',
     position  INTEGER NOT NULL,
     wip_limit INTEGER,
-    UNIQUE (board_id, position)
+    -- Marks the column whose issues count as "completed" for sprint
+    -- completion. Position is not a safe anchor (users can append columns
+    -- after "Done"), so the flag is explicit.
+    is_done   BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Deferred so multi-row reorders inside a transaction don't trip the
+    -- constraint on intermediate states (checked at COMMIT instead).
+    UNIQUE (board_id, position) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_board_columns_board_id ON board_columns (board_id);
@@ -102,7 +114,10 @@ CREATE INDEX idx_sprints_board_id ON sprints (board_id);
 CREATE TABLE issues (
     id           UUID PRIMARY KEY,
     board_id     UUID        NOT NULL REFERENCES boards (id) ON DELETE CASCADE,
-    column_id    UUID        NOT NULL REFERENCES board_columns (id) ON DELETE CASCADE,
+    -- RESTRICT, not CASCADE: deleting a column must never destroy its issues.
+    -- Both delete paths (Rust server + delete_column_atomic RPC) move issues
+    -- to a fallback column before dropping the column row.
+    column_id    UUID        NOT NULL REFERENCES board_columns (id) ON DELETE RESTRICT,
     sprint_id    UUID                 REFERENCES sprints (id) ON DELETE SET NULL,
     parent_id    UUID                 REFERENCES issues (id) ON DELETE CASCADE,
     issue_key    TEXT        NOT NULL,

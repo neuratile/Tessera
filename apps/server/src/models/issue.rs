@@ -51,7 +51,12 @@ fn default_priority() -> String {
     "medium".to_string()
 }
 
+use crate::models::double_option;
+
 /// Payload for updating an issue.
+///
+/// Nullable columns use `Option<Option<T>>` so a client can send an explicit
+/// `null` to clear the field, while omitting it leaves the value unchanged.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateIssue {
@@ -59,11 +64,16 @@ pub struct UpdateIssue {
     pub description: Option<String>,
     pub priority: Option<String>,
     pub issue_type: Option<String>,
-    pub assignee_id: Option<Uuid>,
-    pub sprint_id: Option<Uuid>,
-    pub story_points: Option<i32>,
-    pub due_date: Option<DateTime<Utc>>,
-    pub git_branch: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub assignee_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub sprint_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub story_points: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub due_date: Option<Option<DateTime<Utc>>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub git_branch: Option<Option<String>>,
 }
 
 /// Payload for moving an issue to a different column / position.

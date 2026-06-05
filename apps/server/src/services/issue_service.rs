@@ -224,6 +224,26 @@ pub async fn create_issue(
         }
     };
 
+    // Verify the parent issue (if any) belongs to the same board. A cross-board
+    // parent would let `ON DELETE CASCADE` silently delete this issue when the
+    // foreign board's parent is removed.
+    if let Some(parent_id) = payload.parent_id {
+        let parent_board_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT board_id FROM issues WHERE id = $1")
+                .bind(parent_id)
+                .fetch_optional(pool)
+                .await?;
+        match parent_board_id {
+            Some(parent_board) if parent_board == board_id => {}
+            Some(_) => {
+                return Err(ApiError::Validation(
+                    "parent issue does not belong to this board".into(),
+                ));
+            }
+            None => return Err(ApiError::NotFound("parent issue not found".into())),
+        }
+    }
+
     let mut tx = pool.begin().await?;
 
     // Increment issue counter on board
@@ -390,44 +410,53 @@ pub async fn update_issue(
     if let Some(ref itype) = payload.issue_type {
         log_change!("issue_type", Some(current.issue_type.clone()), Some(itype.clone()));
     }
+    // Nullable fields use Option<Option<T>>: outer None = "leave unchanged",
+    // Some(None) = "clear", Some(Some(v)) = "set". Resolve effective values once
+    // so the activity log and the UPDATE always agree.
+    let new_assignee_id = payload.assignee_id.unwrap_or(current.assignee_id);
+    let new_sprint_id = payload.sprint_id.unwrap_or(current.sprint_id);
+    let new_story_points = payload.story_points.unwrap_or(current.story_points);
+    let new_due_date = payload.due_date.unwrap_or(current.due_date);
+    let new_git_branch = payload.git_branch.unwrap_or(current.git_branch.clone());
+
     // 5. Assignee
-    if payload.assignee_id != current.assignee_id {
+    if new_assignee_id != current.assignee_id {
         log_change!(
             "assignee_id",
             current.assignee_id.map(|id| id.to_string()),
-            payload.assignee_id.map(|id| id.to_string())
+            new_assignee_id.map(|id| id.to_string())
         );
     }
     // 6. Sprint
-    if payload.sprint_id != current.sprint_id {
+    if new_sprint_id != current.sprint_id {
         log_change!(
             "sprint_id",
             current.sprint_id.map(|id| id.to_string()),
-            payload.sprint_id.map(|id| id.to_string())
+            new_sprint_id.map(|id| id.to_string())
         );
     }
     // 7. Story Points
-    if payload.story_points != current.story_points {
+    if new_story_points != current.story_points {
         log_change!(
             "story_points",
             current.story_points.map(|s| s.to_string()),
-            payload.story_points.map(|s| s.to_string())
+            new_story_points.map(|s| s.to_string())
         );
     }
     // 8. Due Date
-    if payload.due_date != current.due_date {
+    if new_due_date != current.due_date {
         log_change!(
             "due_date",
             current.due_date.map(|d| d.to_rfc3339()),
-            payload.due_date.map(|d| d.to_rfc3339())
+            new_due_date.map(|d| d.to_rfc3339())
         );
     }
     // 9. Git Branch
-    if payload.git_branch != current.git_branch {
+    if new_git_branch != current.git_branch {
         log_change!(
             "git_branch",
             current.git_branch.clone(),
-            payload.git_branch.clone()
+            new_git_branch.clone()
         );
     }
 
@@ -436,7 +465,7 @@ pub async fn update_issue(
     let description = payload.description.as_ref().unwrap_or(&current.description);
     let priority = payload.priority.as_ref().unwrap_or(&current.priority);
     let issue_type = payload.issue_type.as_ref().unwrap_or(&current.issue_type);
-    
+
     sqlx::query(
         r#"
         UPDATE issues
@@ -449,11 +478,11 @@ pub async fn update_issue(
     .bind(description)
     .bind(priority)
     .bind(issue_type)
-    .bind(payload.assignee_id.or(current.assignee_id))
-    .bind(payload.sprint_id.or(current.sprint_id))
-    .bind(payload.story_points.or(current.story_points))
-    .bind(payload.due_date.or(current.due_date))
-    .bind(payload.git_branch.or(current.git_branch))
+    .bind(new_assignee_id)
+    .bind(new_sprint_id)
+    .bind(new_story_points)
+    .bind(new_due_date)
+    .bind(new_git_branch)
     .bind(now)
     .bind(issue_id)
     .execute(&mut *tx)
@@ -495,8 +524,33 @@ pub async fn move_issue(
         return Err(ApiError::Forbidden("viewers cannot move issues".into()));
     }
 
+    // The target column must belong to the issue's own board — otherwise an
+    // issue could be transplanted into another board's column.
+    let column_on_board: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM board_columns WHERE id = $1 AND board_id = $2)",
+    )
+    .bind(payload.column_id)
+    .bind(issue.board_id)
+    .fetch_one(pool)
+    .await?;
+    if !column_on_board {
+        return Err(ApiError::Validation("column does not belong to this board".into()));
+    }
+
     let mut tx = pool.begin().await?;
     let now = Utc::now();
+
+    // Re-read column/position under a row lock: a concurrent move could have
+    // shifted this issue since the pre-transaction read, and the shift
+    // predicates below would then operate on a stale range, duplicating or
+    // gapping position values.
+    let issue = sqlx::query_as::<_, IssueMoveInfo>(
+        "SELECT board_id, column_id, position FROM issues WHERE id = $1 FOR UPDATE",
+    )
+    .bind(issue_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::NotFound("issue not found".into()))?;
 
     let old_col_id = issue.column_id;
     let new_col_id = payload.column_id;
@@ -599,6 +653,8 @@ pub async fn delete_issue(
     user_id: Uuid,
     issue_id: Uuid,
 ) -> ApiResult<()> {
+    // Authorization can use an unlocked read — the position arithmetic below
+    // must not (see the locked re-read inside the transaction).
     let issue = sqlx::query_as::<_, IssueMoveInfo>(
         "SELECT board_id, column_id, position FROM issues WHERE id = $1"
     )
@@ -619,6 +675,17 @@ pub async fn delete_issue(
     }
 
     let mut tx = pool.begin().await?;
+
+    // Re-read column/position under a row lock: a concurrent move_issue could
+    // have shifted this issue since the pre-transaction read, and shifting
+    // neighbours by a stale position duplicates or gaps position values.
+    let issue = sqlx::query_as::<_, IssueMoveInfo>(
+        "SELECT board_id, column_id, position FROM issues WHERE id = $1 FOR UPDATE",
+    )
+    .bind(issue_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::NotFound("issue not found".into()))?;
 
     // Shift positions of subsequent items in same column down
     sqlx::query("UPDATE issues SET position = position - 1 WHERE column_id = $1 AND position > $2")

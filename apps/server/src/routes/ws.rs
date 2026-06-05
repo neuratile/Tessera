@@ -1,61 +1,114 @@
 //! WebSocket connection and upgrade route.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
+use axum::response::Response;
 use axum::routing::get;
-use axum::{Router, response::Response};
+use axum::Router;
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
-use crate::error::ApiError;
 use crate::middleware::auth::Claims;
 use crate::AppState;
 
+/// How long a freshly upgraded socket has to present its auth message.
+const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// First message the client must send after the upgrade.
+/// The token is never placed in the URL, so it cannot leak via access logs,
+/// browser history, or Referer headers.
 #[derive(serde::Deserialize)]
-pub struct WsQuery {
-    pub token: String,
+struct AuthMessage {
+    r#type: String,
+    token: String,
 }
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Path(board_id): Path<Uuid>,
-    Query(query): Query<WsQuery>,
     State(state): State<Arc<AppState>>,
-) -> Result<Response, ApiError> {
-    // 1. Authenticate user from token query param
+) -> Response {
+    // Authentication happens over the socket itself (first-message auth);
+    // browsers cannot set an Authorization header on WebSocket upgrades.
+    ws.on_upgrade(move |socket| handle_socket(socket, board_id, state))
+}
+
+/// Waits for the first-message auth frame, validates the JWT, and verifies the
+/// user belongs to the board's team. Returns `None` on any failure.
+async fn authenticate(
+    socket: &mut WebSocket,
+    board_id: Uuid,
+    state: &Arc<AppState>,
+) -> Option<Uuid> {
+    let msg = tokio::time::timeout(AUTH_TIMEOUT, socket.recv())
+        .await
+        .ok()?? // outer: timeout elapsed; inner: socket closed
+        .ok()?;
+
+    let Message::Text(text) = msg else {
+        return None;
+    };
+
+    let auth: AuthMessage = serde_json::from_str(&text).ok()?;
+    if auth.r#type != "auth" {
+        return None;
+    }
+
     let mut validation = Validation::new(Algorithm::HS256);
     validation.leeway = 30;
 
     let claims = decode::<Claims>(
-        &query.token,
+        &auth.token,
         &DecodingKey::from_secret(state.config.jwt_secret.as_bytes()),
         &validation,
     )
-    .map_err(|_| ApiError::Auth("invalid token".to_string()))?;
+    .ok()?;
 
-    let user_id = Uuid::parse_str(&claims.claims.sub)
-        .map_err(|_| ApiError::Auth("invalid token subject".to_string()))?;
+    // Refresh tokens must not grant realtime access — mirror the HTTP
+    // AuthUser extractor's token-kind check.
+    if claims.claims.kind.as_deref() == Some("refresh") {
+        return None;
+    }
 
-    // 2. Verify membership in the board's team
+    let user_id = Uuid::parse_str(&claims.claims.sub).ok()?;
+
+    // Verify membership in the board's team.
     let board_row = sqlx::query("SELECT team_id FROM boards WHERE id = $1")
         .bind(board_id)
         .fetch_optional(&state.db)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("board not found".to_string()))?;
+        .await
+        .ok()??;
 
     use sqlx::Row;
     let board_team_id: Uuid = board_row.get("team_id");
 
-    let _ = crate::services::team_service::check_membership(&state.db, user_id, board_team_id).await?;
+    crate::services::team_service::check_membership(&state.db, user_id, board_team_id)
+        .await
+        .ok()?;
 
-    // Upgrade connection
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, board_id, user_id, state)))
+    Some(user_id)
 }
 
-async fn handle_socket(socket: WebSocket, board_id: Uuid, user_id: Uuid, state: Arc<AppState>) {
+async fn handle_socket(mut socket: WebSocket, board_id: Uuid, state: Arc<AppState>) {
+    let Some(user_id) = authenticate(&mut socket, board_id, &state).await else {
+        tracing::debug!("websocket auth failed for board {}", board_id);
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    };
+
+    // Ack so the client knows it can start consuming events.
+    if socket
+        .send(Message::Text(r#"{"type":"auth_ok"}"#.into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 

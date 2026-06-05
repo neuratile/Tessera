@@ -1,127 +1,40 @@
 import { create } from 'zustand';
+import type {
+  ActivityLog,
+  Board,
+  BoardColumn,
+  BoardUser,
+  Comment,
+  Issue,
+  IssueType,
+  Label,
+  Priority,
+  Sprint,
+  Team,
+  TeamMember,
+} from '@testing-ide/shared';
 
-// ── Type imports ──────────────────────────────────────────────────────
-// These mirror the shared package types. Once the shared package is
-// updated they can be replaced with `@testing-ide/shared` imports.
+// ── Type re-exports ──────────────────────────────────────────────────
+// The shared package is the single source of truth for board types;
+// re-export them so existing `board-store` imports keep working.
 
-export type IssueType = 'epic' | 'story' | 'task' | 'bug' | 'subtask';
-export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'trivial';
-export type BoardType = 'kanban' | 'scrum';
-export type TeamRole = 'admin' | 'member' | 'viewer';
-export type SprintStatus = 'planned' | 'active' | 'completed';
-
-export type BoardUser = {
-  id: string;
-  email: string;
-  displayName: string;
-  avatarUrl?: string;
-}
-
-export type Team = {
-  id: string;
-  name: string;
-  description: string;
-  inviteCode: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type TeamMember = {
-  id: string;
-  teamId: string;
-  userId: string;
-  role: TeamRole;
-  joinedAt: string;
-  user?: BoardUser;
-}
-
-export type Board = {
-  id: string;
-  teamId: string;
-  name: string;
-  key: string;
-  description: string;
-  boardType: BoardType;
-  issueCounter: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type BoardColumn = {
-  id: string;
-  boardId: string;
-  name: string;
-  color: string;
-  position: number;
-  wipLimit?: number;
-}
-
-export type Sprint = {
-  id: string;
-  boardId: string;
-  name: string;
-  goal: string;
-  startDate: string;
-  endDate: string;
-  status: SprintStatus;
-  createdAt: string;
-}
-
-export type Label = {
-  id: string;
-  boardId: string;
-  name: string;
-  color: string;
-}
-
-export type Issue = {
-  id: string;
-  boardId: string;
-  columnId: string;
-  sprintId?: string;
-  parentId?: string;
-  issueKey: string;
-  issueType: IssueType;
-  title: string;
-  description: string;
-  priority: Priority;
-  assigneeId?: string;
-  reporterId: string;
-  storyPoints?: number;
-  dueDate?: string;
-  gitBranch?: string;
-  position: number;
-  labels: Label[];
-  assignee?: BoardUser;
-  reporter?: BoardUser;
-  subtaskCount?: number;
-  commentCount?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type Comment = {
-  id: string;
-  issueId: string;
-  authorId: string;
-  body: string;
-  author?: BoardUser;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type ActivityLog = {
-  id: string;
-  issueId: string;
-  userId: string;
-  action: string;
-  field: string;
-  oldValue: string;
-  newValue: string;
-  user?: BoardUser;
-  createdAt: string;
-}
+export type {
+  ActivityLog,
+  Board,
+  BoardColumn,
+  BoardType,
+  BoardUser,
+  Comment,
+  Issue,
+  IssueType,
+  Label,
+  Priority,
+  Sprint,
+  SprintStatus,
+  Team,
+  TeamMember,
+  TeamRole,
+} from '@testing-ide/shared';
 
 // ── Store State ───────────────────────────────────────────────────────
 

@@ -119,7 +119,7 @@ export function BoardSettings({ onClose }: Props) {
       alert('A board must have at least one column.');
       return;
     }
-    if (!confirm('Are you sure you want to delete this column? Inbound issues will remain, but columns layouts will collapse.')) {
+    if (!confirm('Are you sure you want to delete this column? Its issues will move to the leftmost remaining column.')) {
       return;
     }
 

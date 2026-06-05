@@ -24,7 +24,7 @@ export const BoardUserSchema = z.object({
 export const TeamSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
-  description: z.string(),
+  description: z.string().optional(),
   inviteCode: z.string().min(1),
   createdBy: z.string().uuid(),
   createdAt: IsoDateTimeSchema,
@@ -45,7 +45,7 @@ export const BoardSchema = z.object({
   teamId: z.string().uuid(),
   name: z.string().min(1),
   key: z.string().min(1),
-  description: z.string(),
+  description: z.string().optional(),
   boardType: BoardTypeSchema,
   issueCounter: z.number().int().nonnegative(),
   createdAt: IsoDateTimeSchema,
@@ -59,15 +59,17 @@ export const BoardColumnSchema = z.object({
   color: z.string().min(1),
   position: z.number().int().nonnegative(),
   wipLimit: z.number().int().positive().optional(),
+  // Marks the column whose issues count as completed for sprint completion.
+  isDone: z.boolean().default(false),
 });
 
 export const SprintSchema = z.object({
   id: z.string().uuid(),
   boardId: z.string().uuid(),
   name: z.string().min(1),
-  goal: z.string(),
-  startDate: IsoDateTimeSchema,
-  endDate: IsoDateTimeSchema,
+  goal: z.string().optional(),
+  startDate: IsoDateTimeSchema.optional(),
+  endDate: IsoDateTimeSchema.optional(),
   status: SprintStatusSchema,
   createdAt: IsoDateTimeSchema,
 });
@@ -120,9 +122,9 @@ export const ActivityLogSchema = z.object({
   issueId: z.string().uuid(),
   userId: z.string().uuid(),
   action: z.string().min(1),
-  field: z.string(),
-  oldValue: z.string(),
-  newValue: z.string(),
+  field: z.string().optional(),
+  oldValue: z.string().optional(),
+  newValue: z.string().optional(),
   user: BoardUserSchema.optional(),
   createdAt: IsoDateTimeSchema,
 });
@@ -179,8 +181,9 @@ export const CreateCommentInputSchema = z.object({
 export const CreateSprintInputSchema = z.object({
   name: z.string().min(1).max(100),
   goal: z.string().max(500).optional(),
-  startDate: IsoDateTimeSchema,
-  endDate: IsoDateTimeSchema,
+  // Planned sprints may not have dates until they are activated.
+  startDate: IsoDateTimeSchema.optional(),
+  endDate: IsoDateTimeSchema.optional(),
 });
 
 export const CreateLabelInputSchema = z.object({
