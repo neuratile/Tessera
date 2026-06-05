@@ -43,9 +43,9 @@ Three places where the README / earlier audit run ahead of the implementation. W
 | TypeScript unit tests | 43 |
 | Zod schema tests | 78 |
 | Integration tests (live Ollama) | 2 |
-| E2E tests (Playwright) | 1 |
+| E2E tests (Playwright) | 2 |
 | Snapshot tests (Insta) | 6 |
-| **Total** | **339+** |
+| **Total** | **349+** |
 
 ---
 
