@@ -173,8 +173,8 @@ export type CreateCommentInput = {
 export type CreateSprintInput = {
   name: string;
   goal?: string;
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export type CreateLabelInput = {

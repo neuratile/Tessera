@@ -179,8 +179,9 @@ export const CreateCommentInputSchema = z.object({
 export const CreateSprintInputSchema = z.object({
   name: z.string().min(1).max(100),
   goal: z.string().max(500).optional(),
-  startDate: IsoDateTimeSchema,
-  endDate: IsoDateTimeSchema,
+  // Planned sprints may not have dates until they are activated.
+  startDate: IsoDateTimeSchema.optional(),
+  endDate: IsoDateTimeSchema.optional(),
 });
 
 export const CreateLabelInputSchema = z.object({
