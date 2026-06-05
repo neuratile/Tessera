@@ -158,7 +158,7 @@ pub async fn login(pool: &PgPool, config: &Config, email: &str, password: &str) 
     .await?
     .ok_or_else(|| ApiError::Auth("invalid email or password".into()))?;
 
-    verify_password(password, &user.password_hash)?;
+    verify_password(password, user.password_hash.as_deref().unwrap_or(""))?;
 
     let (access_token, refresh_token) = generate_tokens(user.id, config)?;
 
