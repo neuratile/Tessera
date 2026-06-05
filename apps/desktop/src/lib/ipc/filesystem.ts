@@ -1,4 +1,4 @@
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { ask as tauriAsk, open as openDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readTextFile, stat, watch as tauriWatch } from '@tauri-apps/plugin-fs';
 import type { UnwatchFn, WatchEvent } from '@tauri-apps/plugin-fs';
 
@@ -137,6 +137,7 @@ export async function readDirectoryEntries(
             kind,
             // Empty array signals "expandable but unloaded" to react-arborist.
             children: [],
+            isLoaded: false,
           }
         : {
             id: relativePath,
@@ -241,6 +242,18 @@ export async function watchDirectory(
     return await tauriWatch(path, cb, options);
   } catch (err) {
     throw new IpcError('fs.watch', asMessage(err), { cause: err });
+  }
+}
+
+/** Show a native confirmation dialog. Returns `true` if confirmed, `false` if cancelled. */
+export async function confirm(
+  message: string,
+  options?: { title?: string; kind?: 'info' | 'warning' | 'error' },
+): Promise<boolean> {
+  try {
+    return await tauriAsk(message, options);
+  } catch (err) {
+    throw new IpcError('dialog.ask', asMessage(err), { cause: err });
   }
 }
 

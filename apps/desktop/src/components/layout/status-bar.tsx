@@ -19,6 +19,7 @@ export function StatusBar() {
   const treeError = useWorkspaceStore((s) => s.treeError);
   const analysis = useWorkspaceStore((s) => s.analysis);
 
+  console.log("DEBUG: StatusBar rendering, project is:", project);
   return (
     <footer className="flex h-7 shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-3 px-3 font-mono text-[11px] text-muted-foreground">
       <div className="flex items-center gap-4">

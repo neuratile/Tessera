@@ -3,6 +3,8 @@ import { create } from 'zustand';
 
 import { filesystem, getErrorMessage } from '@/lib/ipc';
 
+console.log("DEBUG: Evaluating workspace-store.ts module");
+
 /**
  * Workspace store: tracks the currently-open project and the in-memory
  * file tree built from the Tauri filesystem walk. The Phase 6 backend
@@ -21,6 +23,7 @@ export type FsEntry = {
   absolutePath: string;
   kind: 'file' | 'directory';
   children?: FsEntry[];
+  isLoaded?: boolean;
 };
 
 export type AnalysisState =
@@ -60,7 +63,7 @@ export type WorkspaceState = {
 function replaceChildren(entries: FsEntry[], target: string, children: FsEntry[]): FsEntry[] {
   return entries.map((entry) => {
     if (entry.relativePath === target) {
-      return { ...entry, children };
+      return { ...entry, children, isLoaded: true };
     }
     if (entry.children) {
       return { ...entry, children: replaceChildren(entry.children, target, children) };
@@ -91,13 +94,13 @@ async function refreshTreeHelper(
     newEntries.map(async (entry) => {
       if (entry.kind === 'directory') {
         const oldEntry = oldMap.get(entry.relativePath);
-        if (oldEntry && oldEntry.children !== undefined) {
+        if (oldEntry && oldEntry.isLoaded === true) {
           const refreshedChildren = await refreshTreeHelper(
-            oldEntry.children,
+            oldEntry.children ?? [],
             entry.absolutePath,
             entry.relativePath,
           );
-          return { ...entry, children: refreshedChildren };
+          return { ...entry, children: refreshedChildren, isLoaded: true };
         }
       }
       return entry;
@@ -105,7 +108,7 @@ async function refreshTreeHelper(
   );
 }
 
-export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
+const store = create<WorkspaceState>()((set) => ({
   project: null,
   tree: [],
   loadingTree: false,
@@ -113,14 +116,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
   selectedPath: null,
   analysis: { status: 'idle' },
 
-  setProject: (project) =>
+  setProject: (project) => {
+    console.log("DEBUG: setProject called with:", project);
     set({
       project,
       tree: [],
       treeError: null,
       selectedPath: null,
       analysis: { status: 'idle' },
-    }),
+    });
+  },
   updateProject: (project) => set({ project }),
   setTree: (tree) => set({ tree, treeError: null }),
   setTreeLoading: (loadingTree) => set({ loadingTree }),
@@ -149,3 +154,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
       analysis: { status: 'idle' },
     }),
 }));
+
+const globalStore = globalThis as unknown as {
+  useWorkspaceStore?: typeof store;
+};
+
+export const useWorkspaceStore = globalStore.useWorkspaceStore || store;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalStore.useWorkspaceStore = useWorkspaceStore;
+}
+

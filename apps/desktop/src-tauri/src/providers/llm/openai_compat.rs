@@ -114,6 +114,7 @@ pub fn build_request_payload(req: &GenerateRequest, stream: bool) -> serde_json:
         "model": req.model,
         "messages": req.messages.iter().map(message_to_openai).collect::<Vec<_>>(),
         "stream": stream,
+        "response_format": { "type": "json_object" }
     });
 
     if !req.tools.is_empty() {
@@ -443,6 +444,7 @@ mod tests {
         assert_eq!(body["model"], "x");
         assert_eq!(body["stream"], true);
         assert!(body["messages"].is_array());
+        assert_eq!(body["response_format"]["type"], "json_object");
     }
 
     #[test]

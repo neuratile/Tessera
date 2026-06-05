@@ -46,7 +46,7 @@ const DEFAULT_DURATION_MS = 6_000;
 
 let nextId = 1;
 
-export const useToastStore = create<ToastState>()((set) => ({
+const store = create<ToastState>()((set) => ({
   toasts: [],
   push: ({ kind, message, title, duration = DEFAULT_DURATION_MS }) => {
     const id = nextId++;
@@ -65,6 +65,17 @@ export const useToastStore = create<ToastState>()((set) => ({
     })),
   clear: () => set({ toasts: [] }),
 }));
+
+const globalStore = globalThis as unknown as {
+  useToastStore?: typeof store;
+};
+
+export const useToastStore = globalStore.useToastStore || store;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalStore.useToastStore = useToastStore;
+}
+
 
 /**
  * Imperative API for code that doesn't sit inside a React component.

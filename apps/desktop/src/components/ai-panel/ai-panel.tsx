@@ -28,7 +28,7 @@ import { pickActiveProvider } from '@/lib/provider';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
-import { ArtifactDetailDrawer } from './artifact-detail-drawer';
+import { ArtifactDetailDrawer } from '@/components/ai-panel/artifact-detail-drawer';
 
 const GENERATE_BUTTONS: ReadonlyArray<{
   id: GenerationArtifactType;
@@ -279,6 +279,7 @@ export function AiPanel() {
     [setArtifactsError, upsertArtifact],
   );
 
+  console.log("DEBUG: AiPanel rendering, project is:", project);
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-3 h-8 flex items-center justify-between bg-card">

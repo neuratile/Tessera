@@ -41,7 +41,27 @@ Rules:
   you MUST supply a single string. Format any bullet lists as markdown inside \
   a single string (e.g. '* item1\\n* item2'), NEVER as a JSON array of strings.
 - Always invoke the `emit_project_context` tool with the structured payload. \
-  Never reply with free-form prose.";
+  Never reply with free-form prose.
+
+The structured payload MUST have the following JSON structure:
+{
+  \"summary\": \"One-paragraph elevator pitch for the project\",
+  \"architecture_notes\": \"Bullet-prose describing layers, boundaries, and data flow. MUST be a single string (using markdown bullet points like '* text\\n* text'), NOT a JSON array of strings.\",
+  \"key_modules\": [
+    {
+      \"name\": \"Module/file name\",
+      \"responsibility\": \"Core module responsibility\"
+    }
+  ],
+  \"data_flows\": [
+    {
+      \"producer\": \"Producer name\",
+      \"consumer\": \"Consumer name\",
+      \"payload\": \"Payload description\"
+    }
+  ],
+  \"known_risks\": [\"Risk description\"]
+}";
 
 /// Build the message sequence for a context-summarization request.
 #[must_use]
@@ -61,7 +81,19 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
     user_body.push_str("## Sampled chunks\n\n");
     user_body.push_str(&ctx.render_chunks());
-    user_body.push_str("\n\nNow invoke `emit_project_context` with the structured summary.");
+    user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke `emit_project_context` with the structured summary.\n\
+    The JSON payload MUST have exactly these keys (and no others):\n\
+    {\n\
+      \"summary\": \"One-paragraph elevator pitch for the project\",\n\
+      \"architecture_notes\": \"Bullet-prose describing layers, boundaries, and data flow. MUST be a single string (using markdown bullet points like '* text\\n* text'), NOT a JSON array of strings.\",\n\
+      \"key_modules\": [\n\
+        {\n\
+          \"name\": \"Module/file name\",\n\
+          \"responsibility\": \"Core module responsibility\"\n\
+        }\n\
+      ]\n\
+    }\n\
+    Do NOT output fields from the codebase (like architect, location, timeline, bhk_display, category, etc.) at the top level. You MUST use only the keys listed above. Do NOT reply with free-form prose, apologies, or explanations. You MUST invoke the tool.");
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
 }

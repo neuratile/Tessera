@@ -100,6 +100,7 @@ pub fn run() {
             commands::projects::delete_project,
             // Analysis commands (Phase 3/4)
             commands::analysis::analyze_project,
+            commands::analysis::get_analysis_outcome,
             // Generation commands (Phase 5)
             commands::generation::generate_artifact,
             // Provider config commands (Phase 4)

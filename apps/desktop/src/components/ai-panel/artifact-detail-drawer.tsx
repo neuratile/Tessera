@@ -16,7 +16,7 @@ import { artifacts as artifactsIpc, generation, getErrorMessage } from '@/lib/ip
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
-import { DiffView } from './diff-view';
+import { DiffView } from '@/components/ai-panel/diff-view';
 
 type Props = {
   summary: ArtifactSummary;

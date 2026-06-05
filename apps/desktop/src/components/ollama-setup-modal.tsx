@@ -2,7 +2,7 @@ import { REQUIRED_MODELS } from '@testing-ide/shared';
 
 import type { OllamaSetupState } from '@/lib/ollama-setup';
 
-import { Button } from './ui/button';
+import { Button } from '@/components/ui/button';
 
 type Props = {
   isChecking: boolean;

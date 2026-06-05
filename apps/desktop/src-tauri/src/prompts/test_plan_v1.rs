@@ -28,7 +28,25 @@ Rules:
 - When a section cannot be filled from the supplied context, leave the \
   array empty rather than fabricating items.
 - Always invoke the `emit_test_plan` tool with the structured payload. \
-  Never reply with free-form prose.";
+  Never reply with free-form prose.
+
+The structured payload MUST have the following JSON structure:
+{
+  \"summary\": \"One-paragraph overview of the test plan\",
+  \"objectives\": [\"Objective 1\", \"Objective 2\"],
+  \"scopeIn\": [\"Module/feature in scope 1\"],
+  \"scopeOut\": [\"Module/feature out of scope 1\"],
+  \"strategy\": \"Description of the test strategy\",
+  \"environments\": [\"Environment 1\"],
+  \"risks\": [
+    {
+      \"description\": \"Risk description\",
+      \"mitigation\": \"Mitigation strategy\"
+    }
+  ],
+  \"entryCriteria\": [\"Entry criteria 1\"],
+  \"exitCriteria\": [\"Exit criteria 1\"]
+}";
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
@@ -55,7 +73,25 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
     user_body.push_str("## Relevant code\n\n");
     user_body.push_str(&ctx.render_chunks());
-    user_body.push_str("\n\nNow invoke `emit_test_plan` with the structured plan.");
+    user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_test_plan` tool with the structured plan.\n\
+    The JSON payload MUST have exactly these keys (and no others):\n\
+    {\n\
+      \"summary\": \"One-paragraph overview of the test plan\",\n\
+      \"objectives\": [\"Objective 1\"],\n\
+      \"scopeIn\": [\"Module/feature in scope\"],\n\
+      \"scopeOut\": [\"Module/feature out of scope\"],\n\
+      \"strategy\": \"Description of the test strategy\",\n\
+      \"environments\": [\"Environment 1\"],\n\
+      \"risks\": [\n\
+        {\n\
+          \"description\": \"Risk description\",\n\
+          \"mitigation\": \"Mitigation strategy\"\n\
+        }\n\
+      ],\n\
+      \"entryCriteria\": [\"Entry criteria 1\"],\n\
+      \"exitCriteria\": [\"Exit criteria 1\"]\n\
+    }\n\
+    Do NOT output fields from the codebase (like architect, location, timeline, bhk_display, category, etc.) at the top level. You MUST use only the keys listed above. Do NOT reply with free-form prose, apologies, or explanations. You MUST invoke the tool.");
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
 }

@@ -44,7 +44,7 @@ export type EditorState = {
   reset: () => void;
 };
 
-export const useEditorStore = create<EditorState>()((set) => ({
+const store = create<EditorState>()((set) => ({
   tabs: [],
   activeId: null,
   contents: {},
@@ -122,6 +122,17 @@ export const useEditorStore = create<EditorState>()((set) => ({
       loading: {},
     }),
 }));
+
+const globalStore = globalThis as unknown as {
+  useEditorStore?: typeof store;
+};
+
+export const useEditorStore = globalStore.useEditorStore || store;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalStore.useEditorStore = useEditorStore;
+}
+
 
 function stripKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
   if (!(key in obj)) return obj;

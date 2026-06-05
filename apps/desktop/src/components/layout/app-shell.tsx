@@ -9,8 +9,8 @@ import {
 import { COMMAND, useCommand } from '@/lib/command-bus';
 import { useUiStore, type PanelSizes } from '@/stores/ui-store';
 
-import { StatusBar } from './status-bar';
-import { Toolbar } from './toolbar';
+import { StatusBar } from '@/components/layout/status-bar';
+import { Toolbar } from '@/components/layout/toolbar';
 
 type Props = {
   sidebar: ReactNode;

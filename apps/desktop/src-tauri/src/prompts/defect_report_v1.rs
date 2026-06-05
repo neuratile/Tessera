@@ -30,7 +30,29 @@ Rules:
 - Defect IDs must strictly match the regex `^DEF-[A-Z0-9_-]+$` (all-caps, \
   e.g., `DEF-NULL-POINTER`, NOT `DEF-Null-Pointer` or `DEF-Null`).
 - Always invoke the `emit_defect_report` tool with the structured payload. \
-  Never reply with free-form prose.";
+  Never reply with free-form prose.
+
+The structured payload MUST have the following JSON structure:
+{
+  \"findings\": [
+    {
+      \"id\": \"DEF-UNIQUE-ID\",
+      \"severity\": \"critical | major | minor | trivial\",
+      \"category\": \"logic_error | race_condition | null_safety | input_validation | security | performance | memory_leak | error_handling\",
+      \"confidence\": \"high | medium\",
+      \"location\": {
+        \"symbol\": \"Function/class/method name\",
+        \"start_line\": 10,
+        \"end_line\": 20,
+        \"file_hint\": \"path/to/file.ext\"
+      },
+      \"description\": \"Detailed description of the defect\",
+      \"impact\": \"Potential impact of the defect\",
+      \"suggested_fix\": \"Concrete code fix suggestion\"
+    }
+  ],
+  \"summary\": \"One-paragraph overview of findings\"
+}";
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
@@ -55,7 +77,29 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
     user_body.push_str("## Code under review\n\n");
     user_body.push_str(&ctx.render_chunks());
-    user_body.push_str("\n\nNow invoke `emit_defect_report` with the structured findings.");
+    user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_defect_report` tool with the structured findings.\n\
+    The JSON payload MUST have exactly these keys (and no others):\n\
+    {\n\
+      \"findings\": [\n\
+        {\n\
+          \"id\": \"DEF-UNIQUE-ID\",\n\
+          \"severity\": \"critical | major | minor | trivial\",\n\
+          \"category\": \"logic_error | race_condition | null_safety | input_validation | security | performance | memory_leak | error_handling\",\n\
+          \"confidence\": \"high | medium\",\n\
+          \"location\": {\n\
+            \"symbol\": \"Function/class/method name\",\n\
+            \"start_line\": 1,\n\
+            \"end_line\": 10,\n\
+            \"file_hint\": \"path/to/file.ext\"\n\
+          },\n\
+          \"description\": \"Detailed description of the defect\",\n\
+          \"impact\": \"Potential impact of the defect\",\n\
+          \"suggested_fix\": \"Concrete code fix suggestion\"\n\
+        }\n\
+      ],\n\
+      \"summary\": \"One-paragraph overview of findings\"\n\
+    }\n\
+    Do NOT output fields from the codebase (like architect, location, timeline, bhk_display, category, etc.) at the top level. You MUST use only the keys listed above. Do NOT reply with free-form prose, apologies, or explanations. You MUST invoke the tool.");
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
 }

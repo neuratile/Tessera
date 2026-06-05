@@ -30,6 +30,7 @@ export function FileExplorer() {
   const projectId = project?.id;
   const projectRootPath = project?.rootPath;
 
+  console.log("DEBUG: FileExplorer rendering, project is:", project);
   // Setup directory watch subscription when active project changes
   useEffect(() => {
     if (projectRootPath === undefined) return;
@@ -85,7 +86,7 @@ export function FileExplorer() {
   const handleToggle = (id: string) => {
     const target = findEntry(tree, id);
     if (target === null || target.kind !== 'directory') return;
-    if (target.children !== undefined) return; // already loaded
+    if (target.isLoaded) return; // already loaded
 
     setLoadingFolders((prev) => {
       const next = new Set(prev);

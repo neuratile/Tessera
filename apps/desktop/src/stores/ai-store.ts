@@ -55,7 +55,7 @@ export type AiState = {
   reset: () => void;
 };
 
-export const useAiStore = create<AiState>()((set) => ({
+const store = create<AiState>()((set) => ({
   generation: { status: 'idle' },
   artifacts: [],
   loadingArtifacts: false,
@@ -98,3 +98,14 @@ export const useAiStore = create<AiState>()((set) => ({
       artifactsError: null,
     }),
 }));
+
+const globalStore = globalThis as unknown as {
+  useAiStore?: typeof store;
+};
+
+export const useAiStore = globalStore.useAiStore || store;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalStore.useAiStore = useAiStore;
+}
+

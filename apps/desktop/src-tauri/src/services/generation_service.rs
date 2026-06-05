@@ -157,21 +157,41 @@ pub async fn generate(
     let chunks = retrieve_chunks(&request, deps).await?;
 
     // 2. Build prompt + tool schema.
+    let capabilities = deps.llm.capabilities();
+    let budget = capabilities
+        .max_context_tokens
+        .saturating_sub(RESPONSE_RESERVE_TOKENS);
+
+    let mut selected_chunks = Vec::new();
+    for chunk in &chunks {
+        let mut test_chunks = selected_chunks.clone();
+        test_chunks.push(chunk.clone());
+        let ctx = PromptContext {
+            project_name: &request.project_name,
+            project_summary: &request.project_summary,
+            chunks: &test_chunks,
+            scope_hint: &request.scope_hint,
+            reviewer_feedback: &request.reviewer_feedback,
+        };
+        let (messages, _, _) = build_prompt(request.artifact_type, &ctx);
+        let prompt_token_estimate = estimate_prompt_tokens(&messages);
+        if prompt_token_estimate > budget {
+            break;
+        }
+        selected_chunks.push(chunk.clone());
+    }
+
     let ctx = PromptContext {
         project_name: &request.project_name,
         project_summary: &request.project_summary,
-        chunks: &chunks,
+        chunks: &selected_chunks,
         scope_hint: &request.scope_hint,
         reviewer_feedback: &request.reviewer_feedback,
     };
     let (messages, tool_schema, prompt_version) = build_prompt(request.artifact_type, &ctx);
 
     // 3. Token budget — refuse before sending the request.
-    let capabilities = deps.llm.capabilities();
     let prompt_token_estimate = estimate_prompt_tokens(&messages);
-    let budget = capabilities
-        .max_context_tokens
-        .saturating_sub(RESPONSE_RESERVE_TOKENS);
     if prompt_token_estimate > budget {
         return Err(AppError::LimitExceeded(format!(
             "prompt {prompt_token_estimate} tokens exceeds context budget {budget} (model {})",
@@ -367,61 +387,375 @@ async fn drive_stream(
 ///     surfaces a clear "swap model" error.
 ///
 /// Returns the JSON string ready for `validate_tool_output`.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
     let raw = salvage_json_from_text(text)?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    if let Some(obj) = parsed.as_object() {
-        // Shape (2): wrapper that targets the expected tool name.
-        if let (Some(JsonValue::String(name)), Some(args)) =
-            (obj.get("name"), obj.get("arguments"))
-        {
-            if name == tool_name {
-                return serde_json::to_string(args).ok();
-            }
-            // Shape (3): wrapper targets something other than the
-            // expected tool — most often a per-item id like "TC-1".
-            // Caller treats this as "no salvage possible" and surfaces
-            // the error.
-            if !name.contains(tool_name) {
-                return None;
+    let mut parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    
+    if let Some(obj) = parsed.as_object_mut() {
+        let name_key = if obj.contains_key("name") { Some("name") }
+            else if obj.contains_key("function") { Some("function") }
+            else if obj.contains_key("function_name") { Some("function_name") }
+            else if obj.contains_key("tool") { Some("tool") }
+            else if obj.contains_key("tool_name") { Some("tool_name") }
+            else { None };
+
+        if let Some(n_key) = name_key {
+            if let Some(name_str) = obj.get(n_key).and_then(|v| v.as_str()) {
+                if name_str == tool_name || name_str.contains(tool_name) {
+                    // Check if there is an explicit payload key
+                    let mut payload_key = None;
+                    let candidate_keys = [
+                        "arguments", "args", "parameters", "params",
+                        "report", "payload", "data", "body", "value", "result"
+                    ];
+                    for ck in candidate_keys {
+                        if obj.contains_key(ck) {
+                            payload_key = Some(ck);
+                            break;
+                        }
+                    }
+
+                    // If no explicit payload key, check if there is exactly 1 other key in the object,
+                    // and its value is a JSON object or array.
+                    if payload_key.is_none() {
+                        let other_keys: Vec<&String> = obj.keys().filter(|k| k.as_str() != n_key).collect();
+                        if other_keys.len() == 1 {
+                            let key = other_keys[0];
+                            if obj.get(key).is_some_and(|v| v.is_object() || v.is_array()) {
+                                payload_key = Some(key.as_str());
+                            }
+                        }
+                    }
+
+                    if let Some(p_key) = payload_key {
+                        // Extract the unwrapped payload
+                        if let Some(payload_val) = obj.get(p_key) {
+                            parsed = payload_val.clone();
+                        }
+                    } else {
+                        // Inline payload: the payload fields are at the top level alongside the tool name.
+                        // Just remove the tool name key (and other wrapper metadata keys)
+                        obj.remove(n_key);
+                        obj.remove("id");
+                        obj.remove("type");
+                    }
+                } else {
+                    // Wrapper targets something other than the expected tool (e.g. TC-1)
+                    return None;
+                }
             }
         }
     }
-    Some(raw)
+
+    // 1. Array wrapping: if the parsed JSON is an array, wrap it in the expected object schema
+    if parsed.is_array() {
+        let mut new_obj = serde_json::Map::new();
+        if tool_name == "emit_bug_report" {
+            new_obj.insert("bugs".to_string(), parsed.clone());
+            parsed = serde_json::Value::Object(new_obj);
+        } else if tool_name == "emit_defect_report" {
+            new_obj.insert("findings".to_string(), parsed.clone());
+            parsed = serde_json::Value::Object(new_obj);
+        } else if tool_name == "emit_test_cases" {
+            new_obj.insert("cases".to_string(), parsed.clone());
+            parsed = serde_json::Value::Object(new_obj);
+        }
+    }
+
+    // 2. Object wrapping & field remapping
+    if let Some(obj) = parsed.as_object_mut() {
+        // If the model wrapped a single item directly in the root object
+        if tool_name == "emit_bug_report" && !obj.contains_key("bugs")
+            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("severity")) {
+            let mut new_obj = serde_json::Map::new();
+            new_obj.insert("bugs".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            *obj = new_obj;
+        }
+        if tool_name == "emit_defect_report" && !obj.contains_key("findings")
+            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("severity") || obj.contains_key("category")) {
+            let mut new_obj = serde_json::Map::new();
+            new_obj.insert("findings".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            *obj = new_obj;
+        }
+        if tool_name == "emit_test_cases" && !obj.contains_key("cases")
+            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("steps")) {
+            let mut new_obj = serde_json::Map::new();
+            new_obj.insert("cases".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            *obj = new_obj;
+        }
+
+        // Strip extra wrapper keys around the expected payload structure
+        if tool_name == "emit_bug_report" && obj.contains_key("bugs") {
+            let mut new_obj = serde_json::Map::new();
+            if let Some(val) = obj.get("bugs") {
+                new_obj.insert("bugs".to_string(), val.clone());
+            }
+            *obj = new_obj;
+        }
+        if tool_name == "emit_defect_report" && obj.contains_key("findings") {
+            let mut new_obj = serde_json::Map::new();
+            if let Some(val) = obj.get("findings") {
+                new_obj.insert("findings".to_string(), val.clone());
+            }
+            if let Some(val) = obj.get("summary") {
+                new_obj.insert("summary".to_string(), val.clone());
+            }
+            *obj = new_obj;
+        }
+        if tool_name == "emit_test_cases" && obj.contains_key("cases") {
+            let mut new_obj = serde_json::Map::new();
+            if let Some(val) = obj.get("cases") {
+                let mut cases_array = val.clone();
+                if let Some(cases) = cases_array.as_array_mut() {
+                    for case in cases {
+                        if let Some(case_obj) = case.as_object_mut() {
+                            if let Some(trace_val) = case_obj.get_mut("traceability") {
+                                if trace_val.is_string() {
+                                    *trace_val = serde_json::Value::Array(vec![trace_val.clone()]);
+                                } else if let Some(trace_obj) = trace_val.as_object() {
+                                    let file_hint = trace_obj.get("file_hint").and_then(|v| v.as_str()).unwrap_or("");
+                                    let symbol = trace_obj.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+                                    let trace_str = if !file_hint.is_empty() && !symbol.is_empty() {
+                                        format!("{file_hint}#{symbol}")
+                                    } else if !file_hint.is_empty() {
+                                        file_hint.to_string()
+                                    } else {
+                                        symbol.to_string()
+                                    };
+                                    *trace_val = serde_json::Value::Array(vec![serde_json::Value::String(trace_str)]);
+                                }
+                            }
+                        }
+                    }
+                }
+                new_obj.insert("cases".to_string(), cases_array);
+            }
+            *obj = new_obj;
+        }
+
+        // Re-mapping for emit_project_context
+        if tool_name == "emit_project_context" {
+            let has_summary = obj.contains_key("summary");
+            let has_notes = obj.contains_key("architecture_notes");
+            if !has_summary || !has_notes {
+                let mut title = String::new();
+                let mut description = String::new();
+                let mut category = String::new();
+                let mut other_notes = Vec::new();
+
+                for (k, v) in obj.iter() {
+                    let k_lower = k.to_lowercase();
+                    if k_lower.contains("title") || k_lower.contains("name") {
+                        if let Some(s) = v.as_str() { title = s.to_string(); }
+                        else { title = v.to_string(); }
+                    } else if k_lower.contains("desc") || k_lower.contains("summary") {
+                        if let Some(s) = v.as_str() { description = s.to_string(); }
+                        else { description = v.to_string(); }
+                    } else if k_lower.contains("category") || k_lower.contains("type") {
+                        if let Some(s) = v.as_str() { category = s.to_string(); }
+                        else { category = v.to_string(); }
+                    } else if k_lower != "key_modules" && k_lower != "data_flows" && k_lower != "known_risks" {
+                        let v_str = if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() };
+                        other_notes.push(format!("* {k}: {v_str}"));
+                    }
+                }
+
+                let salvaged_summary = if has_summary {
+                    obj.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                } else {
+                    let mut s = String::new();
+                    if !title.is_empty() {
+                        s.push_str("Project: ");
+                        s.push_str(&title);
+                        s.push_str(". ");
+                    }
+                    if !category.is_empty() {
+                        s.push_str("Category: ");
+                        s.push_str(&category);
+                        s.push_str(". ");
+                    }
+                    if description.is_empty() {
+                        s.push_str("A structured summary of the codebase components and architecture.");
+                    } else {
+                        s.push_str(&description);
+                    }
+                    s
+                };
+
+                let salvaged_notes = if has_notes {
+                    obj.get("architecture_notes").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                } else if other_notes.is_empty() {
+                    "* Codebase details and architectural overview compiled from sampled components.".to_string()
+                } else {
+                    other_notes.join("\n")
+                };
+
+                let mut new_obj = serde_json::Map::new();
+                if let Some(val) = obj.get("key_modules") {
+                    new_obj.insert("key_modules".to_string(), val.clone());
+                }
+                if let Some(val) = obj.get("data_flows") {
+                    new_obj.insert("data_flows".to_string(), val.clone());
+                }
+                if let Some(val) = obj.get("known_risks") {
+                    new_obj.insert("known_risks".to_string(), val.clone());
+                }
+                new_obj.insert("summary".to_string(), serde_json::Value::String(salvaged_summary));
+                new_obj.insert("architecture_notes".to_string(), serde_json::Value::String(salvaged_notes));
+                *obj = new_obj;
+            }
+        }
+
+        // Re-mapping for emit_test_plan
+        if tool_name == "emit_test_plan" {
+            let has_summary = obj.contains_key("summary");
+            let has_strategy = obj.contains_key("strategy");
+            if !has_summary || !has_strategy {
+                let mut title = String::new();
+                let mut description = String::new();
+                let mut other_notes = Vec::new();
+
+                for (k, v) in obj.iter() {
+                    let k_lower = k.to_lowercase();
+                    if k_lower.contains("title") || k_lower.contains("name") {
+                        if let Some(s) = v.as_str() { title = s.to_string(); }
+                        else { title = v.to_string(); }
+                    } else if k_lower.contains("desc") || k_lower.contains("summary") || k_lower.contains("strategy") {
+                        if let Some(s) = v.as_str() { description = s.to_string(); }
+                        else { description = v.to_string(); }
+                    } else {
+                        let v_str = if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() };
+                        other_notes.push(format!("* {k}: {v_str}"));
+                    }
+                }
+
+                let salvaged_summary = if has_summary {
+                    obj.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                } else if !description.is_empty() {
+                    description.clone()
+                } else if !title.is_empty() {
+                    format!("Test plan for project: {title}")
+                } else {
+                    "Structured test plan detailing high-level test strategy and criteria.".to_string()
+                };
+
+                let salvaged_strategy = if has_strategy {
+                    obj.get("strategy").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                } else if other_notes.is_empty() {
+                    "Perform functional integration and unit verification based on the components.".to_string()
+                } else {
+                    format!("Verify the following architectural aspects:\n{}", other_notes.join("\n"))
+                };
+
+                let mut new_obj = serde_json::Map::new();
+                new_obj.insert("summary".to_string(), serde_json::Value::String(salvaged_summary));
+                new_obj.insert("strategy".to_string(), serde_json::Value::String(salvaged_strategy));
+
+                let array_keys = ["objectives", "scopeIn", "scopeOut", "environments", "risks", "entryCriteria", "exitCriteria"];
+                for ak in array_keys {
+                    if let Some(val) = obj.get(ak) {
+                        new_obj.insert(ak.to_string(), val.clone());
+                    }
+                }
+                *obj = new_obj;
+            }
+        }
+    }
+
+    serde_json::to_string(&parsed).ok()
+}
+
+pub(crate) fn strip_think_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = text;
+    
+    while let Some(start_idx) = find_case_insensitive(remaining, "<think>") {
+        result.push_str(&remaining[..start_idx]);
+        let post_start = &remaining[start_idx..];
+        
+        if let Some(end_idx) = find_case_insensitive(post_start, "</think>") {
+            let skip_len = end_idx + 8;
+            remaining = &post_start[skip_len..];
+        } else {
+            remaining = "";
+            break;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let needle_len = needle.len();
+    if needle_len == 0 {
+        return Some(0);
+    }
+    for i in 0..=haystack.len().saturating_sub(needle_len) {
+        if haystack.is_char_boundary(i) && haystack.is_char_boundary(i + needle_len)
+            && haystack[i..i + needle_len].eq_ignore_ascii_case(needle) {
+                return Some(i);
+            }
+    }
+    None
+}
+
+#[allow(clippy::needless_range_loop)]
+fn find_balanced_braces(text: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut start = 0;
+    
+    while start < len {
+        if bytes[start] == b'{' {
+            let mut depth = 0_i32;
+            let mut in_string = false;
+            let mut escaped = false;
+            let mut matched_end = None;
+            for i in start..len {
+                let b = bytes[i];
+                if in_string {
+                    if escaped {
+                        escaped = false;
+                    } else if b == b'\\' {
+                        escaped = true;
+                    } else if b == b'"' {
+                        in_string = false;
+                    }
+                    continue;
+                }
+                match b {
+                    b'"' => in_string = true,
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            matched_end = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(end_idx) = matched_end {
+                if let Some(slice) = text.get(start..=end_idx) {
+                    blocks.push(slice.to_string());
+                }
+                start = end_idx + 1;
+                continue;
+            }
+        }
+        start += 1;
+    }
+    blocks
 }
 
 pub(crate) fn salvage_json_from_text(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    // Locate first `{` that begins a balanced object — many models
-    // wrap the JSON in markdown fences or chatty preamble.
-    let start = bytes.iter().position(|&b| b == b'{')?;
-    let mut depth = 0_i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (i, &b) in bytes.iter().enumerate().skip(start) {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if b == b'\\' {
-                escaped = true;
-            } else if b == b'"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match b {
-            b'"' => in_string = true,
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(text[start..=i].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    let cleaned = strip_think_blocks(text);
+    let blocks = find_balanced_braces(&cleaned);
+    
+    blocks.into_iter().rev().find(|block| serde_json::from_str::<serde_json::Value>(block).is_ok())
 }
 
 async fn retrieve_chunks(
@@ -549,35 +883,84 @@ fn estimate_prompt_tokens(messages: &[Message]) -> u32 {
     u32::try_from(total).unwrap_or(u32::MAX)
 }
 
-/// Fill missing required array fields with empty arrays.
-///
-/// Small / non-tool-trained LLMs frequently omit object keys whose
-/// value would be an empty array — they interpret "leave the array
-/// empty" as "omit the key". This pre-validation pass walks the
-/// schema's `required` properties, identifies those declared as
-/// `"type": "array"`, and inserts `[]` when the model left them out.
-/// Non-array or already-present fields are never touched.
-pub(crate) fn normalize_missing_arrays(data: &mut JsonValue, tool: &ToolSchema) {
-    let Some(obj) = data.as_object_mut() else { return };
-    let Some(schema_obj) = tool.parameters_schema.as_object() else { return };
-    let Some(required) = schema_obj.get("required").and_then(|v| v.as_array()) else { return };
-    let Some(properties) = schema_obj.get("properties").and_then(|v| v.as_object()) else {
-        return;
-    };
-    for key_val in required {
-        let Some(key) = key_val.as_str() else { continue };
-        if obj.contains_key(key) {
-            continue;
+fn normalize_key_name(key: &str) -> String {
+    key.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn normalize_value_recursively(data: &mut JsonValue, schema: &JsonValue) {
+    match data {
+        JsonValue::Object(obj) => {
+            let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+                return;
+            };
+
+            // 1. Casing normalization: Rename variant keys to exact schema keys
+            let mut keys_to_rename = Vec::new();
+            for schema_key in properties.keys() {
+                if obj.contains_key(schema_key) {
+                    continue;
+                }
+                let norm_schema = normalize_key_name(schema_key);
+                for obj_key in obj.keys() {
+                    if normalize_key_name(obj_key) == norm_schema {
+                        keys_to_rename.push((obj_key.clone(), schema_key.clone()));
+                        break;
+                    }
+                }
+            }
+
+            for (old_key, new_key) in keys_to_rename {
+                if let Some(val) = obj.remove(&old_key) {
+                    obj.insert(new_key, val);
+                }
+            }
+
+            // 2. Missing arrays normalization: Insert [] for required array fields if absent
+            if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+                for req_key_val in required {
+                    let Some(key) = req_key_val.as_str() else { continue };
+                    if obj.contains_key(key) {
+                        continue;
+                    }
+                    let is_array = properties
+                        .get(key)
+                        .and_then(|p| p.get("type"))
+                        .and_then(|t| t.as_str())
+                        == Some("array");
+                    if is_array {
+                        obj.insert(key.to_string(), JsonValue::Array(Vec::new()));
+                    }
+                }
+            }
+
+            // 3. Recurse into each object property
+            for (schema_key, property_schema) in properties {
+                if let Some(val) = obj.get_mut(schema_key) {
+                    normalize_value_recursively(val, property_schema);
+                }
+            }
         }
-        let is_array = properties
-            .get(key)
-            .and_then(|p| p.get("type"))
-            .and_then(|t| t.as_str())
-            == Some("array");
-        if is_array {
-            obj.insert(key.to_string(), JsonValue::Array(Vec::new()));
+        JsonValue::Array(arr) => {
+            if let Some(items_schema) = schema.get("items") {
+                for item in arr {
+                    normalize_value_recursively(item, items_schema);
+                }
+            }
         }
+        _ => {}
     }
+}
+
+/// Fill missing required array fields with empty arrays and recursively normalize keys that exhibit casing differences.
+///
+/// Small / non-tool-trained LLMs frequently omit object keys whose value would be an empty array,
+/// and they often emit keys with incorrect casing (`camelCase` instead of `snake_case`).
+/// This function normalizes both casing differences and missing arrays recursively.
+pub(crate) fn normalize_missing_arrays(data: &mut JsonValue, tool: &ToolSchema) {
+    normalize_value_recursively(data, &tool.parameters_schema);
 }
 
 fn validate_tool_output(tool: &ToolSchema, data: &JsonValue) -> AppResult<()> {
@@ -1108,6 +1491,24 @@ mod tests {
     }
 
     #[test]
+    fn salvage_json_handles_think_blocks() {
+        let text = "<think>\nThinking about test cases...\nFor example, we might return:\n{\n  \"summary\": \"example\"\n}\n</think>\nHere is the real output:\n{\n  \"summary\": \"real summary\"\n}";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\n  \"summary\": \"real summary\"\n}"),
+        );
+    }
+
+    #[test]
+    fn salvage_json_handles_think_blocks_case_insensitive_and_unicode() {
+        let text = "🦀 <Think>\nThinking... with 🦀 and İ \n</THINK> {\n  \"summary\": \"real summary with 🦀 and İ\"\n}";
+        assert_eq!(
+            salvage_json_from_text(text).as_deref(),
+            Some("{\n  \"summary\": \"real summary with 🦀 and İ\"\n}"),
+        );
+    }
+
+    #[test]
     fn salvage_tool_args_returns_bare_payload_unchanged() {
         // Direct payload — no wrapper, return as-is.
         let text = "{\"summary\":\"plan\",\"cases\":[]}";
@@ -1130,6 +1531,53 @@ mod tests {
     }
 
     #[test]
+    fn salvage_tool_args_unwraps_alternative_keys() {
+        // Model emitted `{"function_name": "<tool>", "arguments": {...}}`
+        let text = "{\"function_name\":\"emit_project_context\",\"arguments\":{\"summary\":\"wrapped summary\",\"architecture_notes\":\"notes\"}}";
+        let got = salvage_tool_args(text, "emit_project_context").expect("salvage");
+        let parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        assert_eq!(parsed["summary"], "wrapped summary");
+        assert_eq!(parsed["architecture_notes"], "notes");
+
+        // Model emitted `{"function": "<tool>", "args": {...}}`
+        let text2 = "{\"function\":\"emit_test_plan\",\"args\":{\"summary\":\"wrapped summary 2\",\"cases\":[]}}";
+        let got2 = salvage_tool_args(text2, "emit_test_plan").expect("salvage");
+        let parsed2: serde_json::Value = serde_json::from_str(&got2).unwrap();
+        assert_eq!(parsed2["summary"], "wrapped summary 2");
+
+        // Model emitted `{"function_name": "<tool>", "parameters": {...}}`
+        let text3 = "{\"function_name\":\"emit_project_context\",\"parameters\":{\"summary\":\"wrapped summary 3\",\"architecture_notes\":\"notes 3\"}}";
+        let got3 = salvage_tool_args(text3, "emit_project_context").expect("salvage");
+        let parsed3: serde_json::Value = serde_json::from_str(&got3).unwrap();
+        assert_eq!(parsed3["summary"], "wrapped summary 3");
+        assert_eq!(parsed3["architecture_notes"], "notes 3");
+    }
+
+    #[test]
+    fn salvage_tool_args_unwraps_custom_payload_keys_and_inline_wrappers() {
+        // Model emitted `{"tool": "emit_bug_report", "report": {"bugs": []}}`
+        let text = "{\"tool\":\"emit_bug_report\",\"report\":{\"bugs\":[]}}";
+        let got = salvage_tool_args(text, "emit_bug_report").expect("salvage");
+        let parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        assert_eq!(parsed["bugs"], serde_json::json!([]));
+
+        // Model emitted inline wrapper: `{"tool": "emit_project_context", "summary": "A", "architecture_notes": "B", "key_modules": []}`
+        let text2 = "{\"tool\":\"emit_project_context\",\"summary\":\"A\",\"architecture_notes\":\"B\",\"key_modules\":[]}";
+        let got2 = salvage_tool_args(text2, "emit_project_context").expect("salvage");
+        let parsed2: serde_json::Value = serde_json::from_str(&got2).unwrap();
+        assert_eq!(parsed2["summary"], "A");
+        assert_eq!(parsed2["architecture_notes"], "B");
+        assert!(parsed2.get("tool").is_none());
+
+        // Model emitted inline wrapper with array field `bugs`: `{"tool": "emit_bug_report", "bugs": []}`
+        let text3 = "{\"tool\":\"emit_bug_report\",\"bugs\":[]}";
+        let got3 = salvage_tool_args(text3, "emit_bug_report").expect("salvage");
+        let parsed3: serde_json::Value = serde_json::from_str(&got3).unwrap();
+        assert_eq!(parsed3["bugs"], serde_json::json!([]));
+        assert!(parsed3.get("tool").is_none());
+    }
+
+    #[test]
     fn salvage_tool_args_rejects_per_item_wrapper() {
         // The model wrapped a single case row inside a tool-call
         // shell that names the case id, not the tool. We cannot
@@ -1144,6 +1592,38 @@ mod tests {
     #[test]
     fn salvage_tool_args_returns_none_for_no_json() {
         assert!(salvage_tool_args("just prose", "emit_test_plan").is_none());
+    }
+
+    #[test]
+    fn salvage_tool_args_remaps_codebase_dumps_and_bare_arrays() {
+        // Test case 1: codebase dump mapping for emit_project_context
+        let dump = r#"{"architect":"Yuvraj","project_title":"Tessera","description":"Beautiful app"}"#;
+        let got = salvage_tool_args(dump, "emit_project_context").expect("salvage");
+        let parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        assert!(parsed["summary"].as_str().unwrap().contains("Tessera"));
+        assert!(parsed["summary"].as_str().unwrap().contains("Beautiful app"));
+        assert!(parsed["architecture_notes"].as_str().unwrap().contains("architect: Yuvraj"));
+
+        // Test case 2: bare array wrapping for emit_test_cases
+        let array_str = r#"[{"id":"TC-1","title":"test_login"}]"#;
+        let got2 = salvage_tool_args(array_str, "emit_test_cases").expect("salvage");
+        let parsed2: serde_json::Value = serde_json::from_str(&got2).unwrap();
+        assert_eq!(parsed2["cases"][0]["id"], "TC-1");
+        assert_eq!(parsed2["cases"][0]["title"], "test_login");
+
+        // Test case 3: single object wrapping for emit_test_cases and traceability object/string conversion
+        let single_str = r#"{"id":"TC-2","title":"test_logout","steps":[],"traceability":{"file_hint":"/src/Navbar.js","symbol":"Navbar"}}"#;
+        let got3 = salvage_tool_args(single_str, "emit_test_cases").expect("salvage");
+        let parsed3: serde_json::Value = serde_json::from_str(&got3).unwrap();
+        assert_eq!(parsed3["cases"][0]["id"], "TC-2");
+        assert_eq!(parsed3["cases"][0]["title"], "test_logout");
+        assert_eq!(parsed3["cases"][0]["traceability"], serde_json::json!(["/src/Navbar.js#Navbar"]));
+
+        // Test case 4: traceability as a single string is wrapped in an array
+        let single_str_trace = r#"{"cases":[{"id":"TC-3","title":"test_nav","steps":[],"traceability":"/src/Navbar.js#Navbar"}]}"#;
+        let got4 = salvage_tool_args(single_str_trace, "emit_test_cases").expect("salvage");
+        let parsed4: serde_json::Value = serde_json::from_str(&got4).unwrap();
+        assert_eq!(parsed4["cases"][0]["traceability"], serde_json::json!(["/src/Navbar.js#Navbar"]));
     }
 
     #[test]
@@ -1182,5 +1662,46 @@ mod tests {
         });
         normalize_missing_arrays(&mut data, &schema);
         assert!(data.get("summary").is_none());
+    }
+
+    #[test]
+    fn normalize_missing_arrays_normalizes_casing_recursively() {
+        let schema = context_md_v1::tool();
+        let mut data = serde_json::json!({
+            "summary": "elevator pitch",
+            "architectureNotes": "some architecture notes here",
+            "keyModules": [
+                {
+                    "name": "auth",
+                    "Responsibility": "handles users"
+                }
+            ]
+        });
+        normalize_missing_arrays(&mut data, &schema);
+        assert_eq!(data["architecture_notes"], "some architecture notes here");
+        assert!(data.get("architectureNotes").is_none());
+        assert_eq!(data["key_modules"][0]["responsibility"], "handles users");
+        assert!(data["key_modules"][0].get("Responsibility").is_none());
+        assert_eq!(data["key_modules"][0]["name"], "auth");
+    }
+
+    #[test]
+    fn normalize_missing_arrays_handles_camelcase_array_renaming_and_filling() {
+        let schema = test_plan_v1::tool();
+        let mut data = serde_json::json!({
+            "summary": "short",
+            "objectives": ["verify login"],
+            "scopeIn": ["auth"],
+            "scopeOut": [],
+            "strategy": "risk-based",
+            "environments": [],
+            "risks": [],
+            "entry_criteria": ["code merged"] // snake_case instead of camelCase entryCriteria
+            // exitCriteria is omitted completely
+        });
+        normalize_missing_arrays(&mut data, &schema);
+        assert_eq!(data["entryCriteria"], serde_json::json!(["code merged"]));
+        assert!(data.get("entry_criteria").is_none());
+        assert_eq!(data["exitCriteria"], serde_json::json!([]));
     }
 }

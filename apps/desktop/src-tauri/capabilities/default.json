@@ -9,19 +9,51 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
-    "fs:allow-read-text-file",
     "fs:allow-write-text-file",
-    "fs:allow-read-dir",
-    "fs:allow-stat",
-    "fs:allow-watch",
-    "fs:allow-unwatch",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-watch",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-unwatch",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" }
+      ]
+    },
     {
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/**" },
         { "path": "$DOCUMENT/**" },
         { "path": "$DESKTOP/**" },
-        { "path": "$DOWNLOAD/**" }
+        { "path": "$DOWNLOAD/**" },
+        { "path": "**" },
+        { "path": "**/*" }
       ]
     }
   ]

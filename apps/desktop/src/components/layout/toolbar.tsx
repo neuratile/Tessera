@@ -1,5 +1,5 @@
 import type { Project } from '@testing-ide/shared';
-import { Clock, FolderOpen, Loader2, Settings } from 'lucide-react';
+import { Clock, FolderOpen, Loader2, Settings, Trash } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -74,12 +74,22 @@ export function Toolbar() {
         // analysed folder shouldn't re-run the whole pipeline).
         const alreadyReady =
           options.skipAnalysisIfReady && target.status === 'ready' && target.fileCount > 0;
-        if (alreadyReady) return;
+        if (alreadyReady) {
+          try {
+            const outcome = await analysisIpc.getAnalysisOutcome(target.id);
+            if (outcome !== null) {
+              setAnalysis({ status: 'ready', outcome });
+            }
+          } catch (err) {
+            console.warn('Failed to load existing analysis outcome:', err);
+          }
+          return;
+        }
 
         runAnalysis(target);
       })();
     },
-    [runAnalysis, setProject, setTree, setTreeError, setTreeLoading],
+    [runAnalysis, setProject, setTree, setTreeError, setTreeLoading, setAnalysis],
   );
 
   const handleOpenFolder = useCallback(() => {
@@ -143,6 +153,7 @@ export function Toolbar() {
     }
   }, [analysisState]);
 
+  console.log("DEBUG: Toolbar rendering, project is:", project);
   return (
     <header className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-card px-3">
       <div className="flex min-w-0 items-center gap-2.5">
@@ -257,6 +268,29 @@ function RecentProjectsButton({
     });
   };
 
+  const handleDeleteProject = useCallback(
+    async (id: string, name: string) => {
+      try {
+        const confirmed = await filesystem.confirm(
+          `Are you sure you want to delete project "${name}"? This will remove it from the recent projects list, but your files on disk will not be touched.`,
+          { title: 'Delete Project', kind: 'warning' },
+        );
+        if (!confirmed) return;
+
+        await projects.deleteProject(id);
+        setList((prev) => (prev ? prev.filter((p) => p.id !== id) : null));
+        toast.ok('Project removed from recents');
+        if (activeId === id) {
+          useEditorStore.getState().reset();
+          useWorkspaceStore.getState().reset();
+        }
+      } catch (err) {
+        toast.err(getErrorMessage(err), { title: 'Failed to delete project' });
+      }
+    },
+    [activeId],
+  );
+
   // Keyboard nav for the listbox — arrow keys move the highlight,
   // Enter selects, Escape closes. Highlight is reset to 0 when the
   // list refreshes so an upstream delete cannot leave it pointing
@@ -367,7 +401,7 @@ function RecentProjectsButton({
                 {list.map((p, index) => {
                   const isHighlighted = index === highlight;
                   return (
-                    <li key={p.id}>
+                    <li key={p.id} className="relative group/row flex items-center justify-between">
                       <button
                         type="button"
                         role="option"
@@ -376,13 +410,13 @@ function RecentProjectsButton({
                           if (!isHighlighted) setHighlight(index);
                         }}
                         onClick={() => select(p)}
-                        className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition-colors ${
+                        className={`flex-1 flex flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition-colors pr-10 ${
                           isHighlighted ? 'bg-primary/10 text-primary' : ''
                         } ${activeId === p.id && !isHighlighted ? 'bg-muted/30' : ''}`}
                       >
                         <span className="truncate font-medium">{p.name}</span>
                         <span
-                          className="text-muted-foreground truncate text-[10px]"
+                          className="text-muted-foreground truncate text-[10px] max-w-[200px]"
                           title={p.rootPath}
                         >
                           {p.rootPath}
@@ -390,6 +424,17 @@ function RecentProjectsButton({
                         <span className="text-muted-foreground text-[10px]">
                           {p.fileCount} files · {p.status}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteProject(p.id, p.name);
+                        }}
+                        className="absolute right-2 opacity-0 group-hover/row:opacity-100 focus:opacity-100 hover:text-destructive text-muted-foreground p-1 transition-opacity"
+                        aria-label={`Delete ${p.name}`}
+                      >
+                        <Trash className="size-3.5" />
                       </button>
                     </li>
                   );

@@ -1,15 +1,15 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { App } from './App';
-import { AppErrorBoundary } from './components/app-error-boundary';
-import { BrowserNotice } from './components/browser-notice';
-import './index.css';
-import { installE2eTauriMocks } from './lib/e2e-tauri-mocks';
-import { initSentry } from './lib/sentry';
+import { App } from '@/App';
+import { AppErrorBoundary } from '@/components/app-error-boundary';
+import { BrowserNotice } from '@/components/browser-notice';
+import '@/index.css';
+import { installE2eTauriMocks } from '@/lib/e2e-tauri-mocks';
+import { initSentry } from '@/lib/sentry';
 // Side-effect import - wires Monaco's web-worker URLs before any
 // `<Editor>` mounts. See `lib/monaco-setup.ts`.
-import './lib/monaco-setup';
+import '@/lib/monaco-setup';
 
 const container = document.getElementById('root');
 if (!container) {

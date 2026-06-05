@@ -11,9 +11,20 @@ type AuthState = {
   clear: () => void;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+const store = create<AuthState>((set) => ({
   accessToken: null,
   refreshToken: null,
   setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
   clear: () => set({ accessToken: null, refreshToken: null }),
 }));
+
+const globalStore = globalThis as unknown as {
+  useAuthStore?: typeof store;
+};
+
+export const useAuthStore = globalStore.useAuthStore || store;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalStore.useAuthStore = useAuthStore;
+}
+

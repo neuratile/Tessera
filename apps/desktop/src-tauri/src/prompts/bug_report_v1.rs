@@ -32,7 +32,30 @@ Rules:
 - Bug IDs must strictly match the regex `^BUG-[A-Z0-9_-]+$` (all-caps, \
   e.g., `BUG-SESSION-LEAK`, NOT `BUG-Session-Leak` or `BUG-Session`).
 - Always invoke the `emit_bug_report` tool with the structured payload. \
-  Never reply with free-form prose.";
+  Never reply with free-form prose.
+
+The structured payload MUST have the following JSON structure:
+{
+  \"bugs\": [
+    {
+      \"id\": \"BUG-UNIQUE-ID\",
+      \"title\": \"Short descriptive title of the bug\",
+      \"severity\": \"critical | major | minor | trivial\",
+      \"environment\": \"OS/runtime stack when known\",
+      \"steps_to_reproduce\": [\"Step 1\", \"Step 2\"],
+      \"expected_behavior\": \"Expected behavior\",
+      \"actual_behavior\": \"Actual behavior\",
+      \"root_cause\": {
+        \"symbol\": \"Function/class/method name\",
+        \"start_line\": 10,
+        \"end_line\": 20,
+        \"file_hint\": \"path/to/file.ext\",
+        \"explanation\": \"Root cause explanation\"
+      },
+      \"evidence_snippet\": \"Verbatim snippet of code showing the bug\"
+    }
+  ]
+}";
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
@@ -57,7 +80,30 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
     user_body.push_str("## Code in scope\n\n");
     user_body.push_str(&ctx.render_chunks());
-    user_body.push_str("\n\nNow invoke `emit_bug_report` with the structured report.");
+    user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_bug_report` tool with the structured report.\n\
+    The JSON payload MUST have exactly these keys (and no others):\n\
+    {\n\
+      \"bugs\": [\n\
+        {\n\
+          \"id\": \"BUG-UNIQUE-ID\",\n\
+          \"title\": \"Short descriptive title of the bug\",\n\
+          \"severity\": \"critical | major | minor | trivial\",\n\
+          \"environment\": \"OS/runtime stack when known\",\n\
+          \"steps_to_reproduce\": [\"Step 1\", \"Step 2\"],\n\
+          \"expected_behavior\": \"Expected behavior\",\n\
+          \"actual_behavior\": \"Actual behavior\",\n\
+          \"root_cause\": {\n\
+            \"symbol\": \"Function/class/method name\",\n\
+            \"start_line\": 1,\n\
+            \"end_line\": 10,\n\
+            \"file_hint\": \"path/to/file.ext\",\n\
+            \"explanation\": \"Root cause explanation\"\n\
+          },\n\
+          \"evidence_snippet\": \"Verbatim snippet of code showing the bug\"\n\
+        }\n\
+      ]\n\
+    }\n\
+    Do NOT output fields from the codebase (like architect, location, timeline, bhk_display, category, etc.) at the top level. You MUST use only the keys listed above. Do NOT reply with free-form prose, apologies, or explanations. You MUST invoke the tool.");
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
 }
