@@ -7,7 +7,11 @@ export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
 export const DEFAULT_EMBED_MODEL = 'nomic-embed-text';
 export const CHAT_MODEL_FALLBACKS = ['qwen2.5-coder:7b', 'qwen2.5-coder:1.5b'] as const;
 export const HTTP_TIMEOUT_MS = 120_000;
-export const PROCESS_TIMEOUT_MS = 600_000;
+// 15 min per cargo probe attempt. The golden test-cases probe now
+// reserves 4k output tokens (parity with the desktop app) and a cold
+// 3B model on the 2-vCPU CI runner can take ~10 min to stream that —
+// the old 10 min cap left no margin and turned slow runs into timeouts.
+export const PROCESS_TIMEOUT_MS = 900_000;
 const JSON_RESULT_PREFIX = 'JSON_RESULT:';
 
 export const desktopRoot = fileURLToPath(new URL('../../', import.meta.url));

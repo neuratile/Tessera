@@ -53,6 +53,7 @@ const GOLDEN_RETRY = 2;
 describe('Ollama golden prompt coverage', () => {
   integrationTest(
     'generates a test plan payload that matches TestPlanSchema',
+    { retry: GOLDEN_RETRY },
     async () => {
       if (!context.ready) {
         return;
@@ -71,11 +72,11 @@ describe('Ollama golden prompt coverage', () => {
       // test.
       expect(Array.isArray(parsed.data.objectives)).toBe(true);
     },
-    { retry: GOLDEN_RETRY },
   );
 
   integrationTest(
     'generates test cases that match TestCaseSchema',
+    { retry: GOLDEN_RETRY },
     async () => {
       if (!context.ready) {
         return;
@@ -92,6 +93,5 @@ describe('Ollama golden prompt coverage', () => {
       // model quality and CI runner resources — not pipeline regressions.
       expect(Array.isArray(parsed.data.cases)).toBe(true);
     },
-    { retry: GOLDEN_RETRY },
   );
 });

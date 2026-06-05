@@ -173,7 +173,9 @@ jobs:
       - lint
       - typecheck
       - unit-test
-    timeout-minutes: 60
+    # Worst case: golden test-cases probe retries 3× at 15 min per
+    # attempt (~45 min) plus model pulls, warm-up, and the Rust suite.
+    timeout-minutes: 90
     services:
       ollama:
         image: ollama/ollama:latest

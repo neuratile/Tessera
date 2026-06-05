@@ -19,7 +19,10 @@ export default defineConfig({
     include: ['src/**/*.integration.test.ts', 'tests/**/*.integration.test.ts'],
     exclude: ['src-tauri/**'],
     fileParallelism: false,
-    testTimeout: 600_000,
-    hookTimeout: 600_000,
+    // Must stay above PROCESS_TIMEOUT_MS in tests/support/ollama.ts
+    // (15 min) so the cargo probe's own timeout fires first and reports
+    // a meaningful error instead of a bare vitest timeout.
+    testTimeout: 960_000,
+    hookTimeout: 960_000,
   },
 });
