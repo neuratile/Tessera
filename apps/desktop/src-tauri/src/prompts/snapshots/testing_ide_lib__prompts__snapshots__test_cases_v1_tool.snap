@@ -50,6 +50,27 @@ properties:
         - expectedResult
       type: object
     type: array
+  files:
+    description: "Runnable workspace mirroring the cases: minimal source-under-test plus generated vitest specs, so the local sandbox can execute them. Optional — omit for descriptive-only cases."
+    items:
+      additionalProperties: false
+      properties:
+        contents:
+          description: Full file contents.
+          type: string
+        isTest:
+          description: true for a generated vitest spec; false for source-under-test.
+          type: boolean
+        path:
+          description: "Workspace-relative path, e.g. `src/add.ts` or `add.test.ts`. No absolute paths, no `..`."
+          minLength: 1
+          type: string
+      required:
+        - path
+        - contents
+        - isTest
+      type: object
+    type: array
 required:
   - cases
 type: object

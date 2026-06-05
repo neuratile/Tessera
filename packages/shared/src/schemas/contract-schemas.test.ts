@@ -28,6 +28,7 @@ import {
   TestResultSchema,
   CoverageLineSchema,
   RunResultSchema,
+  TestCaseSchema,
 } from '../index';
 
 describe('RegisterSchema', () => {
@@ -647,6 +648,60 @@ describe('RunResultSchema', () => {
         durationMs: 0,
         tests: [],
         coverage: [],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('TestCaseSchema', () => {
+  it('accepts a descriptive-only artifact (no runnable files)', () => {
+    const parsed = TestCaseSchema.parse({
+      cases: [
+        {
+          id: 'TC-ADD-1',
+          title: 'adds two numbers',
+          steps: ['call add(1, 2)'],
+          expectedResult: 'returns 3',
+          priority: 'p1',
+        },
+      ],
+    });
+    expect(parsed.files).toBeUndefined();
+  });
+
+  it('accepts a runnable workspace mirroring the sandbox WorkspaceFile shape', () => {
+    const parsed = TestCaseSchema.parse({
+      cases: [
+        {
+          id: 'TC-ADD-1',
+          title: 'adds two numbers',
+          steps: ['call add(1, 2)'],
+          expectedResult: 'returns 3',
+          priority: 'p1',
+        },
+      ],
+      files: [
+        { path: 'src/add.ts', contents: 'export const add = (a, b) => a + b;', isTest: false },
+        { path: 'add.test.ts', contents: "import { test, expect } from 'vitest';", isTest: true },
+      ],
+    });
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.files?.[1]?.isTest).toBe(true);
+  });
+
+  it('rejects a file missing the isTest discriminator', () => {
+    expect(() =>
+      TestCaseSchema.parse({
+        cases: [
+          {
+            id: 'TC-ADD-1',
+            title: 'adds two numbers',
+            steps: ['call add(1, 2)'],
+            expectedResult: 'returns 3',
+            priority: 'p1',
+          },
+        ],
+        files: [{ path: 'src/add.ts', contents: 'x' }],
       }),
     ).toThrow();
   });

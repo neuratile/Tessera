@@ -28,6 +28,14 @@ Rules:
 - Steps are imperative and ordered. Expected results are observable, not \
   internal state assertions the test runner cannot reach.
 - Priority must follow impact * likelihood, not test difficulty.
+- Also emit a `files` array that makes the cases runnable in the local \
+  sandbox: the minimal source-under-test file(s), reproduced from the \
+  supplied chunks and marked `isTest: false`, plus one vitest spec per \
+  source file marked `isTest: true`. Specs use \
+  `import { describe, it, expect } from 'vitest'` and import the source by \
+  relative path. Use workspace-relative paths only — never an absolute \
+  path or a `..` segment. Omit `files` only when the scope has no \
+  executable behavior (e.g. pure type declarations).
 - Always invoke the `emit_test_cases` tool with the structured payload. \
   Never reply with free-form prose.";
 
@@ -54,7 +62,10 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
 
     user_body.push_str("## Code to cover\n\n");
     user_body.push_str(&ctx.render_chunks());
-    user_body.push_str("\n\nNow invoke `emit_test_cases` with the structured cases.");
+    user_body.push_str(
+        "\n\nNow invoke `emit_test_cases` with the structured cases and a \
+         runnable `files` array (source-under-test + vitest specs).",
+    );
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
 }
@@ -107,6 +118,30 @@ pub fn tool() -> ToolSchema {
                                     "minLength": 1,
                                     "description": "Source reference such as `src/routes/auth.ts#login`."
                                 }
+                            }
+                        }
+                    }
+                },
+                "files": {
+                    "type": "array",
+                    "description": "Runnable workspace mirroring the cases: minimal source-under-test plus generated vitest specs, so the local sandbox can execute them. Optional — omit for descriptive-only cases.",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["path", "contents", "isTest"],
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Workspace-relative path, e.g. `src/add.ts` or `add.test.ts`. No absolute paths, no `..`."
+                            },
+                            "contents": {
+                                "type": "string",
+                                "description": "Full file contents."
+                            },
+                            "isTest": {
+                                "type": "boolean",
+                                "description": "true for a generated vitest spec; false for source-under-test."
                             }
                         }
                     }
@@ -195,5 +230,34 @@ mod tests {
             .filter_map(|v| v.as_str())
             .collect();
         assert!(!names.contains(&"traceability"));
+    }
+
+    #[test]
+    fn files_array_is_optional_runnable_workspace() {
+        let schema = tool();
+
+        // `files` is offered but not required (descriptive-only cases stay valid).
+        let top_required = &schema.parameters_schema["required"];
+        let required: Vec<&str> = top_required
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(required, vec!["cases"]);
+
+        // Each file mirrors the sandbox `WorkspaceFile` shape.
+        let item_required = &schema.parameters_schema["properties"]["files"]["items"]["required"];
+        let file_fields: Vec<&str> = item_required
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(file_fields, vec!["path", "contents", "isTest"]);
+
+        let is_test_type =
+            &schema.parameters_schema["properties"]["files"]["items"]["properties"]["isTest"]["type"];
+        assert_eq!(is_test_type.as_str(), Some("boolean"));
     }
 }
