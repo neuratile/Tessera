@@ -29,6 +29,8 @@ pub struct BoardColumn {
     pub color: String,
     pub position: i32,
     pub wip_limit: Option<i32>,
+    /// Marks the column whose issues count as completed for sprint completion.
+    pub is_done: bool,
 }
 
 /// Payload for creating a board.

@@ -2,7 +2,7 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -243,11 +243,15 @@ async fn complete_sprint(
     let mut tx = state.db.begin().await?;
 
     // 1. Move incomplete issues to backlog (sprint_id = NULL)
-    // Find the Done column (column with highest position on the board)
-    let done_column_id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1 ORDER BY position DESC LIMIT 1")
-        .bind(sprint_info_board_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    // The Done column is marked explicitly via is_done — position is not a
+    // safe anchor once users append columns after "Done". Fall back to the
+    // highest position only for legacy boards without the flag set.
+    let done_column_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM board_columns WHERE board_id = $1 ORDER BY is_done DESC, position DESC LIMIT 1",
+    )
+    .bind(sprint_info_board_id)
+    .fetch_optional(&mut *tx)
+    .await?;
 
     if let Some(done_col_id) = done_column_id {
         sqlx::query("UPDATE issues SET sprint_id = NULL WHERE sprint_id = $1 AND column_id != $2")
@@ -290,7 +294,7 @@ async fn complete_sprint(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/boards/{board_id}/sprints", get(list_sprints).post(create_sprint))
-        .route("/sprints/{id}", post(update_sprint).patch(update_sprint)) // PUT/PATCH
+        .route("/sprints/{id}", put(update_sprint).patch(update_sprint)) // PUT/PATCH
         .route("/sprints/{id}/start", post(start_sprint))
         .route("/sprints/{id}/complete", post(complete_sprint))
 }

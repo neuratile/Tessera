@@ -8,10 +8,15 @@ use crate::error::{ApiError, ApiResult};
 use crate::models::team::{CreateTeam, Team};
 use crate::models::user::UserProfile;
 
-/// Generate a short, unique invite code.
+/// Generate a unique invite code.
+///
+/// 20 hex chars drawn from two UUIDv4s (~76 bits of entropy). Joining with a
+/// code grants full team membership, so the space must withstand online
+/// brute force; 8 chars (32 bits) was guessable.
 fn generate_invite_code() -> String {
-    // Generate an 8-character uppercase alphanumeric code from a UUID
-    Uuid::new_v4().to_string().replace('-', "")[..8].to_uppercase()
+    let a = Uuid::new_v4().simple().to_string();
+    let b = Uuid::new_v4().simple().to_string();
+    format!("{}{}", &a[..10], &b[..10]).to_uppercase()
 }
 
 /// Create a new team and add the creator as an admin member.
