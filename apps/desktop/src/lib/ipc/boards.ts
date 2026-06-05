@@ -883,6 +883,7 @@ export async function updateIssue(issueId: string, input: UpdateIssueInput): Pro
   if (input.sprintId !== undefined) updatePayload.sprint_id = input.sprintId;
   if (input.storyPoints !== undefined) updatePayload.story_points = input.storyPoints;
   if (input.dueDate !== undefined) updatePayload.due_date = input.dueDate;
+  if (input.gitBranch !== undefined) updatePayload.git_branch = input.gitBranch;
 
   const { error } = await supabase
     .from('issues')
