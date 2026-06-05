@@ -28,7 +28,7 @@ properties:
           minLength: 10
           type: string
         id:
-          description: "Stable id, prefix `DEF-`."
+          description: "Stable id, prefix `DEF-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'DEF-NULL-POINTER' in all-caps, NOT 'DEF-Null-Pointer')."
           pattern: "^DEF-[A-Z0-9_-]+$"
           type: string
         impact:

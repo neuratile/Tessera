@@ -1,5 +1,6 @@
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { readDir, readTextFile, stat } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, stat, watch as tauriWatch } from '@tauri-apps/plugin-fs';
+import type { UnwatchFn, WatchEvent } from '@tauri-apps/plugin-fs';
 
 import type { FsEntry } from '@/stores/workspace-store';
 
@@ -226,3 +227,20 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * Watch a directory recursively for any file or directory changes.
+ * Returns an unwatch function.
+ */
+export async function watchDirectory(
+  path: string,
+  cb: (event: WatchEvent) => void,
+  options?: { recursive?: boolean; delayMs?: number },
+): Promise<UnwatchFn> {
+  try {
+    return await tauriWatch(path, cb, options);
+  } catch (err) {
+    throw new IpcError('fs.watch', asMessage(err), { cause: err });
+  }
+}
+

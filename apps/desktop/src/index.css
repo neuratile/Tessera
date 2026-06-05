@@ -172,11 +172,11 @@ samp {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-3);
+  background: rgba(255, 255, 255, 0.16);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Status pills — opt-in classes the AI panel + drawer can apply

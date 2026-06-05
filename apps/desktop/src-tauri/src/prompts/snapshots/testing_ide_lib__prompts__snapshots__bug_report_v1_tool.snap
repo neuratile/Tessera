@@ -21,7 +21,7 @@ properties:
           minLength: 1
           type: string
         id:
-          description: "Stable id, prefix `BUG-`."
+          description: "Stable id, prefix `BUG-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'BUG-SESSION-LEAK' in all-caps, NOT 'BUG-Session-Leak')."
           pattern: "^BUG-[A-Z0-9_-]+$"
           type: string
         root_cause:

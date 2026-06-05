@@ -28,6 +28,8 @@ Rules:
 - Steps are imperative and ordered. Expected results are observable, not \
   internal state assertions the test runner cannot reach.
 - Priority must follow impact * likelihood, not test difficulty.
+- Test case IDs must strictly match the regex `^TC-[A-Z0-9_-]+$` (all-caps, \
+  e.g., `TC-LOGIN-SUCCESS`, NOT `TC-Login-Success` or `TC-Login`).
 - Always invoke the `emit_test_cases` tool with the structured payload. \
   Never reply with free-form prose.";
 
@@ -87,7 +89,7 @@ pub fn tool() -> ToolSchema {
                             "id": {
                                 "type": "string",
                                 "pattern": "^TC-[A-Z0-9_-]+$",
-                                "description": "Stable id, prefix `TC-`."
+                                "description": "Stable id, prefix `TC-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'TC-TEST-CARD-FOOTER' in all-caps, NOT 'TC-TEST-CARD-Footer')."
                             },
                             "title": { "type": "string", "minLength": 5, "maxLength": 200 },
                             "priority": { "type": "string", "enum": priority_enum },

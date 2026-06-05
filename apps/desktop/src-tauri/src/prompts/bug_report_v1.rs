@@ -29,6 +29,8 @@ Rules:
   supplied chunks. Do NOT speculate beyond what the code shows.
 - One bug per report. If multiple defects share a symptom, emit \
   multiple reports rather than coalescing.
+- Bug IDs must strictly match the regex `^BUG-[A-Z0-9_-]+$` (all-caps, \
+  e.g., `BUG-SESSION-LEAK`, NOT `BUG-Session-Leak` or `BUG-Session`).
 - Always invoke the `emit_bug_report` tool with the structured payload. \
   Never reply with free-form prose.";
 
@@ -90,7 +92,7 @@ pub fn tool() -> ToolSchema {
                             "id": {
                                 "type": "string",
                                 "pattern": "^BUG-[A-Z0-9_-]+$",
-                                "description": "Stable id, prefix `BUG-`."
+                                "description": "Stable id, prefix `BUG-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'BUG-SESSION-LEAK' in all-caps, NOT 'BUG-Session-Leak')."
                             },
                             "title": { "type": "string", "minLength": 10, "maxLength": 200 },
                             "severity": { "type": "string", "enum": severity_enum },

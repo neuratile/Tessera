@@ -12,7 +12,7 @@ properties:
           minLength: 1
           type: string
         id:
-          description: "Stable id, prefix `TC-`."
+          description: "Stable id, prefix `TC-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'TC-TEST-CARD-FOOTER' in all-caps, NOT 'TC-TEST-CARD-Footer')."
           pattern: "^TC-[A-Z0-9_-]+$"
           type: string
         preconditions:

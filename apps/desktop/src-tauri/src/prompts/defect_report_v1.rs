@@ -27,6 +27,8 @@ Rules:
   finding. If the location is not visible in the chunks, do NOT report it.
 - Suggested fixes must be concrete code changes, not 'consider refactoring'.
 - Categorize accurately — over-broad categories make triage harder.
+- Defect IDs must strictly match the regex `^DEF-[A-Z0-9_-]+$` (all-caps, \
+  e.g., `DEF-NULL-POINTER`, NOT `DEF-Null-Pointer` or `DEF-Null`).
 - Always invoke the `emit_defect_report` tool with the structured payload. \
   Never reply with free-form prose.";
 
@@ -100,7 +102,7 @@ pub fn tool() -> ToolSchema {
                             "id": {
                                 "type": "string",
                                 "pattern": "^DEF-[A-Z0-9_-]+$",
-                                "description": "Stable id, prefix `DEF-`."
+                                "description": "Stable id, prefix `DEF-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'DEF-NULL-POINTER' in all-caps, NOT 'DEF-Null-Pointer')."
                             },
                             "severity": { "type": "string", "enum": severity_enum },
                             "category": { "type": "string", "enum": category_enum },

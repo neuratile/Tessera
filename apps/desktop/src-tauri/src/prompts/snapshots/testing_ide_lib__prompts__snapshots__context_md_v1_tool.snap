@@ -5,7 +5,7 @@ expression: "context_md_v1::tool().parameters_schema"
 additionalProperties: false
 properties:
   architecture_notes:
-    description: "Bullet-prose describing layers, boundaries, and data flow. Cite files / functions / classes by name."
+    description: "Bullet-prose describing layers, boundaries, and data flow. Cite files / functions / classes by name. MUST be a single string (using markdown bullet points like '* text\\n* text'), NOT a JSON array of strings."
     minLength: 1
     type: string
   data_flows:

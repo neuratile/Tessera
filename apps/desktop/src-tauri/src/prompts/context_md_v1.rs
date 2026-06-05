@@ -37,6 +37,9 @@ Rules:
   than guessing.
 - Output is consumed by other LLM prompts, so prefer stable noun-phrase \
   references over narrative paragraphs.
+- For string fields in the schema (like `summary` and `architecture_notes`), \
+  you MUST supply a single string. Format any bullet lists as markdown inside \
+  a single string (e.g. '* item1\\n* item2'), NEVER as a JSON array of strings.
 - Always invoke the `emit_project_context` tool with the structured payload. \
   Never reply with free-form prose.";
 
@@ -85,7 +88,8 @@ pub fn tool() -> ToolSchema {
                 "architecture_notes": {
                     "type": "string",
                     "description": "Bullet-prose describing layers, boundaries, and data flow. \
-                                   Cite files / functions / classes by name.",
+                                   Cite files / functions / classes by name. MUST be a single string \
+                                   (using markdown bullet points like '* text\\n* text'), NOT a JSON array of strings.",
                     "minLength": 1
                 },
                 "key_modules": {

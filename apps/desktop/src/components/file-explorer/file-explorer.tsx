@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Tree, type NodeRendererProps } from 'react-arborist';
 
@@ -21,9 +21,53 @@ export function FileExplorer() {
   const setSelectedPath = useWorkspaceStore((s) => s.setSelectedPath);
   const setChildren = useWorkspaceStore((s) => s.setChildren);
   const setTreeError = useWorkspaceStore((s) => s.setTreeError);
+  const refreshTree = useWorkspaceStore((s) => s.refreshTree);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 280, height: 400 });
+  const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
+
+  const projectId = project?.id;
+  const projectRootPath = project?.rootPath;
+
+  // Setup directory watch subscription when active project changes
+  useEffect(() => {
+    if (projectRootPath === undefined) return;
+
+    let active = true;
+    let stopWatching: (() => void) | null = null;
+
+    void (async () => {
+      try {
+        const unwatch = await filesystem.watchDirectory(
+          projectRootPath,
+          () => {
+            if (!active) return;
+            void refreshTree();
+          },
+          {
+            recursive: true,
+            delayMs: 200,
+          },
+        );
+
+        if (!active) {
+          unwatch();
+        } else {
+          stopWatching = unwatch;
+        }
+      } catch (err) {
+        console.error('Failed to start directory watcher:', err);
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (stopWatching !== null) {
+        stopWatching();
+      }
+    };
+  }, [projectId, projectRootPath, refreshTree]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -41,7 +85,14 @@ export function FileExplorer() {
   const handleToggle = (id: string) => {
     const target = findEntry(tree, id);
     if (target === null || target.kind !== 'directory') return;
-    if (target.children !== undefined && target.children.length > 0) return; // already loaded
+    if (target.children !== undefined) return; // already loaded
+
+    setLoadingFolders((prev) => {
+      const next = new Set(prev);
+      next.add(target.relativePath);
+      return next;
+    });
+
     setTreeError(null);
     void (async () => {
       try {
@@ -52,6 +103,12 @@ export function FileExplorer() {
         setChildren(target.relativePath, children);
       } catch (err) {
         setTreeError(getErrorMessage(err));
+      } finally {
+        setLoadingFolders((prev) => {
+          const next = new Set(prev);
+          next.delete(target.relativePath);
+          return next;
+        });
       }
     })();
   };
@@ -103,7 +160,7 @@ export function FileExplorer() {
               }
             }}
           >
-            {NodeRow}
+            {(props) => <NodeRow {...props} loadingFolders={loadingFolders} />}
           </Tree>
         )}
       </div>
@@ -111,10 +168,16 @@ export function FileExplorer() {
   );
 }
 
-function NodeRow({ node, style, dragHandle }: NodeRendererProps<FsEntry>) {
+function NodeRow({
+  node,
+  style,
+  dragHandle,
+  loadingFolders,
+}: NodeRendererProps<FsEntry> & { loadingFolders: Set<string> }) {
   const selected = useWorkspaceStore((s) => s.selectedPath);
   const isSelected = selected === node.data.relativePath;
   const isDir = node.data.kind === 'directory';
+  const isLoading = loadingFolders.has(node.data.relativePath);
 
   return (
     <div
@@ -134,16 +197,18 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<FsEntry>) {
       }`}
     >
       <span className="text-muted-foreground flex w-4 shrink-0 items-center justify-center">
-        {isDir ? (
-          node.isOpen ? (
-            <ChevronDown className="size-3" />
-          ) : (
-            <ChevronRight className="size-3" />
-          )
-        ) : null}
+        {isDir && !isLoading && (
+          <ChevronRight
+            className={`size-3 transition-transform duration-150 ${
+              node.isOpen ? 'rotate-90' : ''
+            }`}
+          />
+        )}
       </span>
       <span className="text-muted-foreground flex shrink-0 items-center">
-        {isDir ? (
+        {isLoading ? (
+          <Loader2 className="size-3.5 animate-spin text-primary" />
+        ) : isDir ? (
           node.isOpen ? (
             <FolderOpen className="size-3.5" />
           ) : (

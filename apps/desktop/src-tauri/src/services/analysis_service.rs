@@ -29,17 +29,18 @@ use crate::services::{ast_service, chunking_service, file_discovery_service};
 
 const EMBEDDING_BATCH_SIZE: usize = 32;
 
-/// Hard cap on the number of characters sent to the embedding endpoint
+/// Hard cap on the number of bytes sent to the embedding endpoint
 /// per chunk. Ollama's default `nomic-embed-text` exposes a 2048-token
-/// context window; at the project's 4-chars-per-token heuristic
-/// (`approximate_token_count`) that is ~8 KB per input. We leave a
-/// headroom of ~512 tokens for the prompt template the embedding model
-/// adds internally, landing on 6 000 chars.
+/// context window. In dense code blocks (e.g. minified JS assets), the
+/// average token density can be extremely high (often under 1.2 characters
+/// per token due to minimal spacing and punctuation). To safely fit within
+/// the 2048-token limit without raising context-overflow errors, we set the
+/// cap to 2,000 bytes.
 ///
 /// Chunks longer than this are truncated *only* for the embedding
 /// call. The full chunk content is still persisted so RAG search hits
 /// return the complete symbol body to the LLM downstream.
-const EMBEDDING_INPUT_CHAR_CAP: usize = 6_000;
+const EMBEDDING_INPUT_CHAR_CAP: usize = 2_000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
