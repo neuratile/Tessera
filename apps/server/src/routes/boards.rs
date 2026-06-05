@@ -26,7 +26,10 @@ struct ColumnInput {
 struct ColumnUpdateInput {
     name: Option<String>,
     color: Option<String>,
-    wip_limit: Option<i32>,
+    // Option<Option<...>>: explicit null clears the WIP limit, omission
+    // leaves it unchanged (see models::double_option).
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    wip_limit: Option<Option<i32>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -129,7 +132,8 @@ async fn update_column(
 
     let name = payload.name.as_deref().unwrap_or(&current_name);
     let color = payload.color.as_deref().unwrap_or(&current_color);
-    let wip_limit = payload.wip_limit.or(current_wip_limit);
+    // Outer None = leave unchanged, Some(None) = clear, Some(Some(v)) = set.
+    let wip_limit = payload.wip_limit.unwrap_or(current_wip_limit);
 
     let column = board_service::update_column(&state.db, auth.user_id, column_id, name, color, wip_limit).await?;
     Ok(Json(column))

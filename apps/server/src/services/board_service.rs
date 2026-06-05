@@ -135,7 +135,8 @@ pub async fn update_board(
     }
 
     let name = payload.name.unwrap_or(board.name);
-    let description = payload.description.or(board.description);
+    // Outer None = leave unchanged, Some(None) = clear, Some(Some(v)) = set.
+    let description = payload.description.unwrap_or(board.description);
     let board_type = payload.board_type.unwrap_or(board.board_type);
     let now = Utc::now();
 

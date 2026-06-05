@@ -51,16 +51,7 @@ fn default_priority() -> String {
     "medium".to_string()
 }
 
-/// Deserializes a field that distinguishes "absent" from "explicitly null".
-/// Absent -> outer `None` (leave unchanged); `null` -> `Some(None)` (clear);
-/// value -> `Some(Some(v))` (set).
-fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    Deserialize::deserialize(deserializer).map(Some)
-}
+use crate::models::double_option;
 
 /// Payload for updating an issue.
 ///

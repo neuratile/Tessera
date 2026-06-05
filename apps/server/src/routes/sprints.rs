@@ -115,9 +115,10 @@ async fn update_sprint(
     }
 
     let name = payload.name.unwrap_or(current_name);
-    let goal = payload.goal.or(current_goal);
-    let start_date = payload.start_date.or(current_start_date);
-    let end_date = payload.end_date.or(current_end_date);
+    // Outer None = leave unchanged, Some(None) = clear, Some(Some(v)) = set.
+    let goal = payload.goal.unwrap_or(current_goal);
+    let start_date = payload.start_date.unwrap_or(current_start_date);
+    let end_date = payload.end_date.unwrap_or(current_end_date);
 
     let sprint = sqlx::query_as::<_, Sprint>(
         r#"

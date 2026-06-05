@@ -14,7 +14,7 @@ pub struct User {
     pub avatar_url: Option<String>,
     /// Never serialized to JSON responses (skipped via route-level projection).
     #[serde(skip_serializing)]
-    pub password_hash: String,
+    pub password_hash: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
