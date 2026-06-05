@@ -119,6 +119,9 @@ pub fn build_request_payload(req: &GenerateRequest, stream: bool) -> serde_json:
 
     if !req.tools.is_empty() {
         payload["tools"] = req.tools.iter().map(tool_to_openai).collect();
+        if req.tools.len() == 1 {
+            payload["tool_choice"] = tool_choice_to_openai(&req.tools[0]);
+        }
     }
     if let Some(t) = req.temperature {
         payload["temperature"] = serde_json::json!(t);
@@ -159,6 +162,15 @@ fn tool_to_openai(tool: &ToolSchema) -> serde_json::Value {
             "name": tool.name,
             "description": tool.description,
             "parameters": tool.parameters_schema,
+        }
+    })
+}
+
+fn tool_choice_to_openai(tool: &ToolSchema) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": tool.name,
         }
     })
 }
@@ -448,9 +460,26 @@ mod tests {
     }
 
     #[test]
+    fn build_request_payload_forces_single_tool_choice() {
+        let mut request = empty_request();
+        request.tools = vec![ToolSchema {
+            name: "emit_test_plan".into(),
+            description: "Emit a test plan.".into(),
+            parameters_schema: serde_json::json!({ "type": "object" }),
+        }];
+
+        let body = build_request_payload(&request, true);
+
+        assert_eq!(body["tools"][0]["function"]["name"], "emit_test_plan");
+        assert_eq!(body["tool_choice"]["type"], "function");
+        assert_eq!(body["tool_choice"]["function"]["name"], "emit_test_plan");
+    }
+
+    #[test]
     fn build_request_payload_omits_empty_optionals() {
         let body = build_request_payload(&empty_request(), false);
         assert!(body.get("tools").is_none());
+        assert!(body.get("tool_choice").is_none());
         assert!(body.get("temperature").is_none());
         assert!(body.get("max_tokens").is_none());
         assert!(body.get("stop").is_none());

@@ -299,10 +299,35 @@ fn extract_raw_json(
     let preview: String = aggregated.text.chars().take(200).collect();
     let tool_name = &tool_schema.name;
     let text_len = aggregated.text_len;
+    // Some local models ignore the OpenAI-compatible `tools` field and
+    // print their native pseudo-call syntax as plain text. The salvage
+    // path above handles recoverable object literals; this branch keeps
+    // unrecoverable pseudo-calls actionable instead of generic.
+    if let Some(fmt) = detect_non_tool_call_format(&aggregated.text) {
+        return Err(AppError::InvalidInput(format!(
+            "model `{model}` did not invoke `{tool_name}`; it emitted {fmt} as plain text. \
+             Use a tool-capable model or a model that can emit strict JSON. Preview: {preview}"
+        )));
+    }
     Err(AppError::InvalidInput(format!(
         "model `{model}` did not invoke `{tool_name}` and emitted {text_len} chars of free text \
          that does not contain a JSON object. Preview: {preview}"
     )))
+}
+
+fn detect_non_tool_call_format(text: &str) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+    if lower.contains("tool_code") {
+        Some("Gemma-style `tool_code` blocks")
+    } else if lower.contains("<tool_call") {
+        Some("`<tool_call>` tags")
+    } else if lower.contains("<function_call") || lower.contains("<|python_tag|>") {
+        Some("Llama function-call tags")
+    } else if lower.contains("default_api.") {
+        Some("a code snippet")
+    } else {
+        None
+    }
 }
 
 /// Result of draining the LLM stream — extracted so [`generate`] stays
@@ -399,16 +424,23 @@ async fn drive_stream(
 /// Returns the JSON string ready for `validate_tool_output`.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
-    let raw = salvage_json_from_text(text)?;
+    let raw = salvage_json_from_text(text).or_else(|| salvage_js_object_literal_from_text(text))?;
     let mut parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    
+
     if let Some(obj) = parsed.as_object_mut() {
-        let name_key = if obj.contains_key("name") { Some("name") }
-            else if obj.contains_key("function") { Some("function") }
-            else if obj.contains_key("function_name") { Some("function_name") }
-            else if obj.contains_key("tool") { Some("tool") }
-            else if obj.contains_key("tool_name") { Some("tool_name") }
-            else { None };
+        let name_key = if obj.contains_key("name") {
+            Some("name")
+        } else if obj.contains_key("function") {
+            Some("function")
+        } else if obj.contains_key("function_name") {
+            Some("function_name")
+        } else if obj.contains_key("tool") {
+            Some("tool")
+        } else if obj.contains_key("tool_name") {
+            Some("tool_name")
+        } else {
+            None
+        };
 
         if let Some(n_key) = name_key {
             if let Some(name_str) = obj.get(n_key).and_then(|v| v.as_str()) {
@@ -416,8 +448,16 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                     // Check if there is an explicit payload key
                     let mut payload_key = None;
                     let candidate_keys = [
-                        "arguments", "args", "parameters", "params",
-                        "report", "payload", "data", "body", "value", "result"
+                        "arguments",
+                        "args",
+                        "parameters",
+                        "params",
+                        "report",
+                        "payload",
+                        "data",
+                        "body",
+                        "value",
+                        "result",
                     ];
                     for ck in candidate_keys {
                         if obj.contains_key(ck) {
@@ -429,7 +469,8 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                     // If no explicit payload key, check if there is exactly 1 other key in the object,
                     // and its value is a JSON object or array.
                     if payload_key.is_none() {
-                        let other_keys: Vec<&String> = obj.keys().filter(|k| k.as_str() != n_key).collect();
+                        let other_keys: Vec<&String> =
+                            obj.keys().filter(|k| k.as_str() != n_key).collect();
                         if other_keys.len() == 1 {
                             let key = other_keys[0];
                             if obj.get(key).is_some_and(|v| v.is_object() || v.is_array()) {
@@ -476,22 +517,40 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
     // 2. Object wrapping & field remapping
     if let Some(obj) = parsed.as_object_mut() {
         // If the model wrapped a single item directly in the root object
-        if tool_name == "emit_bug_report" && !obj.contains_key("bugs")
-            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("severity")) {
+        if tool_name == "emit_bug_report"
+            && !obj.contains_key("bugs")
+            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("severity"))
+        {
             let mut new_obj = serde_json::Map::new();
-            new_obj.insert("bugs".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            new_obj.insert(
+                "bugs".to_string(),
+                serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]),
+            );
             *obj = new_obj;
         }
-        if tool_name == "emit_defect_report" && !obj.contains_key("findings")
-            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("severity") || obj.contains_key("category")) {
+        if tool_name == "emit_defect_report"
+            && !obj.contains_key("findings")
+            && (obj.contains_key("title")
+                || obj.contains_key("id")
+                || obj.contains_key("severity")
+                || obj.contains_key("category"))
+        {
             let mut new_obj = serde_json::Map::new();
-            new_obj.insert("findings".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            new_obj.insert(
+                "findings".to_string(),
+                serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]),
+            );
             *obj = new_obj;
         }
-        if tool_name == "emit_test_cases" && !obj.contains_key("cases")
-            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("steps")) {
+        if tool_name == "emit_test_cases"
+            && !obj.contains_key("cases")
+            && (obj.contains_key("title") || obj.contains_key("id") || obj.contains_key("steps"))
+        {
             let mut new_obj = serde_json::Map::new();
-            new_obj.insert("cases".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]));
+            new_obj.insert(
+                "cases".to_string(),
+                serde_json::Value::Array(vec![serde_json::Value::Object(obj.clone())]),
+            );
             *obj = new_obj;
         }
 
@@ -524,8 +583,14 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                                 if trace_val.is_string() {
                                     *trace_val = serde_json::Value::Array(vec![trace_val.clone()]);
                                 } else if let Some(trace_obj) = trace_val.as_object() {
-                                    let file_hint = trace_obj.get("file_hint").and_then(|v| v.as_str()).unwrap_or("");
-                                    let symbol = trace_obj.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+                                    let file_hint = trace_obj
+                                        .get("file_hint")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let symbol = trace_obj
+                                        .get("symbol")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
                                     let trace_str = if !file_hint.is_empty() && !symbol.is_empty() {
                                         format!("{file_hint}#{symbol}")
                                     } else if !file_hint.is_empty() {
@@ -533,7 +598,10 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                                     } else {
                                         symbol.to_string()
                                     };
-                                    *trace_val = serde_json::Value::Array(vec![serde_json::Value::String(trace_str)]);
+                                    *trace_val =
+                                        serde_json::Value::Array(vec![serde_json::Value::String(
+                                            trace_str,
+                                        )]);
                                 }
                             }
                         }
@@ -557,22 +625,41 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                 for (k, v) in obj.iter() {
                     let k_lower = k.to_lowercase();
                     if k_lower.contains("title") || k_lower.contains("name") {
-                        if let Some(s) = v.as_str() { title = s.to_string(); }
-                        else { title = v.to_string(); }
+                        if let Some(s) = v.as_str() {
+                            title = s.to_string();
+                        } else {
+                            title = v.to_string();
+                        }
                     } else if k_lower.contains("desc") || k_lower.contains("summary") {
-                        if let Some(s) = v.as_str() { description = s.to_string(); }
-                        else { description = v.to_string(); }
+                        if let Some(s) = v.as_str() {
+                            description = s.to_string();
+                        } else {
+                            description = v.to_string();
+                        }
                     } else if k_lower.contains("category") || k_lower.contains("type") {
-                        if let Some(s) = v.as_str() { category = s.to_string(); }
-                        else { category = v.to_string(); }
-                    } else if k_lower != "key_modules" && k_lower != "data_flows" && k_lower != "known_risks" {
-                        let v_str = if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() };
+                        if let Some(s) = v.as_str() {
+                            category = s.to_string();
+                        } else {
+                            category = v.to_string();
+                        }
+                    } else if k_lower != "key_modules"
+                        && k_lower != "data_flows"
+                        && k_lower != "known_risks"
+                    {
+                        let v_str = if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            v.to_string()
+                        };
                         other_notes.push(format!("* {k}: {v_str}"));
                     }
                 }
 
                 let salvaged_summary = if has_summary {
-                    obj.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    obj.get("summary")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 } else {
                     let mut s = String::new();
                     if !title.is_empty() {
@@ -586,7 +673,9 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                         s.push_str(". ");
                     }
                     if description.is_empty() {
-                        s.push_str("A structured summary of the codebase components and architecture.");
+                        s.push_str(
+                            "A structured summary of the codebase components and architecture.",
+                        );
                     } else {
                         s.push_str(&description);
                     }
@@ -594,7 +683,10 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                 };
 
                 let salvaged_notes = if has_notes {
-                    obj.get("architecture_notes").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    obj.get("architecture_notes")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 } else if other_notes.is_empty() {
                     "* Codebase details and architectural overview compiled from sampled components.".to_string()
                 } else {
@@ -611,8 +703,14 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                 if let Some(val) = obj.get("known_risks") {
                     new_obj.insert("known_risks".to_string(), val.clone());
                 }
-                new_obj.insert("summary".to_string(), serde_json::Value::String(salvaged_summary));
-                new_obj.insert("architecture_notes".to_string(), serde_json::Value::String(salvaged_notes));
+                new_obj.insert(
+                    "summary".to_string(),
+                    serde_json::Value::String(salvaged_summary),
+                );
+                new_obj.insert(
+                    "architecture_notes".to_string(),
+                    serde_json::Value::String(salvaged_notes),
+                );
                 *obj = new_obj;
             }
         }
@@ -629,40 +727,78 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
                 for (k, v) in obj.iter() {
                     let k_lower = k.to_lowercase();
                     if k_lower.contains("title") || k_lower.contains("name") {
-                        if let Some(s) = v.as_str() { title = s.to_string(); }
-                        else { title = v.to_string(); }
-                    } else if k_lower.contains("desc") || k_lower.contains("summary") || k_lower.contains("strategy") {
-                        if let Some(s) = v.as_str() { description = s.to_string(); }
-                        else { description = v.to_string(); }
+                        if let Some(s) = v.as_str() {
+                            title = s.to_string();
+                        } else {
+                            title = v.to_string();
+                        }
+                    } else if k_lower.contains("desc")
+                        || k_lower.contains("summary")
+                        || k_lower.contains("strategy")
+                    {
+                        if let Some(s) = v.as_str() {
+                            description = s.to_string();
+                        } else {
+                            description = v.to_string();
+                        }
                     } else {
-                        let v_str = if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() };
+                        let v_str = if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            v.to_string()
+                        };
                         other_notes.push(format!("* {k}: {v_str}"));
                     }
                 }
 
                 let salvaged_summary = if has_summary {
-                    obj.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    obj.get("summary")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 } else if !description.is_empty() {
                     description.clone()
                 } else if !title.is_empty() {
                     format!("Test plan for project: {title}")
                 } else {
-                    "Structured test plan detailing high-level test strategy and criteria.".to_string()
+                    "Structured test plan detailing high-level test strategy and criteria."
+                        .to_string()
                 };
 
                 let salvaged_strategy = if has_strategy {
-                    obj.get("strategy").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    obj.get("strategy")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 } else if other_notes.is_empty() {
-                    "Perform functional integration and unit verification based on the components.".to_string()
+                    "Perform functional integration and unit verification based on the components."
+                        .to_string()
                 } else {
-                    format!("Verify the following architectural aspects:\n{}", other_notes.join("\n"))
+                    format!(
+                        "Verify the following architectural aspects:\n{}",
+                        other_notes.join("\n")
+                    )
                 };
 
                 let mut new_obj = serde_json::Map::new();
-                new_obj.insert("summary".to_string(), serde_json::Value::String(salvaged_summary));
-                new_obj.insert("strategy".to_string(), serde_json::Value::String(salvaged_strategy));
+                new_obj.insert(
+                    "summary".to_string(),
+                    serde_json::Value::String(salvaged_summary),
+                );
+                new_obj.insert(
+                    "strategy".to_string(),
+                    serde_json::Value::String(salvaged_strategy),
+                );
 
-                let array_keys = ["objectives", "scopeIn", "scopeOut", "environments", "risks", "entryCriteria", "exitCriteria"];
+                let array_keys = [
+                    "objectives",
+                    "scopeIn",
+                    "scopeOut",
+                    "environments",
+                    "risks",
+                    "entryCriteria",
+                    "exitCriteria",
+                ];
                 for ak in array_keys {
                     if let Some(val) = obj.get(ak) {
                         new_obj.insert(ak.to_string(), val.clone());
@@ -679,11 +815,11 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
 pub(crate) fn strip_think_blocks(text: &str) -> String {
     let mut result = String::new();
     let mut remaining = text;
-    
+
     while let Some(start_idx) = find_case_insensitive(remaining, "<think>") {
         result.push_str(&remaining[..start_idx]);
         let post_start = &remaining[start_idx..];
-        
+
         if let Some(end_idx) = find_case_insensitive(post_start, "</think>") {
             let skip_len = end_idx + 8;
             remaining = &post_start[skip_len..];
@@ -702,10 +838,12 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
         return Some(0);
     }
     for i in 0..=haystack.len().saturating_sub(needle_len) {
-        if haystack.is_char_boundary(i) && haystack.is_char_boundary(i + needle_len)
-            && haystack[i..i + needle_len].eq_ignore_ascii_case(needle) {
-                return Some(i);
-            }
+        if haystack.is_char_boundary(i)
+            && haystack.is_char_boundary(i + needle_len)
+            && haystack[i..i + needle_len].eq_ignore_ascii_case(needle)
+        {
+            return Some(i);
+        }
     }
     None
 }
@@ -716,27 +854,27 @@ fn find_balanced_braces(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
     let len = bytes.len();
     let mut start = 0;
-    
+
     while start < len {
         if bytes[start] == b'{' {
             let mut depth = 0_i32;
-            let mut in_string = false;
+            let mut in_string: Option<u8> = None;
             let mut escaped = false;
             let mut matched_end = None;
             for i in start..len {
                 let b = bytes[i];
-                if in_string {
+                if let Some(quote) = in_string {
                     if escaped {
                         escaped = false;
                     } else if b == b'\\' {
                         escaped = true;
-                    } else if b == b'"' {
-                        in_string = false;
+                    } else if b == quote {
+                        in_string = None;
                     }
                     continue;
                 }
                 match b {
-                    b'"' => in_string = true,
+                    b'\'' | b'"' => in_string = Some(b),
                     b'{' => depth += 1,
                     b'}' => {
                         depth -= 1;
@@ -764,8 +902,198 @@ fn find_balanced_braces(text: &str) -> Vec<String> {
 pub(crate) fn salvage_json_from_text(text: &str) -> Option<String> {
     let cleaned = strip_think_blocks(text);
     let blocks = find_balanced_braces(&cleaned);
-    
-    blocks.into_iter().rev().find(|block| serde_json::from_str::<serde_json::Value>(block).is_ok())
+
+    blocks
+        .into_iter()
+        .rev()
+        .find(|block| serde_json::from_str::<serde_json::Value>(block).is_ok())
+}
+
+fn salvage_js_object_literal_from_text(text: &str) -> Option<String> {
+    let cleaned = strip_think_blocks(text);
+    let blocks = find_balanced_braces(&cleaned);
+
+    blocks
+        .into_iter()
+        .rev()
+        .filter_map(|block| js_object_literal_to_json(&block))
+        .find(|json| serde_json::from_str::<serde_json::Value>(json).is_ok())
+}
+
+fn js_object_literal_to_json(raw: &str) -> Option<String> {
+    let normalized_strings = normalize_js_strings(raw);
+    let quoted_keys = quote_js_object_keys(&normalized_strings);
+    let without_trailing_commas = remove_js_trailing_commas(&quoted_keys);
+    if serde_json::from_str::<serde_json::Value>(&without_trailing_commas).is_ok() {
+        Some(without_trailing_commas)
+    } else {
+        None
+    }
+}
+
+fn normalize_js_strings(raw: &str) -> String {
+    let mut out = String::new();
+    let mut in_string: Option<char> = None;
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if let Some(quote) = in_string {
+            if escaped {
+                // `\'` is valid in JS strings (single- or double-quoted)
+                // but not in JSON; pop the `\` we already wrote and emit
+                // the quote bare.
+                if ch == '\'' {
+                    out.pop();
+                }
+                out.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                out.push(ch);
+                escaped = true;
+            } else if ch == quote {
+                out.push('"');
+                in_string = None;
+            } else if quote == '\'' && ch == '"' {
+                out.push_str("\\\"");
+            } else {
+                out.push(ch);
+            }
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            out.push('"');
+            in_string = Some(ch);
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
+}
+
+fn quote_js_object_keys(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch != '{' && ch != ',' {
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        out.push(ch);
+        i += 1;
+        while i < chars.len() && chars[i].is_whitespace() {
+            out.push(chars[i]);
+            i += 1;
+        }
+
+        if i >= chars.len() || !is_js_identifier_start(chars[i]) {
+            continue;
+        }
+
+        let key_start = i;
+        i += 1;
+        while i < chars.len() && is_js_identifier_continue(chars[i]) {
+            i += 1;
+        }
+        let key: String = chars[key_start..i].iter().collect();
+        let mut j = i;
+        while j < chars.len() && chars[j].is_whitespace() {
+            j += 1;
+        }
+
+        if j < chars.len() && chars[j] == ':' {
+            out.push('"');
+            out.push_str(&key);
+            out.push('"');
+        } else {
+            out.push_str(&key);
+        }
+    }
+
+    out
+}
+
+fn is_js_identifier_start(ch: char) -> bool {
+    ch == '_' || ch == '$' || ch.is_ascii_alphabetic()
+}
+
+fn is_js_identifier_continue(ch: char) -> bool {
+    is_js_identifier_start(ch) || ch.is_ascii_digit()
+}
+
+fn remove_js_trailing_commas(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == ',' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
+                i += 1;
+                continue;
+            }
+        }
+
+        out.push(ch);
+        i += 1;
+    }
+
+    out
 }
 
 async fn retrieve_chunks(
@@ -791,12 +1119,12 @@ async fn retrieve_chunks(
                  classes, and entry points of {}",
                 request.project_name
             ),
-            ArtifactType::TestCases
-            | ArtifactType::DefectReport
-            | ArtifactType::BugReport => format!(
-                "core public APIs, exported functions, classes, and entry points of {}",
-                request.project_name
-            ),
+            ArtifactType::TestCases | ArtifactType::DefectReport | ArtifactType::BugReport => {
+                format!(
+                    "core public APIs, exported functions, classes, and entry points of {}",
+                    request.project_name
+                )
+            }
         }
     };
 
@@ -931,7 +1259,9 @@ fn normalize_value_recursively(data: &mut JsonValue, schema: &JsonValue) {
             // 2. Missing arrays normalization: Insert [] for required array fields if absent
             if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
                 for req_key_val in required {
-                    let Some(key) = req_key_val.as_str() else { continue };
+                    let Some(key) = req_key_val.as_str() else {
+                        continue;
+                    };
                     if obj.contains_key(key) {
                         continue;
                     }
@@ -1472,7 +1802,8 @@ mod tests {
 
     #[test]
     fn salvage_json_strips_markdown_fence_and_prose() {
-        let text = "Here is the test plan:\n```json\n{\"summary\":\"ok\",\"goals\":[]}\n```\nAll done.";
+        let text =
+            "Here is the test plan:\n```json\n{\"summary\":\"ok\",\"goals\":[]}\n```\nAll done.";
         assert_eq!(
             salvage_json_from_text(text).as_deref(),
             Some("{\"summary\":\"ok\",\"goals\":[]}"),
@@ -1564,6 +1895,203 @@ mod tests {
     }
 
     #[test]
+    fn salvage_tool_args_recovers_gemma_project_context_tool_code() {
+        let text = r#"<tool_code>
+            console.log(google.admin.project_context.set_project_context({
+                project_name: "Project Context",
+                project_description: "A comprehensive context object for the entire application",
+                category: "desktop app",
+                key_modules: [
+                    { name: "src-tauri", responsibility: "Backend command and provider orchestration" },
+                ],
+            }))
+        </tool_code>"#;
+
+        let got = salvage_tool_args(text, "emit_project_context").expect("salvage");
+        let mut parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        normalize_missing_arrays(&mut parsed, &context_md_v1::tool());
+        validate_tool_output(&context_md_v1::tool(), &parsed).expect("valid context payload");
+
+        assert!(parsed["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Project Context"));
+        assert!(parsed["summary"]
+            .as_str()
+            .unwrap()
+            .contains("comprehensive context object"));
+        assert_eq!(parsed["key_modules"][0]["name"], "src-tauri");
+    }
+
+    #[test]
+    fn salvage_tool_args_recovers_single_quoted_tool_code_strings() {
+        let text = r"<tool_code>
+            console.log(default_api.emit_test_plan({
+                summary: 'It\'s a plan with a } brace in prose',
+                strategy: 'Verify parser resilience',
+            }))
+        </tool_code>";
+
+        let got = salvage_tool_args(text, "emit_test_plan").expect("salvage");
+        let mut parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        normalize_missing_arrays(&mut parsed, &test_plan_v1::tool());
+        validate_tool_output(&test_plan_v1::tool(), &parsed).expect("valid test plan");
+        assert_eq!(parsed["summary"], "It's a plan with a } brace in prose");
+    }
+
+    #[test]
+    fn salvage_tool_args_recovers_escaped_apostrophe_in_double_quoted_strings() {
+        // `\'` is a legal (if unnecessary) escape in double-quoted JS
+        // strings but invalid JSON — the normalizer must drop the backslash.
+        let text = r#"<tool_code>
+            console.log(default_api.emit_test_plan({
+                summary: "It\'s a plan",
+                strategy: "Verify parser resilience",
+            }))
+        </tool_code>"#;
+
+        let got = salvage_tool_args(text, "emit_test_plan").expect("salvage");
+        let mut parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
+        normalize_missing_arrays(&mut parsed, &test_plan_v1::tool());
+        validate_tool_output(&test_plan_v1::tool(), &parsed).expect("valid test plan");
+        assert_eq!(parsed["summary"], "It's a plan");
+    }
+
+    #[test]
+    fn salvage_tool_args_recovers_pseudo_calls_for_artifact_arrays() {
+        let bug_text = r#"```tool_code
+            console.log(default_api.emit_bug_report({
+                bugs: [{
+                    id: "BUG-RUNTIME",
+                    title: "Runtime failure when saving reports",
+                    severity: "major",
+                    steps_to_reproduce: ["Open the app"],
+                    expected_behavior: "The report is saved",
+                    actual_behavior: "The report fails",
+                    root_cause: { symbol: "saveReport", explanation: "Error is not handled" },
+                }],
+            }))
+        ```"#;
+        let bug = salvage_tool_args(bug_text, "emit_bug_report").expect("salvage bug report");
+        let mut bug_value: serde_json::Value = serde_json::from_str(&bug).unwrap();
+        normalize_missing_arrays(&mut bug_value, &bug_report_v1::tool());
+        validate_tool_output(&bug_report_v1::tool(), &bug_value).expect("valid bug report");
+
+        let cases_text = r#"<tool_code>
+            console.log(default_api.emit_test_cases({
+                cases: [{
+                    id: "TC-SAVE-REPORT",
+                    title: "Save report",
+                    priority: "p1",
+                    steps: ["Save a report"],
+                    expectedResult: "The report is persisted",
+                    traceability: "src/report.ts#saveReport",
+                }],
+            }))
+        </tool_code>"#;
+        let cases = salvage_tool_args(cases_text, "emit_test_cases").expect("salvage cases");
+        let mut cases_value: serde_json::Value = serde_json::from_str(&cases).unwrap();
+        normalize_missing_arrays(&mut cases_value, &test_cases_v1::tool());
+        validate_tool_output(&test_cases_v1::tool(), &cases_value).expect("valid test cases");
+        assert_eq!(
+            cases_value["cases"][0]["traceability"],
+            serde_json::json!(["src/report.ts#saveReport"])
+        );
+    }
+
+    #[test]
+    fn salvage_tool_args_recovers_pseudo_calls_for_plan_and_defects() {
+        let plan_text = r#"<tool_code>
+            console.log(default_api.emit_test_plan({
+                summary: "Focused plan for report workflows",
+                objectives: ["Verify report creation"],
+                scopeIn: ["src/report.ts"],
+                scopeOut: [],
+                strategy: "Exercise unit and integration behavior around reports.",
+                environments: ["vitest"],
+                risks: [{ description: "Persistence can fail", mitigation: "Mock failures" }],
+                entryCriteria: ["Source is indexed"],
+                exitCriteria: ["Critical report cases pass"],
+            }))
+        </tool_code>"#;
+        let plan = salvage_tool_args(plan_text, "emit_test_plan").expect("salvage plan");
+        let mut plan_value: serde_json::Value = serde_json::from_str(&plan).unwrap();
+        normalize_missing_arrays(&mut plan_value, &test_plan_v1::tool());
+        validate_tool_output(&test_plan_v1::tool(), &plan_value).expect("valid test plan");
+
+        let defect_text = r#"```tool_code
+            console.log(default_api.emit_defect_report({
+                findings: [{
+                    id: "DEF-UNHANDLED-ERROR",
+                    severity: "major",
+                    category: "error_handling",
+                    confidence: "high",
+                    location: { symbol: "saveReport", start_line: 10, end_line: 20 },
+                    description: "The save path does not handle provider errors.",
+                    impact: "Users can lose generated report data.",
+                    suggested_fix: "Catch the provider error and surface a retryable failure.",
+                }],
+                summary: "One high-confidence defect found.",
+            }))
+        ```"#;
+        let defect = salvage_tool_args(defect_text, "emit_defect_report").expect("salvage defect");
+        let mut defect_value: serde_json::Value = serde_json::from_str(&defect).unwrap();
+        normalize_missing_arrays(&mut defect_value, &defect_report_v1::tool());
+        validate_tool_output(&defect_report_v1::tool(), &defect_value)
+            .expect("valid defect report");
+    }
+
+    #[test]
+    fn detect_non_tool_call_format_flags_native_formats() {
+        assert_eq!(
+            detect_non_tool_call_format("<tool_code> console.log(set_project_context())"),
+            Some("Gemma-style `tool_code` blocks")
+        );
+        assert_eq!(
+            detect_non_tool_call_format("<tool_call>{}</tool_call>"),
+            Some("`<tool_call>` tags")
+        );
+        assert_eq!(
+            detect_non_tool_call_format("<|python_tag|>emit(...)"),
+            Some("Llama function-call tags")
+        );
+        assert_eq!(
+            detect_non_tool_call_format("print(default_api.foo())"),
+            Some("a code snippet")
+        );
+        assert_eq!(
+            detect_non_tool_call_format("You could use console.log(result) to debug this."),
+            None
+        );
+        assert_eq!(
+            detect_non_tool_call_format("Try print(result) while investigating."),
+            None
+        );
+        assert_eq!(
+            detect_non_tool_call_format("I cannot help with that."),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_raw_json_salvages_tool_code_before_erroring() {
+        let schema = context_md_v1::tool();
+        let aggregate = StreamAggregate {
+            tool_args: String::new(),
+            text: "<tool_code> console.log(set_project_context({ project_name: \"X\", project_description: \"Y\" }))".into(),
+            text_len: 96,
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+
+        let raw = extract_raw_json(&aggregate, &schema, "gemma3n:e4b").expect("salvage");
+        let mut parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        normalize_missing_arrays(&mut parsed, &schema);
+        validate_tool_output(&schema, &parsed).expect("valid context payload");
+        assert!(parsed["summary"].as_str().unwrap().contains('X'));
+    }
+
+    #[test]
     fn salvage_tool_args_unwraps_custom_payload_keys_and_inline_wrappers() {
         // Model emitted `{"tool": "emit_bug_report", "report": {"bugs": []}}`
         let text = "{\"tool\":\"emit_bug_report\",\"report\":{\"bugs\":[]}}";
@@ -1607,12 +2135,19 @@ mod tests {
     #[test]
     fn salvage_tool_args_remaps_codebase_dumps_and_bare_arrays() {
         // Test case 1: codebase dump mapping for emit_project_context
-        let dump = r#"{"architect":"Yuvraj","project_title":"Tessera","description":"Beautiful app"}"#;
+        let dump =
+            r#"{"architect":"Yuvraj","project_title":"Tessera","description":"Beautiful app"}"#;
         let got = salvage_tool_args(dump, "emit_project_context").expect("salvage");
         let parsed: serde_json::Value = serde_json::from_str(&got).unwrap();
         assert!(parsed["summary"].as_str().unwrap().contains("Tessera"));
-        assert!(parsed["summary"].as_str().unwrap().contains("Beautiful app"));
-        assert!(parsed["architecture_notes"].as_str().unwrap().contains("architect: Yuvraj"));
+        assert!(parsed["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Beautiful app"));
+        assert!(parsed["architecture_notes"]
+            .as_str()
+            .unwrap()
+            .contains("architect: Yuvraj"));
 
         // Test case 2: bare array wrapping for emit_test_cases
         let array_str = r#"[{"id":"TC-1","title":"test_login"}]"#;
@@ -1627,13 +2162,19 @@ mod tests {
         let parsed3: serde_json::Value = serde_json::from_str(&got3).unwrap();
         assert_eq!(parsed3["cases"][0]["id"], "TC-2");
         assert_eq!(parsed3["cases"][0]["title"], "test_logout");
-        assert_eq!(parsed3["cases"][0]["traceability"], serde_json::json!(["/src/Navbar.js#Navbar"]));
+        assert_eq!(
+            parsed3["cases"][0]["traceability"],
+            serde_json::json!(["/src/Navbar.js#Navbar"])
+        );
 
         // Test case 4: traceability as a single string is wrapped in an array
         let single_str_trace = r#"{"cases":[{"id":"TC-3","title":"test_nav","steps":[],"traceability":"/src/Navbar.js#Navbar"}]}"#;
         let got4 = salvage_tool_args(single_str_trace, "emit_test_cases").expect("salvage");
         let parsed4: serde_json::Value = serde_json::from_str(&got4).unwrap();
-        assert_eq!(parsed4["cases"][0]["traceability"], serde_json::json!(["/src/Navbar.js#Navbar"]));
+        assert_eq!(
+            parsed4["cases"][0]["traceability"],
+            serde_json::json!(["/src/Navbar.js#Navbar"])
+        );
     }
 
     #[test]
