@@ -375,6 +375,14 @@ BEGIN
     WHERE id = p_sprint_id AND status = 'planned'
     RETURNING * INTO v_sprint;
 
+    -- The status predicate makes concurrent starts safe: if the sprint's
+    -- status changed between the initial SELECT and the board lock (e.g. a
+    -- direct PostgREST update), the UPDATE matches zero rows — error out
+    -- instead of returning a NULL composite record to the caller.
+    IF v_sprint.id IS NULL THEN
+        RAISE EXCEPTION 'sprint was started or modified concurrently';
+    END IF;
+
     RETURN v_sprint;
 END;
 $$;
@@ -562,6 +570,58 @@ CREATE TRIGGER issues_validate_parent
 BEFORE INSERT OR UPDATE OF parent_id, board_id ON issues
 FOR EACH ROW EXECUTE FUNCTION public.validate_issue_parent();
 
+-- Enforce the "at least one admin per team" invariant at the database
+-- level. Both the desktop client (assertNotLastAdmin) and the Rust server
+-- (update_member_role / remove_member) do a read-then-write check, which is
+-- a TOCTOU: two concurrent removals can each see the other admin and both
+-- commit. Locking the team row serialises those transactions so the second
+-- one re-checks against the committed state and fails here instead.
+CREATE OR REPLACE FUNCTION public.enforce_last_admin()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_result team_members;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_result := OLD;
+    ELSE
+        v_result := NEW;
+    END IF;
+
+    -- Only admin rows losing their admin role or membership are guarded.
+    IF OLD.role <> 'admin' THEN
+        RETURN v_result;
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW.role = 'admin' THEN
+        RETURN NEW;
+    END IF;
+
+    -- Serialise concurrent admin removals/demotions on the same team.
+    -- If the team row is gone the whole team is being deleted (cascade) —
+    -- nothing left to protect.
+    PERFORM 1 FROM teams WHERE id = OLD.team_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN v_result;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM team_members
+        WHERE team_id = OLD.team_id AND role = 'admin' AND id <> OLD.id
+    ) THEN
+        RAISE EXCEPTION 'cannot remove or demote the last admin of the team';
+    END IF;
+
+    RETURN v_result;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS team_members_last_admin_guard ON team_members;
+CREATE TRIGGER team_members_last_admin_guard
+BEFORE UPDATE OF role OR DELETE ON team_members
+FOR EACH ROW EXECUTE FUNCTION public.enforce_last_admin();
+
 -- Lock function execution down to signed-in users.
 REVOKE ALL ON FUNCTION public.join_team_with_code(TEXT) FROM anon, public;
 REVOKE ALL ON FUNCTION public.move_issue_on_board(UUID, UUID, INTEGER) FROM anon, public;
@@ -569,6 +629,7 @@ REVOKE ALL ON FUNCTION public.start_sprint_atomic(UUID) FROM anon, public;
 REVOKE ALL ON FUNCTION public.complete_sprint_atomic(UUID) FROM anon, public;
 REVOKE ALL ON FUNCTION public.assign_issue_key() FROM anon, public;
 REVOKE ALL ON FUNCTION public.validate_issue_parent() FROM anon, public;
+REVOKE ALL ON FUNCTION public.enforce_last_admin() FROM anon, public;
 REVOKE ALL ON FUNCTION public.delete_column_atomic(UUID) FROM anon, public;
 GRANT EXECUTE ON FUNCTION public.join_team_with_code(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.move_issue_on_board(UUID, UUID, INTEGER) TO authenticated;

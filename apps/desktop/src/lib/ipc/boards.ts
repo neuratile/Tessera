@@ -379,7 +379,18 @@ export async function joinTeam(inviteCode: string): Promise<TeamMember> {
   });
 
   if (error) throw new Error(error.message);
-  return mapTeamMember(member);
+
+  // The RPC returns the bare team_members row (RETURNS team_members), so the
+  // joined user profile is missing. Re-read with the join — the caller is a
+  // member now, so RLS allows it. Fall back to the bare row if the re-read
+  // fails: the join itself already succeeded.
+  const { data: full, error: fetchError } = await getSupabase()
+    .from('team_members')
+    .select('*, users:user_id(*)')
+    .eq('id', member.id)
+    .single();
+
+  return mapTeamMember(fetchError || !full ? member : full);
 }
 
 export async function fetchTeamMembers(teamId: string): Promise<TeamMember[]> {
