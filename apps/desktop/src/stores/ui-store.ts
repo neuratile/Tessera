@@ -14,8 +14,10 @@ export type PanelSizes = [number, number, number];
 export type UiState = {
   panelSizes: PanelSizes;
   settingsOpen: boolean;
+  mode: 'code' | 'boards';
   setPanelSizes: (sizes: PanelSizes) => void;
   setSettingsOpen: (open: boolean) => void;
+  setMode: (mode: 'code' | 'boards') => void;
 };
 
 function isPanelSizes(value: unknown): value is PanelSizes {
@@ -26,29 +28,34 @@ function isPanelSizes(value: unknown): value is PanelSizes {
   );
 }
 
-function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen'> {
+function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen' | 'mode'> {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
-      return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false };
+      return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false, mode: 'code' };
     }
     const parsed: unknown = JSON.parse(raw);
     const sizes =
       typeof parsed === 'object' && parsed !== null && 'panelSizes' in parsed
         ? parsed.panelSizes
         : null;
+    const mode =
+      typeof parsed === 'object' && parsed !== null && 'mode' in parsed && (parsed.mode === 'code' || parsed.mode === 'boards')
+        ? (parsed.mode)
+        : 'code';
     return {
       panelSizes: isPanelSizes(sizes) ? sizes : DEFAULT_PANEL_SIZES,
       settingsOpen: false,
+      mode,
     };
   } catch {
-    return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false };
+    return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false, mode: 'code' };
   }
 }
 
-function persist(state: Pick<UiState, 'panelSizes'>): void {
+function persist(state: Pick<UiState, 'panelSizes' | 'mode'>): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ panelSizes: state.panelSizes }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ panelSizes: state.panelSizes, mode: state.mode }));
   } catch {
     // localStorage unavailable — silently no-op so the app remains usable.
   }
@@ -60,9 +67,13 @@ const store = create<UiState>()((set, get) => {
     ...initial,
     setPanelSizes: (panelSizes) => {
       set({ panelSizes });
-      persist({ panelSizes: get().panelSizes });
+      persist({ panelSizes: get().panelSizes, mode: get().mode });
     },
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+    setMode: (mode) => {
+      set({ mode });
+      persist({ panelSizes: get().panelSizes, mode: get().mode });
+    },
   };
 });
 

@@ -19,10 +19,10 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@sentry/react": "^10.0.0",
     "@monaco-editor/react": "^4.6.0",
-    "monaco-editor": "^0.52.0",
     "@radix-ui/react-slot": "^1.1.2",
+    "@sentry/react": "^10.0.0",
+    "@supabase/supabase-js": "^2.107.0",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
@@ -31,6 +31,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
+    "monaco-editor": "^0.52.0",
     "react": "^19.0.0",
     "react-arborist": "^3.4.0",
     "react-dom": "^19.0.0",
@@ -42,8 +43,8 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0",
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2.2.0",
     "@types/node": "^22.10.0",
