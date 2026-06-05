@@ -20,15 +20,28 @@ export class BoardWebSocket {
   private boardId: string | null = null;
   private serverUrl: string | null = null;
   private token: string | null = null;
+  private tokenProvider: (() => Promise<string | null>) | null = null;
   private intentionalClose = false;
 
-  /** Open a WebSocket connection to the boards server. */
-  connect(serverUrl: string, token: string, boardId: string): void {
+  /**
+   * Open a WebSocket connection to the boards server.
+   *
+   * Pass `tokenProvider` to fetch a fresh access token on every (re)connect —
+   * a static token goes stale after Supabase's hourly auto-refresh, which
+   * would fail the auth handshake on any reconnect after ~60 minutes.
+   */
+  connect(
+    serverUrl: string,
+    token: string,
+    boardId: string,
+    tokenProvider?: () => Promise<string | null>,
+  ): void {
     // Tear down any existing connection first
     this.disconnect();
 
     this.serverUrl = serverUrl;
     this.token = token;
+    this.tokenProvider = tokenProvider ?? null;
     this.boardId = boardId;
     this.intentionalClose = false;
     this.reconnectDelay = MIN_RECONNECT_MS;
@@ -53,6 +66,7 @@ export class BoardWebSocket {
     this.boardId = null;
     this.serverUrl = null;
     this.token = null;
+    this.tokenProvider = null;
   }
 
   /**
@@ -93,8 +107,9 @@ export class BoardWebSocket {
       // Reset backoff on successful connection
       this.reconnectDelay = MIN_RECONNECT_MS;
       // First-message auth: the server closes the socket unless this arrives
-      // within its auth timeout.
-      this.ws?.send(JSON.stringify({ type: 'auth', token: this.token ?? '' }));
+      // within its auth timeout. Fetch a fresh token when a provider is set —
+      // the stored one may have expired between reconnects.
+      void this.sendAuth();
     };
 
     this.ws.onmessage = (msg) => {
@@ -122,6 +137,25 @@ export class BoardWebSocket {
         this.attemptReconnect();
       }
     };
+  }
+
+  private async sendAuth(): Promise<void> {
+    let token = this.token ?? '';
+    if (this.tokenProvider) {
+      try {
+        const fresh = await this.tokenProvider();
+        if (fresh) {
+          this.token = fresh;
+          token = fresh;
+        }
+      } catch {
+        // Fall back to the stored token; the server rejects it if expired
+        // and the reconnect loop will retry.
+      }
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'auth', token }));
+    }
   }
 
   private attemptReconnect(): void {

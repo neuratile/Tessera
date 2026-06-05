@@ -94,7 +94,41 @@ function mapColumn(dbCol: any): BoardColumn {
     color: dbCol.color,
     position: dbCol.position,
     wipLimit: dbCol.wip_limit || undefined,
+    isDone: dbCol.is_done ?? false,
   };
+}
+
+/**
+ * Resolve the caller's role on a team, throwing unless it is in
+ * `allowed`. Mirrors the Rust server's role checks for the
+ * Supabase-direct path (defense in depth on top of RLS).
+ */
+async function requireTeamRole(teamId: string, allowed: TeamRole[]): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase
+    .from('team_members')
+    .select('role')
+    .eq('team_id', teamId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data || !allowed.includes(data.role as TeamRole)) {
+    throw new Error('Not authorized for this operation');
+  }
+}
+
+/** Resolve a board's team id. */
+async function boardTeamId(boardId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('boards')
+    .select('team_id')
+    .eq('id', boardId)
+    .single();
+  if (error) throw new Error(error.message);
+  return data.team_id;
 }
 
 function mapSprint(dbSprint: any): Sprint {
@@ -298,8 +332,9 @@ export async function createTeam(input: CreateTeamInput): Promise<Team> {
   if (!user) throw new Error('Not authenticated');
 
   const teamId = crypto.randomUUID();
-  // CSPRNG — Math.random() codes are guessable by brute force.
-  const inviteCode = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+  // CSPRNG, 20 hex chars (~80 bits). Joining grants full team membership,
+  // so the code space must withstand online brute force.
+  const inviteCode = Array.from(crypto.getRandomValues(new Uint8Array(10)))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
     .toUpperCase();
@@ -337,38 +372,13 @@ export async function createTeam(input: CreateTeamInput): Promise<Team> {
 }
 
 export async function joinTeam(inviteCode: string): Promise<TeamMember> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  // SECURITY DEFINER RPC: under RLS a non-member cannot SELECT the team row
+  // by invite code, so the lookup + insert happen server-side in one step.
+  const { data: member, error } = await supabase.rpc('join_team_with_code', {
+    p_invite_code: inviteCode.trim().toUpperCase(),
+  });
 
-  const { data: team, error: teamError } = await supabase
-    .from('teams')
-    .select('id')
-    .eq('invite_code', inviteCode.trim().toUpperCase())
-    .single();
-
-  if (teamError || !team) {
-    throw new Error('Invalid invite code or team not found');
-  }
-
-  const memberId = crypto.randomUUID();
-  const { data: member, error: memberError } = await supabase
-    .from('team_members')
-    .insert({
-      id: memberId,
-      team_id: team.id,
-      user_id: user.id,
-      role: 'member',
-    })
-    .select('*, users:user_id(*)')
-    .single();
-
-  if (memberError) {
-    if (memberError.code === '23505') {
-      throw new Error('You are already a member of this team');
-    }
-    throw new Error(memberError.message);
-  }
-
+  if (error) throw new Error(error.message);
   return mapTeamMember(member);
 }
 
@@ -382,7 +392,36 @@ export async function fetchTeamMembers(teamId: string): Promise<TeamMember[]> {
   return (data || []).map(mapTeamMember);
 }
 
+/**
+ * Throws when `memberId` is the last admin of the team — removing or
+ * demoting them would leave the team permanently unadministrable.
+ * Mirrors the Rust server's guard.
+ */
+async function assertNotLastAdmin(teamId: string, memberId: string): Promise<void> {
+  const { data: target, error: targetError } = await supabase
+    .from('team_members')
+    .select('role')
+    .eq('id', memberId)
+    .eq('team_id', teamId)
+    .single();
+  if (targetError) throw new Error(targetError.message);
+  if (target.role !== 'admin') return;
+
+  const { count, error: countError } = await supabase
+    .from('team_members')
+    .select('id', { count: 'exact', head: true })
+    .eq('team_id', teamId)
+    .eq('role', 'admin');
+  if (countError) throw new Error(countError.message);
+  if ((count ?? 0) <= 1) {
+    throw new Error('Cannot remove or demote the last admin of the team');
+  }
+}
+
 export async function removeTeamMember(teamId: string, memberId: string): Promise<void> {
+  await requireTeamRole(teamId, ['admin']);
+  await assertNotLastAdmin(teamId, memberId);
+
   const { error } = await supabase
     .from('team_members')
     .delete()
@@ -397,6 +436,11 @@ export async function updateMemberRole(
   memberId: string,
   role: TeamRole,
 ): Promise<TeamMember> {
+  await requireTeamRole(teamId, ['admin']);
+  if (role !== 'admin') {
+    await assertNotLastAdmin(teamId, memberId);
+  }
+
   const { data, error } = await supabase
     .from('team_members')
     .update({ role })
@@ -487,6 +531,9 @@ export async function updateBoard(
 }
 
 export async function deleteBoard(boardId: string): Promise<void> {
+  // Only team admins may delete boards — mirrors the Rust server.
+  await requireTeamRole(await boardTeamId(boardId), ['admin']);
+
   const { error } = await supabase
     .from('boards')
     .delete()
@@ -558,6 +605,15 @@ export async function updateColumn(
 }
 
 export async function deleteColumn(columnId: string): Promise<void> {
+  // Viewers cannot modify board structure — mirrors the Rust server.
+  const { data: column, error: columnError } = await supabase
+    .from('board_columns')
+    .select('board_id')
+    .eq('id', columnId)
+    .single();
+  if (columnError) throw new Error(columnError.message);
+  await requireTeamRole(await boardTeamId(column.board_id), ['admin', 'member']);
+
   const { error } = await supabase
     .from('board_columns')
     .delete()
@@ -647,33 +703,12 @@ export async function updateSprint(
 }
 
 export async function startSprint(sprintId: string): Promise<Sprint> {
-  // Mirror the server guard: only one sprint may be active per board.
-  const { data: sprint, error: sprintError } = await supabase
-    .from('sprints')
-    .select('board_id')
-    .eq('id', sprintId)
-    .single();
-
-  if (sprintError) throw new Error(sprintError.message);
-
-  const { count, error: activeError } = await supabase
-    .from('sprints')
-    .select('id', { count: 'exact', head: true })
-    .eq('board_id', sprint.board_id)
-    .eq('status', 'active');
-
-  if (activeError) throw new Error(activeError.message);
-  if ((count ?? 0) > 0) {
-    throw new Error('Another sprint is already active on this board');
-  }
-
-  const { data, error } = await supabase
-    .from('sprints')
-    .update({ status: 'active', start_date: new Date().toISOString() })
-    .eq('id', sprintId)
-    .eq('status', 'planned')
-    .select()
-    .single();
+  // Atomic RPC: the guard (one active sprint per board) and the status
+  // update run in one transaction with the board row locked, so two
+  // concurrent "Start Sprint" clicks cannot both succeed (TOCTOU).
+  const { data, error } = await supabase.rpc('start_sprint_atomic', {
+    p_sprint_id: sprintId,
+  });
 
   if (error) throw new Error(error.message);
   return mapSprint(data);
@@ -691,10 +726,13 @@ export async function completeSprint(sprintId: string): Promise<Sprint> {
 
   if (sprintError) throw new Error(sprintError.message);
 
+  // The Done column carries an explicit is_done marker; highest position is
+  // only a fallback for legacy boards (users can append columns after Done).
   const { data: doneColumn, error: doneError } = await supabase
     .from('board_columns')
     .select('id')
     .eq('board_id', sprint.board_id)
+    .order('is_done', { ascending: false })
     .order('position', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -767,12 +805,25 @@ export async function createIssue(boardId: string, input: CreateIssueInput): Pro
 
   const issueId = crypto.randomUUID();
 
+  // Compute the next position in the target column — the column default of
+  // 0 would leave every issue unordered and break drag-and-drop arithmetic.
+  const { data: maxRow, error: maxError } = await supabase
+    .from('issues')
+    .select('position')
+    .eq('column_id', input.columnId)
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (maxError) throw new Error(maxError.message);
+  const position = maxRow ? maxRow.position + 1 : 0;
+
   const { error } = await supabase
     .from('issues')
     .insert({
       id: issueId,
       board_id: boardId,
       column_id: input.columnId,
+      position,
       sprint_id: input.sprintId || null,
       parent_id: input.parentId || null,
       issue_type: input.issueType,
@@ -895,7 +946,25 @@ export async function createComment(issueId: string, input: CreateCommentInput):
   return mapComment(data);
 }
 
+/** Throws unless the current user authored the comment — mirrors the server. */
+async function assertCommentAuthor(commentId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase
+    .from('comments')
+    .select('author_id')
+    .eq('id', commentId)
+    .single();
+  if (error) throw new Error(error.message);
+  if (data.author_id !== user.id) {
+    throw new Error('Only the comment author can modify this comment');
+  }
+}
+
 export async function updateComment(commentId: string, body: string): Promise<Comment> {
+  await assertCommentAuthor(commentId);
+
   const { data, error } = await supabase
     .from('comments')
     .update({ body })
@@ -908,6 +977,8 @@ export async function updateComment(commentId: string, body: string): Promise<Co
 }
 
 export async function deleteComment(commentId: string): Promise<void> {
+  await assertCommentAuthor(commentId);
+
   const { error } = await supabase
     .from('comments')
     .delete()
