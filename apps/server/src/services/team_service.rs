@@ -264,6 +264,22 @@ pub async fn update_member_role(
         return Err(ApiError::Forbidden("only admins can update member roles".into()));
     }
 
+    // Prevent demoting the last admin — mirrors the guard in remove_member.
+    // Otherwise the team would be left with no one able to manage it.
+    let target_role = check_membership(pool, user_id_to_update, team_id).await?;
+    if target_role == "admin" && new_role != "admin" {
+        let admin_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM team_members WHERE team_id = $1 AND role = 'admin'",
+        )
+        .bind(team_id)
+        .fetch_one(pool)
+        .await?;
+
+        if admin_count <= 1 {
+            return Err(ApiError::Validation("cannot demote the last admin of the team".into()));
+        }
+    }
+
     sqlx::query("UPDATE team_members SET role = $1 WHERE team_id = $2 AND user_id = $3")
         .bind(new_role)
         .bind(team_id)

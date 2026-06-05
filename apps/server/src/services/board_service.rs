@@ -289,16 +289,20 @@ pub async fn delete_column(pool: &PgPool, user_id: Uuid, column_id: Uuid) -> Api
     }
 
     let mut tx = pool.begin().await?;
-    
+
+    // Delete first, then close the gap. The UNIQUE (board_id, position)
+    // constraint is DEFERRABLE INITIALLY DEFERRED, so intermediate states
+    // inside the transaction are allowed; deleting first also keeps the
+    // statement-level state conflict-free.
+    sqlx::query("DELETE FROM board_columns WHERE id = $1")
+        .bind(column_id)
+        .execute(&mut *tx)
+        .await?;
+
     // Shift subsequent columns down
     sqlx::query("UPDATE board_columns SET position = position - 1 WHERE board_id = $1 AND position > $2")
         .bind(column.board_id)
         .bind(column.position)
-        .execute(&mut *tx)
-        .await?;
-
-    sqlx::query("DELETE FROM board_columns WHERE id = $1")
-        .bind(column_id)
         .execute(&mut *tx)
         .await?;
 
@@ -320,7 +324,11 @@ pub async fn reorder_columns(
     }
 
     let mut tx = pool.begin().await?;
-    
+
+    // Row-by-row position updates produce duplicate positions on intermediate
+    // states. UNIQUE (board_id, position) is DEFERRABLE INITIALLY DEFERRED, so
+    // the constraint is only checked at COMMIT, where the final permutation is
+    // guaranteed to be consistent.
     for (pos, col_id) in column_ids.iter().enumerate() {
         sqlx::query("UPDATE board_columns SET position = $1 WHERE id = $2 AND board_id = $3")
             .bind(pos as i32)
