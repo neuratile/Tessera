@@ -37,6 +37,24 @@ services:
       timeout: 10s
       retries: 10
 
+  tessera-server:
+    build:
+      context: ./apps/server
+      dockerfile: Dockerfile
+    container_name: tessera-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-testing_ide}:${POSTGRES_PASSWORD:-testing_ide_dev_password}@postgres:5432/${POSTGRES_DB:-testing_ide}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-minimum-32-bytes-long!!}
+      SERVER_PORT: 3001
+      CORS_ORIGINS: http://localhost:1420
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-3001}:3001"
+
 volumes:
   postgres-data:
   ollama-data:
+
