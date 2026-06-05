@@ -173,6 +173,21 @@ Architecture Decision Records live in [`apps/desktop/src-tauri/docs/adr/`](./app
 
 ---
 
+## Documentation
+
+Stay up to date with what's happening in the project:
+
+| Document | What you'll find |
+|----------|------------------|
+| [`CHANGELOG.md`](./CHANGELOG.md) | Version history — every change, grouped by release |
+| [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) | Living project context — architecture, status, roadmap, quality grades |
+| [`docs/FEATURE_REVIEW.md`](./docs/FEATURE_REVIEW.md) | Feature scorecard — 22 features rated with gaps and priorities |
+| [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) | Change-management contract for humans + AI agents |
+| [`plan/ROADMAP.md`](./plan/ROADMAP.md) | Feature roadmap and known limitations |
+| [`rules/rules.md`](./rules/rules.md) | Engineering rules (layering, IPC, security, testing) |
+
+---
+
 ## Roadmap
 
 **v0.1 (shipped)** — feature-complete: 5 artifact types, 5 LLM providers, RAG pipeline, streaming generation, first-run wizard, cross-platform signed releases.
@@ -211,6 +226,8 @@ gh pr create --fill        # template + CODEOWNERS take it from here
 
 Read before opening a PR:
 
+- [`CHANGELOG.md`](./CHANGELOG.md) — what changed and when
+- [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) — full project context and current state
 - [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) — the change-management contract (humans + AI agents)
 - [`rules/rules.md`](./rules/rules.md) — engineering rules (layering, IPC, schema validation, security)
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — quick-start pointer · [`BRANCH_PROTECTION.md`](./BRANCH_PROTECTION.md) — admin runbook
