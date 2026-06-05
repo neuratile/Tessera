@@ -647,10 +647,31 @@ export async function updateSprint(
 }
 
 export async function startSprint(sprintId: string): Promise<Sprint> {
+  // Mirror the server guard: only one sprint may be active per board.
+  const { data: sprint, error: sprintError } = await supabase
+    .from('sprints')
+    .select('board_id')
+    .eq('id', sprintId)
+    .single();
+
+  if (sprintError) throw new Error(sprintError.message);
+
+  const { count, error: activeError } = await supabase
+    .from('sprints')
+    .select('id', { count: 'exact', head: true })
+    .eq('board_id', sprint.board_id)
+    .eq('status', 'active');
+
+  if (activeError) throw new Error(activeError.message);
+  if ((count ?? 0) > 0) {
+    throw new Error('Another sprint is already active on this board');
+  }
+
   const { data, error } = await supabase
     .from('sprints')
     .update({ status: 'active', start_date: new Date().toISOString() })
     .eq('id', sprintId)
+    .eq('status', 'planned')
     .select()
     .single();
 
@@ -659,6 +680,37 @@ export async function startSprint(sprintId: string): Promise<Sprint> {
 }
 
 export async function completeSprint(sprintId: string): Promise<Sprint> {
+  // Mirror the server: incomplete issues (everything outside the rightmost
+  // "Done" column) go back to the backlog instead of staying attached to a
+  // completed sprint where no filter will ever show them.
+  const { data: sprint, error: sprintError } = await supabase
+    .from('sprints')
+    .select('board_id')
+    .eq('id', sprintId)
+    .single();
+
+  if (sprintError) throw new Error(sprintError.message);
+
+  const { data: doneColumn, error: doneError } = await supabase
+    .from('board_columns')
+    .select('id')
+    .eq('board_id', sprint.board_id)
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (doneError) throw new Error(doneError.message);
+
+  let backlogQuery = supabase
+    .from('issues')
+    .update({ sprint_id: null })
+    .eq('sprint_id', sprintId);
+  if (doneColumn) {
+    backlogQuery = backlogQuery.neq('column_id', doneColumn.id);
+  }
+  const { error: backlogError } = await backlogQuery;
+  if (backlogError) throw new Error(backlogError.message);
+
   const { data, error } = await supabase
     .from('sprints')
     .update({ status: 'completed', end_date: new Date().toISOString() })
