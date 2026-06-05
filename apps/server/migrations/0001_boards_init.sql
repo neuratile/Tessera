@@ -24,7 +24,10 @@ CREATE TABLE teams (
     name        TEXT        NOT NULL,
     description TEXT,
     invite_code TEXT        NOT NULL UNIQUE,
-    created_by  UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    -- RESTRICT: deleting a user must not cascade-wipe every team they created
+    -- (teams -> boards -> columns/sprints/issues -> comments/activity_logs).
+    -- Ownership must be transferred before the account can be removed.
+    created_by  UUID        NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -75,6 +78,10 @@ CREATE TABLE board_columns (
     color     TEXT    NOT NULL DEFAULT '#6b7280',
     position  INTEGER NOT NULL,
     wip_limit INTEGER,
+    -- Marks the column whose issues count as "completed" for sprint
+    -- completion. Position is not a safe anchor (users can append columns
+    -- after "Done"), so the flag is explicit.
+    is_done   BOOLEAN NOT NULL DEFAULT FALSE,
     -- Deferred so multi-row reorders inside a transaction don't trip the
     -- constraint on intermediate states (checked at COMMIT instead).
     UNIQUE (board_id, position) DEFERRABLE INITIALLY DEFERRED

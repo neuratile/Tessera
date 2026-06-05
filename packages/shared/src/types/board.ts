@@ -53,6 +53,8 @@ export type BoardColumn = {
   color: string;
   position: number;
   wipLimit?: number;
+  /** Marks the column whose issues count as completed for sprint completion. */
+  isDone: boolean;
 }
 
 export type Sprint = {

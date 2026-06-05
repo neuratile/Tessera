@@ -59,6 +59,8 @@ export const BoardColumnSchema = z.object({
   color: z.string().min(1),
   position: z.number().int().nonnegative(),
   wipLimit: z.number().int().positive().optional(),
+  // Marks the column whose issues count as completed for sprint completion.
+  isDone: z.boolean().default(false),
 });
 
 export const SprintSchema = z.object({
