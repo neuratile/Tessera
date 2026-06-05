@@ -58,4 +58,48 @@ test.describe('desktop app flow', () => {
     expect(markdown).toContain('Verify login and logout behavior.');
     expect(markdown).toContain('Confirm health endpoint availability.');
   });
+
+  test('opts in, runs a generated test-cases artifact in the sandbox, and shows results', async ({
+    page,
+  }, testInfo) => {
+    const exportFilePath = testInfo.outputPath('exports/test-cases-express-api.md');
+
+    await installDesktopE2eHarness(page, { fixtureRoot, exportFilePath });
+
+    // Enable local sandbox execution before the app boots (off by default).
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        'testing-ide.ui.v1',
+        JSON.stringify({ panelSizes: [18, 56, 26], sandboxOptIn: true }),
+      );
+    });
+
+    await page.goto('/');
+
+    await page.getByRole('button', { name: 'Open folder' }).click();
+    await expect(page.getByText('src')).toBeVisible();
+
+    await page.getByTestId('analyze-project').click();
+    await expect(page.getByTestId('project-status')).toHaveText('ready');
+
+    const testCasesButton = page.getByRole('button', { name: 'Test cases' });
+    await expect(testCasesButton).toBeEnabled();
+    await testCasesButton.click();
+
+    await expect(page.getByText('Test Cases - express-api')).toBeVisible();
+    await page.getByRole('button', { name: 'Open Test Cases - express-api' }).click();
+
+    const drawer = page.getByRole('dialog', { name: 'Review Test Cases - express-api' });
+    await expect(drawer).toBeVisible();
+
+    // Opt-in is on, so the Run button is enabled.
+    const runButton = drawer.getByRole('button', { name: 'Run' });
+    await expect(runButton).toBeEnabled();
+    await runButton.click();
+
+    // Results panel renders the scripted pass/fail summary + the failure.
+    await expect(drawer.getByText('1/2 passed')).toBeVisible();
+    await expect(drawer.getByText('invalid password is rejected')).toBeVisible();
+    await expect(drawer.getByText('expected 401 to equal 200')).toBeVisible();
+  });
 });

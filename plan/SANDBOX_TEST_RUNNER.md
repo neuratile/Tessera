@@ -166,13 +166,14 @@ WIP off master.
 - [x] Unit-test the service with a `ScriptedRunner` mock (mirror `ScriptedLlm`
       pattern) — no Docker needed in unit tests.
 
-> **Contract note (gap surfaced in Phase 2):** the runner consumes a
-> `structured_data.files[]` array (`{ path, contents, isTest }`) on the
-> test-cases artifact, but the current `test_cases_v1` prompt emits
-> *descriptive* cases (id/title/steps/expectedResult), not runnable code.
-> A codegen step (or a prompt that emits `files[]`) is needed before the
-> end-to-end loop works with real artifacts. `sandbox_service` rejects an
-> artifact without `files[]` with a clear `INVALID_INPUT` error.
+> **Contract note (gap surfaced in Phase 2 — RESOLVED):** the runner
+> consumes a `structured_data.files[]` array (`{ path, contents, isTest }`)
+> on the test-cases artifact. The `test_cases_v1` prompt now emits an
+> optional `files[]` array (minimal source-under-test + one vitest spec per
+> source file) alongside the descriptive cases, so generated artifacts are
+> runnable end to end. `files[]` stays optional, so descriptive-only
+> generations remain valid; `sandbox_service` still rejects an artifact
+> without `files[]` with a clear `INVALID_INPUT` error.
 
 ### Phase 3 — Sandbox hardening (SECURITY GATE — blocks merge)
 - [x] Apply all container flags in §7 (added `--ulimit fsize`; non-root via
@@ -204,20 +205,32 @@ WIP off master.
   branches is an FE/BE contract change (own slice), out of this phase.
 
 ### Phase 5 — Frontend
-- [ ] Opt-in setting (off by default) in settings UI; persisted.
-- [ ] `lib/ipc/sandbox.ts` typed wrapper (Zod-validated, no raw `invoke`).
-- [ ] `stores/sandbox-store.ts` run state (idle/running/done/error).
-- [ ] **Run** button on the Test Cases artifact view (disabled unless opt-in on
-      and Docker available).
-- [ ] Monaco gutter decorations: green = covered, gray = uncovered, red =
-      failing-assertion line.
-- [ ] Results panel: X/Y passed, per-test failures, Stop button (cancellation).
+- [x] Opt-in setting (off by default) in settings UI; persisted (`ui-store`
+      `sandboxOptIn`, localStorage).
+- [x] `lib/ipc/sandbox.ts` typed wrapper (Zod-validated, no raw `invoke`) —
+      `runTestSandbox` + `cancelTestSandbox`.
+- [x] `stores/sandbox-store.ts` run state (idle/running/done/error), keyed by
+      artifact id.
+- [x] **Run** button on the Test Cases artifact view (`SandboxRunPanel`,
+      disabled unless opt-in on). Docker-absence surfaces as an `error`
+      `RunResult` rather than a disabled button (clear message either way).
+- [x] Monaco gutter decorations: green = covered, amber = uncovered (matched
+      to the open file by path suffix). Per-file failing-line red markers are
+      deferred — `TestResult` carries a source line but not a file path, so a
+      failing assertion can't yet be mapped to a specific source file without
+      a contract change; failures show their line textually in the panel.
+- [x] Results panel: X/Y passed, per-test failures + source lines, Stop button.
+      Functional Stop via a `clientRunId` the backend keys the cancel token on
+      (the run IPC is blocking, so the UI must know the id up front).
 
 ### Phase 6 — Tests, docs, polish
-- [ ] Playwright E2E: opt-in → run → see pass/fail + gutters (mock Docker layer
-      or a tiny fixture project).
-- [ ] Update README + ROADMAP + FEATURE_REVIEW (move from "planned" to "shipped").
-- [ ] Tracing spans around build/run/parse stages.
+- [x] Playwright E2E: opt-in → generate test-cases → run → see pass/fail in the
+      results panel (Tauri IPC mocked in `e2e-tauri-mocks.ts`; `run_test_sandbox`
+      + `cancel_test_sandbox` scripted). Gutter pixels aren't asserted (Monaco
+      canvas), but the run path + results render are.
+- [x] Update ROADMAP (moved from "planned" to "shipped (JS/TS)"); plan checkboxes.
+- [x] Tracing spans around build/run/parse stages (`sandbox_run` span +
+      build/run/parse debug events in `docker_js`).
 
 ## 10. Security checklist (must pass before master)
 

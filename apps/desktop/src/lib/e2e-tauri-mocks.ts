@@ -9,6 +9,7 @@ import type {
   OllamaStatus,
   Project,
   ProviderConfigView,
+  RunResult,
 } from '@testing-ide/shared';
 
 import {
@@ -22,6 +23,7 @@ const MOCK_USER_ID = '00000000-0000-4000-8000-000000000001';
 const MOCK_PROJECT_ID = '11111111-1111-4111-8111-111111111111';
 const MOCK_PROVIDER_ID = '22222222-2222-4222-8222-222222222222';
 const MOCK_ARTIFACT_ID = '33333333-3333-4333-8333-333333333333';
+const MOCK_RUN_ID = '44444444-4444-4444-8444-444444444444';
 
 type GeneratePayload = {
   args?: {
@@ -156,6 +158,90 @@ function buildTestPlanArtifact(projectName: string): MockArtifactState {
       inputTokens: 256,
       outputTokens: 192,
     },
+  };
+}
+
+function buildTestCasesArtifact(projectName: string): MockArtifactState {
+  const timestamp = isoNow();
+  const title = `Test Cases - ${projectName}`;
+  const contentMd = `# Test Cases\n\n- TC-LOGIN-1: successful login returns a token\n- TC-LOGIN-2: invalid password is rejected\n`;
+
+  return {
+    summary: {
+      id: MOCK_ARTIFACT_ID,
+      projectId: MOCK_PROJECT_ID,
+      artifactType: 'test-cases',
+      title,
+      status: 'draft',
+      version: 1,
+      parentId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      provider: 'ollama',
+      model: 'qwen2.5-coder:7b',
+    },
+    detail: {
+      id: MOCK_ARTIFACT_ID,
+      projectId: MOCK_PROJECT_ID,
+      artifactType: 'test-cases',
+      title,
+      contentMd,
+      structuredData: {
+        cases: [
+          {
+            id: 'TC-LOGIN-1',
+            title: 'successful login returns a token',
+            steps: ['POST /auth/login with valid credentials'],
+            expectedResult: '200 with a session token',
+            priority: 'p0',
+          },
+        ],
+        // Runnable workspace the sandbox runner consumes (plan §6).
+        files: [
+          { path: 'src/add.ts', contents: 'export const add = (a, b) => a + b;', isTest: false },
+          {
+            path: 'add.test.ts',
+            contents: "import { test, expect } from 'vitest';\n",
+            isTest: true,
+          },
+        ],
+      },
+      status: 'draft',
+      version: 1,
+      parentId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      provider: 'ollama',
+      model: 'qwen2.5-coder:7b',
+      promptVersion: 'test_cases_v1',
+      inputTokens: 256,
+      outputTokens: 192,
+    },
+  };
+}
+
+/** Scripted run result mirroring a mixed pass/fail suite with coverage. */
+function buildRunResult(): RunResult {
+  return {
+    runId: MOCK_RUN_ID,
+    status: 'failed',
+    passedCount: 1,
+    failedCount: 1,
+    durationMs: 320,
+    tests: [
+      { name: 'successful login returns a token', status: 'passed', durationMs: 12 },
+      {
+        name: 'invalid password is rejected',
+        status: 'failed',
+        durationMs: 8,
+        failureMessage: 'expected 401 to equal 200',
+        sourceLine: 14,
+      },
+    ],
+    coverage: [
+      { filePath: 'src/add.ts', line: 1, hits: 3 },
+      { filePath: 'src/add.ts', line: 2, hits: 0 },
+    ],
   };
 }
 
@@ -312,11 +398,13 @@ export function installE2eTauriMocks(): void {
         }
 
         const args = (payload as GeneratePayload).args;
-        if (args?.artifactType !== 'test-plan') {
-          throw new Error('E2E mock only supports test-plan generation');
+        if (args?.artifactType === 'test-plan') {
+          artifact = buildTestPlanArtifact(args.projectName);
+        } else if (args?.artifactType === 'test-cases') {
+          artifact = buildTestCasesArtifact(args.projectName);
+        } else {
+          throw new Error('E2E mock supports only test-plan / test-cases generation');
         }
-
-        artifact = buildTestPlanArtifact(args.projectName);
         const response: GenerateResponse = {
           generationId: '00000000-0000-4000-8000-000000000001',
           artifactId: artifact.detail.id,
@@ -327,6 +415,20 @@ export function installE2eTauriMocks(): void {
         };
         return response;
       }
+
+      case 'run_test_sandbox': {
+        const runArgs = payload as { request?: { optInConfirmed?: boolean } };
+        // The backend rejects opted-out runs; mirror that so the opt-in
+        // gate is exercised end to end (plan §3).
+        if (runArgs.request?.optInConfirmed !== true) {
+          throw new Error('sandbox execution is opt-in; optInConfirmed must be true');
+        }
+        return buildRunResult();
+      }
+
+      case 'cancel_test_sandbox':
+        // No real container in the mock; nothing live to cancel.
+        return false;
 
       case 'list_artifacts':
         return artifact === null ? [] : [artifact.summary];
