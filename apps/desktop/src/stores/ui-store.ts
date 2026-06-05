@@ -14,8 +14,16 @@ export type PanelSizes = [number, number, number];
 export type UiState = {
   panelSizes: PanelSizes;
   settingsOpen: boolean;
+  /**
+   * Opt-in for local sandbox test execution. Off by default — the core
+   * "no code execution on the default path" guarantee (plan §3). Persisted
+   * so the choice survives restarts. The backend independently rejects runs
+   * unless the request also carries `optInConfirmed: true`.
+   */
+  sandboxOptIn: boolean;
   setPanelSizes: (sizes: PanelSizes) => void;
   setSettingsOpen: (open: boolean) => void;
+  setSandboxOptIn: (enabled: boolean) => void;
 };
 
 function isPanelSizes(value: unknown): value is PanelSizes {
@@ -26,29 +34,32 @@ function isPanelSizes(value: unknown): value is PanelSizes {
   );
 }
 
-function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen'> {
+function loadInitial(): Pick<UiState, 'panelSizes' | 'settingsOpen' | 'sandboxOptIn'> {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
-      return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false };
+      return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false, sandboxOptIn: false };
     }
     const parsed: unknown = JSON.parse(raw);
-    const sizes =
-      typeof parsed === 'object' && parsed !== null && 'panelSizes' in parsed
-        ? parsed.panelSizes
-        : null;
+    const obj = typeof parsed === 'object' && parsed !== null ? parsed : {};
+    const sizes = 'panelSizes' in obj ? obj.panelSizes : null;
+    const optIn = 'sandboxOptIn' in obj ? obj.sandboxOptIn : null;
     return {
       panelSizes: isPanelSizes(sizes) ? sizes : DEFAULT_PANEL_SIZES,
       settingsOpen: false,
+      sandboxOptIn: optIn === true,
     };
   } catch {
-    return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false };
+    return { panelSizes: DEFAULT_PANEL_SIZES, settingsOpen: false, sandboxOptIn: false };
   }
 }
 
-function persist(state: Pick<UiState, 'panelSizes'>): void {
+function persist(state: Pick<UiState, 'panelSizes' | 'sandboxOptIn'>): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ panelSizes: state.panelSizes }));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ panelSizes: state.panelSizes, sandboxOptIn: state.sandboxOptIn }),
+    );
   } catch {
     // localStorage unavailable — silently no-op so the app remains usable.
   }
@@ -60,9 +71,13 @@ const store = create<UiState>()((set, get) => {
     ...initial,
     setPanelSizes: (panelSizes) => {
       set({ panelSizes });
-      persist({ panelSizes: get().panelSizes });
+      persist({ panelSizes: get().panelSizes, sandboxOptIn: get().sandboxOptIn });
     },
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+    setSandboxOptIn: (sandboxOptIn) => {
+      set({ sandboxOptIn });
+      persist({ panelSizes: get().panelSizes, sandboxOptIn: get().sandboxOptIn });
+    },
   };
 });
 

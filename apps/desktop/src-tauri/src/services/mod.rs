@@ -29,6 +29,7 @@ pub mod ollama_health_service;
 pub mod project_service;
 pub mod provider_config_service;
 pub mod provider_connection_service;
+pub mod sandbox_service;
 
 #[cfg(test)]
 pub mod ollama_probe_test_support;

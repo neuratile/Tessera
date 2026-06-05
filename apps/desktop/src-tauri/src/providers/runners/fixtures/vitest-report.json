@@ -1,0 +1,56 @@
+{
+  "numTotalTestSuites": 1,
+  "numTotalTests": 4,
+  "numPassedTests": 2,
+  "numFailedTests": 1,
+  "numPendingTests": 1,
+  "startTime": 1733356800000,
+  "success": false,
+  "testResults": [
+    {
+      "name": "/work/add.test.ts",
+      "status": "failed",
+      "startTime": 1733356800100,
+      "endTime": 1733356800340,
+      "assertionResults": [
+        {
+          "ancestorTitles": ["add"],
+          "fullName": "add > adds two positive numbers",
+          "title": "adds two positive numbers",
+          "status": "passed",
+          "duration": 3.21,
+          "failureMessages": [],
+          "location": { "line": 5, "column": 3 }
+        },
+        {
+          "ancestorTitles": ["add"],
+          "fullName": "add > adds negatives",
+          "title": "adds negatives",
+          "status": "passed",
+          "duration": 1.08,
+          "failureMessages": [],
+          "location": { "line": 9, "column": 3 }
+        },
+        {
+          "ancestorTitles": ["add"],
+          "fullName": "add > rejects non-numbers",
+          "title": "rejects non-numbers",
+          "status": "failed",
+          "duration": 2.4,
+          "failureMessages": [
+            "AssertionError: expected NaN to be 3 // Object.is equality\n  at add.test.ts:14:25"
+          ],
+          "location": { "line": 13, "column": 3 }
+        },
+        {
+          "ancestorTitles": ["add"],
+          "fullName": "add > handles bignum",
+          "title": "handles bignum",
+          "status": "skipped",
+          "failureMessages": [],
+          "location": { "line": 18, "column": 3 }
+        }
+      ]
+    }
+  ]
+}

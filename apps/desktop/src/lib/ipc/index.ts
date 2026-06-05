@@ -18,6 +18,7 @@ export * as health from './health';
 export * as ollama from './ollama';
 export * as projects from './projects';
 export * as providers from './providers';
+export * as sandbox from './sandbox';
 export * as streaming from './streaming';
 export * as system from './system';
 

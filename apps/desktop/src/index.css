@@ -211,3 +211,17 @@ samp {
   color: var(--destructive);
   border: 1px solid color-mix(in oklab, var(--destructive) 35%, transparent);
 }
+
+/* Sandbox coverage gutters — painted in the Monaco line-decorations
+ * margin from the latest run's per-line hit counts. Green bar = covered,
+ * amber bar = a statement on the line ran zero times (uncovered). */
+.cov-hit {
+  background: color-mix(in oklab, var(--success) 65%, transparent);
+  width: 3px !important;
+  margin-left: 3px;
+}
+.cov-miss {
+  background: color-mix(in oklab, var(--warning, var(--destructive)) 70%, transparent);
+  width: 3px !important;
+  margin-left: 3px;
+}

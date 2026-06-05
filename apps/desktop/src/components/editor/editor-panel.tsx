@@ -1,11 +1,28 @@
-import Editor, { loader } from '@monaco-editor/react';
+import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import type { CoverageLine } from '@testing-ide/shared';
 import { Circle, X } from 'lucide-react';
 import * as monaco from 'monaco-editor';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { languageFromFilename } from '@/lib/monaco-language';
 import { usePrefersDark } from '@/lib/theme';
 import { useEditorStore } from '@/stores/editor-store';
+import { useSandboxStore } from '@/stores/sandbox-store';
+
+/**
+ * Match a run's coverage lines to the open file. The runner reports
+ * workspace-relative (or `/work/…`) paths, the editor keys tabs by
+ * project-relative path; normalize both and match by suffix so e.g.
+ * `/work/src/add.ts` lines paint onto an open `src/add.ts`.
+ */
+function coverageForPath(coverage: CoverageLine[], relativePath: string): CoverageLine[] {
+  const norm = (p: string): string => p.replace(/^\/?work\//, '').replace(/^\.?\//, '');
+  const target = norm(relativePath);
+  return coverage.filter((c) => {
+    const cp = norm(c.filePath);
+    return cp === target || cp.endsWith(`/${target}`) || target.endsWith(`/${cp}`);
+  });
+}
 
 /**
  * Tabbed Monaco editor.
@@ -34,11 +51,45 @@ export function EditorPanel() {
   const setContent = useEditorStore((s) => s.setContent);
   const markDirty = useEditorStore((s) => s.markDirty);
 
+  const coverage = useSandboxStore((s) => s.coverage);
+
   const dark = usePrefersDark();
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeId) ?? null,
     [tabs, activeId],
   );
+
+  // Monaco instance + its coverage-decoration collection, captured on mount
+  // so the effect below can repaint gutters as the run results or the open
+  // file change without remounting the editor.
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+
+  const handleMount = useCallback<OnMount>((editor) => {
+    editorRef.current = editor;
+  }, []);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (ed === null) return;
+    if (activeTab === null) {
+      decorationsRef.current?.clear();
+      return;
+    }
+    const lines = coverageForPath(coverage, activeTab.relativePath);
+    const decos = lines.map((c) => ({
+      range: new monaco.Range(c.line, 1, c.line, 1),
+      options: {
+        linesDecorationsClassName: c.hits > 0 ? 'cov-hit' : 'cov-miss',
+        hoverMessage: { value: c.hits > 0 ? `Covered — ${c.hits} hit(s)` : 'Not covered' },
+      },
+    }));
+    if (decorationsRef.current === null) {
+      decorationsRef.current = ed.createDecorationsCollection(decos);
+    } else {
+      decorationsRef.current.set(decos);
+    }
+  }, [coverage, activeTab]);
 
   const handleChange = useCallback(
     (value: string | undefined) => {
@@ -91,6 +142,7 @@ export function EditorPanel() {
             theme={dark ? 'vs-dark' : 'light'}
             value={value}
             onChange={handleChange}
+            onMount={handleMount}
             options={{
               minimap: { enabled: false },
               fontSize: 13,

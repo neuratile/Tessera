@@ -25,6 +25,7 @@ pub mod health;
 pub mod ollama;
 pub mod projects;
 pub mod providers;
+pub mod sandbox;
 
 use serde::Serialize;
 use sqlx::SqlitePool;

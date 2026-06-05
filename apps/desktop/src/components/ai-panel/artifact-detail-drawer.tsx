@@ -17,6 +17,7 @@ import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 import { DiffView } from '@/components/ai-panel/diff-view';
+import { SandboxRunPanel } from '@/components/ai-panel/sandbox-run-panel';
 
 type Props = {
   summary: ArtifactSummary;
@@ -319,6 +320,12 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
             />
           ) : detail !== null ? (
             <MarkdownView source={detail.contentMd} />
+          ) : null}
+
+          {viewMode === 'content' && summary.artifactType === 'test-cases' ? (
+            <div className="mt-4">
+              <SandboxRunPanel artifactId={summary.id} />
+            </div>
           ) : null}
         </div>
 

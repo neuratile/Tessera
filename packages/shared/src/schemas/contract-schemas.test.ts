@@ -24,6 +24,11 @@ import {
   RegisterSchema,
   SaveProviderArgsSchema,
   UserSchema,
+  RunRequestSchema,
+  TestResultSchema,
+  CoverageLineSchema,
+  RunResultSchema,
+  TestCaseSchema,
 } from '../index';
 
 describe('RegisterSchema', () => {
@@ -526,6 +531,186 @@ describe('CodeChunkSchema', () => {
         tokenCount: 1,
         createdAt: '2026-05-03T12:00:00.000Z',
         updatedAt: '2026-05-03T12:00:00.000Z',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('RunRequestSchema', () => {
+  it('accepts an opted-in run request', () => {
+    const parsed = RunRequestSchema.parse({
+      artifactId: '123e4567-e89b-12d3-a456-426614174000',
+      optInConfirmed: true,
+    });
+    expect(parsed.optInConfirmed).toBe(true);
+  });
+
+  it('rejects a non-uuid artifactId', () => {
+    expect(() => RunRequestSchema.parse({ artifactId: 'nope', optInConfirmed: true })).toThrow();
+  });
+
+  it('carries an optional clientRunId for the Stop path', () => {
+    const parsed = RunRequestSchema.parse({
+      artifactId: '123e4567-e89b-12d3-a456-426614174000',
+      optInConfirmed: true,
+      clientRunId: '8a3e4567-e89b-12d3-a456-426614174999',
+    });
+    expect(parsed.clientRunId).toBe('8a3e4567-e89b-12d3-a456-426614174999');
+  });
+});
+
+describe('TestResultSchema', () => {
+  it('accepts a passing case without optional fields', () => {
+    const parsed = TestResultSchema.parse({
+      name: 'adds two numbers',
+      status: 'passed',
+      durationMs: 12,
+    });
+    expect(parsed.status).toBe('passed');
+    expect(parsed.failureMessage).toBeUndefined();
+  });
+
+  it('accepts a failing case with a message and source line', () => {
+    const parsed = TestResultSchema.parse({
+      name: 'throws on bad input',
+      status: 'failed',
+      durationMs: 4,
+      failureMessage: 'expected 2 to equal 3',
+      sourceLine: 42,
+    });
+    expect(parsed.sourceLine).toBe(42);
+  });
+
+  it('rejects an unknown status', () => {
+    expect(() =>
+      TestResultSchema.parse({ name: 'x', status: 'errored', durationMs: 1 }),
+    ).toThrow();
+  });
+
+  it('rejects a source line below 1', () => {
+    expect(() =>
+      TestResultSchema.parse({ name: 'x', status: 'passed', durationMs: 1, sourceLine: 0 }),
+    ).toThrow();
+  });
+});
+
+describe('CoverageLineSchema', () => {
+  it('accepts a covered line', () => {
+    const parsed = CoverageLineSchema.parse({ filePath: 'src/add.ts', line: 3, hits: 5 });
+    expect(parsed.hits).toBe(5);
+  });
+
+  it('treats hits = 0 as a valid (uncovered) line', () => {
+    const parsed = CoverageLineSchema.parse({ filePath: 'src/add.ts', line: 7, hits: 0 });
+    expect(parsed.hits).toBe(0);
+  });
+
+  it('rejects line numbers below 1', () => {
+    expect(() => CoverageLineSchema.parse({ filePath: 'a.ts', line: 0, hits: 1 })).toThrow();
+  });
+});
+
+describe('RunResultSchema', () => {
+  it('accepts a completed run with cases and coverage', () => {
+    const parsed = RunResultSchema.parse({
+      runId: '8a3e4567-e89b-12d3-a456-426614174999',
+      status: 'failed',
+      passedCount: 1,
+      failedCount: 1,
+      durationMs: 350,
+      tests: [
+        { name: 'a', status: 'passed', durationMs: 10 },
+        { name: 'b', status: 'failed', durationMs: 4, failureMessage: 'boom', sourceLine: 12 },
+      ],
+      coverage: [
+        { filePath: 'src/add.ts', line: 1, hits: 1 },
+        { filePath: 'src/add.ts', line: 2, hits: 0 },
+      ],
+    });
+    expect(parsed.passedCount).toBe(1);
+    expect(parsed.tests).toHaveLength(2);
+    expect(parsed.coverage[1]?.hits).toBe(0);
+  });
+
+  it('accepts an error run carrying an errorMessage and empty arrays', () => {
+    const parsed = RunResultSchema.parse({
+      runId: '8a3e4567-e89b-12d3-a456-426614174999',
+      status: 'error',
+      passedCount: 0,
+      failedCount: 0,
+      durationMs: 0,
+      tests: [],
+      coverage: [],
+      errorMessage: 'docker daemon unreachable',
+    });
+    expect(parsed.status).toBe('error');
+    expect(parsed.errorMessage).toContain('docker');
+  });
+
+  it('rejects an unknown run status', () => {
+    expect(() =>
+      RunResultSchema.parse({
+        runId: '8a3e4567-e89b-12d3-a456-426614174999',
+        status: 'queued',
+        passedCount: 0,
+        failedCount: 0,
+        durationMs: 0,
+        tests: [],
+        coverage: [],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('TestCaseSchema', () => {
+  it('accepts a descriptive-only artifact (no runnable files)', () => {
+    const parsed = TestCaseSchema.parse({
+      cases: [
+        {
+          id: 'TC-ADD-1',
+          title: 'adds two numbers',
+          steps: ['call add(1, 2)'],
+          expectedResult: 'returns 3',
+          priority: 'p1',
+        },
+      ],
+    });
+    expect(parsed.files).toBeUndefined();
+  });
+
+  it('accepts a runnable workspace mirroring the sandbox WorkspaceFile shape', () => {
+    const parsed = TestCaseSchema.parse({
+      cases: [
+        {
+          id: 'TC-ADD-1',
+          title: 'adds two numbers',
+          steps: ['call add(1, 2)'],
+          expectedResult: 'returns 3',
+          priority: 'p1',
+        },
+      ],
+      files: [
+        { path: 'src/add.ts', contents: 'export const add = (a, b) => a + b;', isTest: false },
+        { path: 'add.test.ts', contents: "import { test, expect } from 'vitest';", isTest: true },
+      ],
+    });
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.files?.[1]?.isTest).toBe(true);
+  });
+
+  it('rejects a file missing the isTest discriminator', () => {
+    expect(() =>
+      TestCaseSchema.parse({
+        cases: [
+          {
+            id: 'TC-ADD-1',
+            title: 'adds two numbers',
+            steps: ['call add(1, 2)'],
+            expectedResult: 'returns 3',
+            priority: 'p1',
+          },
+        ],
+        files: [{ path: 'src/add.ts', contents: 'x' }],
       }),
     ).toThrow();
   });

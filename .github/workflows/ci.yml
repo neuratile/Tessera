@@ -160,6 +160,42 @@ jobs:
       - name: Run unit tests
         run: pnpm test
 
+  e2e-test:
+    name: e2e-test
+    # Playwright E2E against the Vite dev server with a mocked Tauri IPC
+    # layer (e2e-tauri-mocks.ts) — no Rust/Tauri build and no Docker. The
+    # config starts its own Vite webServer on :4173. Covers renderer flows
+    # including the sandbox Run/Stop + results panel from the test-runner
+    # feature. Ubuntu-only: the DOM + mocks are platform-independent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium + OS deps
+        # PLAYWRIGHT_BROWSERS_PATH=0 stores browsers in node_modules
+        # (.local-browsers), matching run-playwright-e2e.mjs at test time.
+        # Without it the binaries land in the global ~/.cache and the suite
+        # fails with "Executable doesn't exist at .../.local-browsers/...".
+        run: pnpm --filter @testing-ide/desktop exec playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: '0'
+
+      - name: Run Playwright E2E suite
+        run: pnpm --filter @testing-ide/desktop run test:e2e
+
   integration-test:
     name: integration-test (ubuntu)
     runs-on: ubuntu-latest
@@ -173,7 +209,9 @@ jobs:
       - lint
       - typecheck
       - unit-test
-    timeout-minutes: 60
+    # Worst case: golden test-cases probe retries 3× at 15 min per
+    # attempt (~45 min) plus model pulls, warm-up, and the Rust suite.
+    timeout-minutes: 90
     services:
       ollama:
         image: ollama/ollama:latest

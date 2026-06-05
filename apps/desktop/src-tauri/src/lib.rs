@@ -72,6 +72,11 @@ pub fn run() {
             tracing::info!("encryption key derived from JWT secret");
             app.manage(crypto_key);
 
+            // Live sandbox-run registry — shared between `run_test_sandbox`
+            // (registers each run's cancel token) and `cancel_test_sandbox`
+            // (fires it on a user Stop).
+            app.manage(services::sandbox_service::RunRegistry::new());
+
             // Native menu bar — Cmd/Ctrl+O open folder, Cmd/Ctrl+,
             // settings, Cmd/Ctrl+G regenerate, About dialog, etc.
             // Built per-window so each window gets its own attached
@@ -121,6 +126,9 @@ pub fn run() {
             commands::hardware::detect_hardware,
             // Ollama bootstrap command (Phase 7)
             commands::ollama::check_ollama_status,
+            // Sandbox test-runner commands (sandbox runner Phase 2 + Phase 5 Stop)
+            commands::sandbox::run_test_sandbox,
+            commands::sandbox::cancel_test_sandbox,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");

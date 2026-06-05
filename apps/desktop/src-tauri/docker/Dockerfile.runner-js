@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+#
+# Sandbox runner image for the JS/TS closed-loop test runner
+# (plan/SANDBOX_TEST_RUNNER.md §7). Built locally on first enable — no
+# registry dependency, preserving the local-first guarantee:
+#
+#   docker build -t tessera-runner-js \
+#     -f apps/desktop/src-tauri/docker/Dockerfile.runner-js \
+#     apps/desktop/src-tauri/docker
+#
+# The image ships vitest + the istanbul coverage provider pre-installed so a
+# run needs no `npm install` (fast, deterministic, fully offline). The host
+# (`providers/runners/docker_js.rs`) materialises a throwaway workspace, bind
+# mounts it at /work, and runs the suite with the §7 hardening flags
+# (`--network none`, `--cap-drop ALL`, `--read-only`, `--pids-limit`,
+# `--ulimit fsize`, `--security-opt no-new-privileges`, cpu/memory caps).
+#
+# SECURITY: pin the base image by digest before distributing this image.
+# Resolve the current digest with:
+#   docker pull node:20-alpine && docker inspect --format='{{index .RepoDigests 0}}' node:20-alpine
+# then replace the tag below with `node:20-alpine@sha256:<digest>`.
+FROM node:20-alpine
+
+# Coverage provider must match `vitest.config` (provider: 'istanbul').
+# Pinned to exact versions for reproducible image builds: a floating `^2`
+# range could pull a vitest minor that changes the JSON reporter shape that
+# `parse_vitest_results` depends on, silently breaking the parser. Bump these
+# deliberately alongside the parser when upgrading.
+RUN npm install -g --no-fund --no-audit \
+      vitest@2.1.9 \
+      @vitest/coverage-istanbul@2.1.9 \
+  && npm cache clean --force
+
+# Make the global modules resolvable from the per-run workspace (which has a
+# minimal package.json with no local deps).
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+# Defence in depth: never execute the suite as root. Combined with the
+# `docker run` flags, a container escape would land as an unprivileged user
+# with no capabilities, no network, and a read-only root filesystem.
+# `node` (uid 1000) ships in the base image.
+USER node
+
+WORKDIR /work

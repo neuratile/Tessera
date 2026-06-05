@@ -41,6 +41,8 @@ type ProviderOption = (typeof PROVIDER_OPTIONS)[number];
 export function SettingsSheet() {
   const open = useUiStore((s) => s.settingsOpen);
   const setOpen = useUiStore((s) => s.setSettingsOpen);
+  const sandboxOptIn = useUiStore((s) => s.sandboxOptIn);
+  const setSandboxOptIn = useUiStore((s) => s.setSandboxOptIn);
   const setActiveProvider = useAiStore((s) => s.setActiveProvider);
 
   const [list, setList] = useState<ProviderConfigView[]>([]);
@@ -157,6 +159,31 @@ export function SettingsSheet() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <section className="space-y-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Local Test Execution
+            </h3>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-background px-3 py-2.5 text-xs transition-colors hover:border-primary/40">
+              <input
+                type="checkbox"
+                checked={sandboxOptIn}
+                onChange={(e) => setSandboxOptIn(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-primary"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium text-foreground">
+                  Run generated tests in a local Docker sandbox
+                </span>
+                <span className="text-muted-foreground mt-1 block text-[10px] leading-relaxed">
+                  Off by default. When on, the <span className="font-mono">Run</span> button on a
+                  Test Cases artifact executes its generated tests inside a hardened,
+                  network-isolated container on this machine. Code never leaves your computer.
+                  Requires Docker to be installed and running.
+                </span>
+              </span>
+            </label>
+          </section>
+
           <section className="space-y-2">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Configured Providers

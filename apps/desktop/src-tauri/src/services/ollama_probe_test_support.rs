@@ -256,6 +256,30 @@ fn extract_tool_arguments(response_content: &[Content], tool_name: &str) -> Resu
     }
 
     let preview: String = free_text.chars().take(240).collect();
+    let tail: String = {
+        let chars: Vec<char> = free_text.chars().collect();
+        chars[chars.len().saturating_sub(120)..].iter().collect()
+    };
+    // Distinguish the three salvage-failure shapes so CI logs point at
+    // the real culprit:
+    //  - balanced JSON present but wrapper shape rejected (per-item
+    //    wrapper) → model quality issue, swap model;
+    //  - a `{` with no balanced close → output truncated by max_tokens;
+    //  - no `{` at all → model emitted prose only.
+    if crate::services::generation_service::salvage_json_from_text(&free_text).is_some() {
+        return Err(anyhow!(
+            "model did not invoke `{tool_name}`; free text contained a JSON \
+             object but its wrapper shape is unsalvageable (per-item tool-call \
+             wrapper) — swap to a tool-trained model; head: {preview}"
+        ));
+    }
+    if free_text.contains('{') {
+        return Err(anyhow!(
+            "model did not invoke `{tool_name}` and its free-text JSON is \
+             unbalanced — output likely truncated by max_tokens; \
+             head: {preview}; tail: {tail}"
+        ));
+    }
     Err(anyhow!(
         "model did not invoke `{tool_name}` and free text contained no JSON object; \
          preview: {preview}"
@@ -363,7 +387,15 @@ mod tests {
                 messages,
                 tools: vec![tool_schema.clone()],
                 temperature: Some(0.1),
-                max_tokens: Some(2_000),
+                // Mirror the production generation budget
+                // (`RESPONSE_RESERVE_TOKENS`). The test-cases payload now
+                // carries a runnable `files[]` array on top of the cases,
+                // which overruns a 4k cap on the 3B model CI ships —
+                // truncating the free-text JSON the model emits mid-array
+                // so the salvage path cannot balance the object and the
+                // probe fails. Reading the const (now 6k) keeps probe +
+                // prod in lockstep so this stays fixed in one place.
+                max_tokens: Some(crate::services::generation_service::RESPONSE_RESERVE_TOKENS),
                 stop_sequences: Vec::new(),
             })
             .await

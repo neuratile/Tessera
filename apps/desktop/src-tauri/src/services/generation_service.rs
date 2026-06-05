@@ -39,8 +39,18 @@ use crate::repositories::chunk_repo;
 use crate::services::chunking_service::Chunk as CodeChunk;
 
 /// Reserve at least this many tokens for the model's response so the
-/// prompt cannot consume the entire context window.
-pub const RESPONSE_RESERVE_TOKENS: u32 = 4_000;
+/// prompt cannot consume the entire context window. Doubles as the
+/// generation `max_tokens` cap.
+///
+/// Sized to the largest structured payload we ask a model to emit:
+/// `test_cases_v1` now returns the test cases *plus* a runnable `files[]`
+/// array (source-under-test reproduced + a vitest spec per file), which
+/// roughly doubled the test-cases output. At 4k the auth-fixture payload
+/// truncated mid-array on the 3B CI model, leaving JSON the salvage path
+/// could not balance and failing the golden probe — the same failure the
+/// earlier 2k→4k bump fixed for the cases-only payload. 6k restores
+/// headroom while staying well under the per-attempt stream timeout.
+pub const RESPONSE_RESERVE_TOKENS: u32 = 6_000;
 
 /// Top-K chunks pulled from the vector index for one generation.
 /// Capped on the chunk-repo side too (`SEARCH_TOP_K_CAP = 50`).

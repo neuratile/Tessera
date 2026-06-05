@@ -120,7 +120,7 @@ src/
   services/            -- Business logic (testable, no HTTP awareness)
   repositories/        -- Database access (no business logic)
   workers/             -- Background jobs
-  providers/           -- External integrations (LLM, embeddings)
+  providers/           -- External integrations (LLM, embeddings, runners/ = sandbox test runners)
   utils/               -- Pure functions, no side effects
   middleware/          -- Express middleware
   db/
@@ -291,8 +291,8 @@ src/
 - **Validate all user input** at the boundary (HTTP layer) using Zod schemas.
 - **Encrypt sensitive data at rest** — user API keys via AES-256.
 - **Use parameterized queries** — never string-concatenate SQL.
-- **No `eval()`, `new Function()`, or dynamic code execution.**
-- **Never execute uploaded code** — the IDE performs static analysis only.
+- **No `eval()`, `new Function()`, or dynamic code execution** in the app process itself (frontend or Rust host).
+- **The default path performs static analysis only** — code is never executed in-process and never uploaded. The *one* sanctioned exception is the opt-in sandbox test runner (`providers/runners/`), which executes generated tests **only** inside a hardened, network-less Docker container, off by default, gated on an explicit opt-in the backend re-checks. Any code execution outside that sandbox is forbidden. See ADR-0004 for the threat model + hardening flags.
 - **Sanitize file paths** — prevent directory traversal attacks (`../../etc/passwd`).
 - **Whitelist file extensions** for upload — never blacklist.
 - **CSP headers** on web app, capability-based permissions on Tauri

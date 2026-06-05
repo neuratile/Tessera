@@ -37,7 +37,7 @@ Open a folder → Tessera parses it with Tree-sitter, embeds chunks via Ollama, 
 | SonarQube | No | No | Rule-based | Yes |
 | **Tessera** | **No (by design)** | **Yes** | **Tree-sitter + RAG** | **Yes (local LLM)** |
 
-Three guarantees: **architecture-aware** (RAG retrieves symbols across the whole project, not just the open file) · **static-only** (code is never executed — safe for production / regulated repos) · **structured** (every artifact is validated JSON that exports cleanly to JIRA / Notion / GitHub Issues).
+Three guarantees: **architecture-aware** (RAG retrieves symbols across the whole project, not just the open file) · **static by default** (analysis never executes your code; an *optional* local Docker sandbox runs **generated** tests opt-in, off by default, with no network — safe for production / regulated repos) · **structured** (every artifact is validated JSON that exports cleanly to JIRA / Notion / GitHub Issues).
 
 ---
 
@@ -53,6 +53,10 @@ Three guarantees: **architecture-aware** (RAG retrieves symbols across the whole
 
 Each artifact is versioned; regenerating with reviewer feedback bumps the version and links to its parent.
 
+### Run generated tests (optional)
+
+Opt-in, off by default. With the sandbox enabled in settings and Docker present, **Run** on a Test Cases artifact executes the generated JS/TS tests inside a hardened, network-less Docker container and paints pass/fail + line coverage onto the Monaco gutters (green = covered, amber = uncovered). Code never leaves the machine: the container runs with `--network none`, drops all capabilities, runs non-root on a read-only rootfs under cpu/mem/pids/file-size caps, and is killed on timeout or Stop. The backend refuses any run unless opt-in is confirmed. See [`plan/SANDBOX_TEST_RUNNER.md`](./plan/SANDBOX_TEST_RUNNER.md) and [ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md).
+
 ---
 
 ## Architecture
@@ -67,8 +71,9 @@ Each artifact is versioned; regenerating with reviewer feedback bumps the versio
 │   Rust commands ─▶ services ─▶ repositories ─▶ SQLite + vec0   │
 │            ├─▶ Tree-sitter (JS / TS / Python)                  │
 │            ├─▶ Ollama embeddings (nomic-embed-text)            │
-│            └─▶ LLM provider trait (Ollama / OpenAI /           │
-│                                    OpenRouter / Anthropic)     │
+│            ├─▶ LLM provider trait (Ollama / OpenAI /           │
+│            │                       OpenRouter / Anthropic)     │
+│            └─▶ TestRunner trait (opt-in Docker sandbox, JS/TS) │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -85,6 +90,7 @@ Layered backend (see [`rules/rules.md`](./rules/rules.md) §4.2): **commands** a
 | AST | `tree-sitter` — JS / TS / Python (more on the roadmap) |
 | Frontend | React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui + Monaco |
 | Observability | `tracing` logs · Sentry (opt-in, both sides) |
+| Test sandbox | Docker (opt-in, off by default) — `vitest` + istanbul in a hardened container, JS/TS |
 
 | LLM provider | Auth | Local | Notes |
 |----------|------|:-----:|-------|
@@ -170,6 +176,8 @@ Architecture Decision Records live in [`apps/desktop/src-tauri/docs/adr/`](./app
 ## Roadmap
 
 **v0.1 (shipped)** — feature-complete: 5 artifact types, 5 LLM providers, RAG pipeline, streaming generation, first-run wizard, cross-platform signed releases.
+
+**Sandbox test runner (shipped, JS/TS)** — opt-in Docker sandbox runs generated test cases and overlays pass/fail + line coverage on the editor, closing the generate → run → measure loop ([ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md)). Python (`docker_py`) + cloud runners reuse the same `TestRunner` trait next.
 
 **Next** — more AST languages (Go, Java, C#, Ruby, Rust) · `sqlite-vec` virtual-table search for projects > 50K chunks ([ADR-0002](./apps/desktop/src-tauri/docs/adr/0002-vec0-migration-trigger.md)) · cloud embedding providers · export to JIRA / Linear / GitHub Issues · team-mode collaboration.
 

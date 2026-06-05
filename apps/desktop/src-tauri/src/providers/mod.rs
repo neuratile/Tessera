@@ -11,7 +11,10 @@
 //!   providers + typed errors.
 //! - [`embeddings`] — vector embeddings (Phase 2). Trait + Ollama impl.
 //! - [`factory`] — runtime provider selection (Phase 2).
+//! - [`runners`] — sandboxed test-runner contract types (Phase 1 of the
+//!   sandbox test runner; `TestRunner` trait + Docker impl land later).
 
 pub mod embeddings;
 pub mod factory;
 pub mod llm;
+pub mod runners;
