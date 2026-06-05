@@ -22,9 +22,13 @@
 FROM node:20-alpine
 
 # Coverage provider must match `vitest.config` (provider: 'istanbul').
+# Pinned to exact versions for reproducible image builds: a floating `^2`
+# range could pull a vitest minor that changes the JSON reporter shape that
+# `parse_vitest_results` depends on, silently breaking the parser. Bump these
+# deliberately alongside the parser when upgrading.
 RUN npm install -g --no-fund --no-audit \
-      vitest@^2 \
-      @vitest/coverage-istanbul@^2 \
+      vitest@2.1.9 \
+      @vitest/coverage-istanbul@2.1.9 \
   && npm cache clean --force
 
 # Make the global modules resolvable from the per-run workspace (which has a

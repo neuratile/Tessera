@@ -211,24 +211,39 @@ async fn persist_success(
     output: RunnerOutput,
     duration_ms: u32,
 ) -> AppResult<()> {
-    test_run_repo::insert_cases(deps.pool, run_id, &output.tests).await?;
-    test_run_repo::insert_coverage(deps.pool, run_id, &output.coverage).await?;
+    // Capture insert errors instead of `?`-returning, so `finalize_run` is
+    // always reached. Otherwise a failure between the two inserts (e.g.
+    // insert_cases commits but insert_coverage errors) would leave the row
+    // stuck in `running` forever, never reaching a terminal status.
+    let write_err = async {
+        test_run_repo::insert_cases(deps.pool, run_id, &output.tests).await?;
+        test_run_repo::insert_coverage(deps.pool, run_id, &output.coverage).await?;
+        Ok::<(), AppError>(())
+    }
+    .await
+    .err();
 
     let passed_count = count_status(&output.tests, TestStatus::Passed);
     let failed_count = count_status(&output.tests, TestStatus::Failed);
+    let (status, error_message) = match &write_err {
+        Some(e) => (RunStatus::Error, Some(format!("DB write failed: {e}"))),
+        None => (output.status, None),
+    };
 
     test_run_repo::finalize_run(
         deps.pool,
         run_id,
         RunOutcome {
-            status: output.status,
+            status,
             passed_count,
             failed_count,
             duration_ms,
-            error_message: None,
+            error_message,
         },
     )
-    .await
+    .await?;
+
+    write_err.map_or(Ok(()), Err)
 }
 
 /// Finalize a run that failed inside the runner with a typed error,

@@ -176,8 +176,25 @@ async fn ensure_docker_available() -> Result<(), RunnerError> {
 
 /// Write the source/test files plus a minimal `package.json` and vitest
 /// config into the workspace.
+/// Paths the runner writes and then reads back after the container exits
+/// (`RESULTS_FILE`, the `coverage/` report dir). A crafted artifact must not
+/// be allowed to pre-seed these: a container that exits without writing its
+/// own output (e.g. a test that hard-kills the process) would otherwise leave
+/// the forged file in place and the host would read it as authentic.
+fn is_reserved_output_path(relative_path: &str) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    let normalized = normalized.trim_start_matches("./");
+    normalized == RESULTS_FILE || normalized == "coverage" || normalized.starts_with("coverage/")
+}
+
 fn materialize_workspace(root: &Path, input: &RunInput) -> Result<(), RunnerError> {
     for file in &input.files {
+        if is_reserved_output_path(&file.relative_path) {
+            return Err(RunnerError::InvalidInput(format!(
+                "workspace file `{}` collides with a runner output path",
+                file.relative_path
+            )));
+        }
         let dest = root.join(&file.relative_path);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
@@ -263,15 +280,10 @@ async fn run_container(
     let timeout = Duration::from_secs(u64::from(limits.timeout_secs));
 
     tokio::select! {
+        // Completion is checked first so a container that finishes at exactly
+        // the wall-clock deadline reports its real results instead of a
+        // spurious timeout; cancellation still preempts the timeout below.
         biased;
-        () = cancel.cancelled() => {
-            docker_kill(&name).await;
-            Err(RunnerError::Cancelled)
-        }
-        () = tokio::time::sleep(timeout) => {
-            docker_kill(&name).await;
-            Err(RunnerError::Timeout(limits.timeout_secs))
-        }
         result = child.wait_with_output() => {
             let output = result
                 .map_err(|e| RunnerError::Process(format!("docker run failed: {e}")))?;
@@ -280,6 +292,14 @@ async fn run_container(
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 exit_code: output.status.code().unwrap_or(-1),
             })
+        }
+        () = cancel.cancelled() => {
+            docker_kill(&name).await;
+            Err(RunnerError::Cancelled)
+        }
+        () = tokio::time::sleep(timeout) => {
+            docker_kill(&name).await;
+            Err(RunnerError::Timeout(limits.timeout_secs))
         }
     }
 }
