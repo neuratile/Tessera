@@ -717,6 +717,26 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
 
         // Re-mapping for emit_test_plan
         if tool_name == "emit_test_plan" {
+            // The v2 schema nests scope as `{ inScope, outOfScope }` and
+            // rejects unknown keys, so always remap the flat v1-style
+            // `scopeIn`/`scopeOut` keys models still emit — the generic
+            // re-nest normalization cannot match them by key name.
+            if !obj.contains_key("scope")
+                && (obj.contains_key("scopeIn") || obj.contains_key("scopeOut"))
+            {
+                let empty_array = || serde_json::Value::Array(Vec::new());
+                let mut scope_obj = serde_json::Map::new();
+                scope_obj.insert(
+                    "inScope".to_string(),
+                    obj.remove("scopeIn").unwrap_or_else(empty_array),
+                );
+                scope_obj.insert(
+                    "outOfScope".to_string(),
+                    obj.remove("scopeOut").unwrap_or_else(empty_array),
+                );
+                obj.insert("scope".to_string(), serde_json::Value::Object(scope_obj));
+            }
+
             let has_summary = obj.contains_key("summary");
             let has_strategy = obj.contains_key("strategy");
             if !has_summary || !has_strategy {
@@ -792,17 +812,38 @@ pub(crate) fn salvage_tool_args(text: &str, tool_name: &str) -> Option<String> {
 
                 let array_keys = [
                     "objectives",
-                    "scopeIn",
-                    "scopeOut",
+                    "testLevels",
+                    "testTypes",
                     "environments",
                     "risks",
                     "entryCriteria",
                     "exitCriteria",
+                    "suspensionCriteria",
+                    "deliverables",
                 ];
                 for ak in array_keys {
                     if let Some(val) = obj.get(ak) {
                         new_obj.insert(ak.to_string(), val.clone());
                     }
+                }
+
+                // `scope` is a required object, and the missing-array
+                // normalization only backfills arrays — carry it over (it
+                // was re-nested above when only flat keys were present) or
+                // insert an empty shell so v2 validation passes.
+                if let Some(val) = obj.get("scope") {
+                    new_obj.insert("scope".to_string(), val.clone());
+                } else {
+                    let mut scope_obj = serde_json::Map::new();
+                    scope_obj.insert(
+                        "inScope".to_string(),
+                        serde_json::Value::Array(Vec::new()),
+                    );
+                    scope_obj.insert(
+                        "outOfScope".to_string(),
+                        serde_json::Value::Array(Vec::new()),
+                    );
+                    new_obj.insert("scope".to_string(), serde_json::Value::Object(scope_obj));
                 }
                 *obj = new_obj;
             }
@@ -2172,8 +2213,16 @@ mod tests {
         </tool_code>"#;
         let plan = salvage_tool_args(plan_text, "emit_test_plan").expect("salvage plan");
         let mut plan_value: serde_json::Value = serde_json::from_str(&plan).unwrap();
-        normalize_missing_arrays(&mut plan_value, &test_plan_v1::tool());
-        validate_tool_output(&test_plan_v1::tool(), &plan_value).expect("valid test plan");
+        normalize_missing_arrays(&mut plan_value, &test_plan_v2::tool());
+        validate_tool_output(&test_plan_v2::tool(), &plan_value).expect("valid test plan");
+        // Flat v1-style scope keys are re-nested into the v2 `scope` object.
+        assert_eq!(
+            plan_value["scope"]["inScope"],
+            serde_json::json!(["src/report.ts"])
+        );
+        assert_eq!(plan_value["scope"]["outOfScope"], serde_json::json!([]));
+        assert!(plan_value.get("scopeIn").is_none());
+        assert!(plan_value.get("scopeOut").is_none());
 
         let defect_text = r#"```tool_code
             console.log(default_api.emit_defect_report({
@@ -2195,6 +2244,37 @@ mod tests {
         normalize_missing_arrays(&mut defect_value, &defect_report_v1::tool());
         validate_tool_output(&defect_report_v1::tool(), &defect_value)
             .expect("valid defect report");
+    }
+
+    #[test]
+    fn salvage_remap_rebuild_produces_v2_test_plan_shape() {
+        // Free-text JSON missing `summary`/`strategy` triggers the rebuild
+        // path. The rebuilt object must satisfy the v2 schema: nested
+        // `scope` instead of flat `scopeIn`/`scopeOut`, with the remaining
+        // required arrays backfilled by normalization.
+        let text = r#"{"title":"Report flows","scopeIn":["src/report.ts"],"scopeOut":[],"objectives":["Verify report creation"]}"#;
+        let got = salvage_tool_args(text, "emit_test_plan").expect("salvage");
+        let mut value: serde_json::Value = serde_json::from_str(&got).unwrap();
+        normalize_missing_arrays(&mut value, &test_plan_v2::tool());
+        validate_tool_output(&test_plan_v2::tool(), &value)
+            .expect("rebuilt plan validates against v2");
+        assert_eq!(
+            value["scope"]["inScope"],
+            serde_json::json!(["src/report.ts"])
+        );
+        assert!(value.get("scopeIn").is_none());
+        assert!(value.get("scopeOut").is_none());
+
+        // Rebuild with no scope information at all still emits the
+        // required `scope` object shell.
+        let bare = r#"{"title":"Bare plan"}"#;
+        let got_bare = salvage_tool_args(bare, "emit_test_plan").expect("salvage bare");
+        let mut bare_value: serde_json::Value = serde_json::from_str(&got_bare).unwrap();
+        normalize_missing_arrays(&mut bare_value, &test_plan_v2::tool());
+        validate_tool_output(&test_plan_v2::tool(), &bare_value)
+            .expect("bare rebuilt plan validates against v2");
+        assert_eq!(bare_value["scope"]["inScope"], serde_json::json!([]));
+        assert_eq!(bare_value["scope"]["outOfScope"], serde_json::json!([]));
     }
 
     #[test]
