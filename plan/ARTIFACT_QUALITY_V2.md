@@ -45,22 +45,22 @@ ISO/IEC/IEEE 29119-3, ISTQB, and TestRail conventions.
 ### Phase 1 — Core evidence artifacts (`feat/artifact-evidence-v2`)
 
 Test cases v2 (`prompts/test_cases_v2.rs`, VERSION `test_cases_v2`, v1 kept):
-- [ ] `steps` becomes `{ action, expectedResult }[]` (separated-steps pattern).
-- [ ] Add `testData?` (string), `type` enum `positive|negative|boundary|error|security`, `postconditions[]`.
-- [ ] Prompt mandates ≥1 negative and ≥1 boundary case per covered feature.
-- [ ] `files[]` payload byte-identical contract — sandbox (`RunInput`, `sandbox_service`) untouched.
-- [ ] Update `TestCaseSchema` Zod + round-trip contract test, same PR.
+- [x] `steps` becomes `{ action, expectedResult }[]` (separated-steps pattern).
+- [x] Add `testData?` (string), `type` enum `positive|negative|boundary|error|security`, `postconditions[]`.
+- [x] Prompt mandates ≥1 negative and ≥1 boundary case per covered feature.
+- [x] `files[]` payload byte-identical contract — sandbox (`RunInput`, `sandbox_service`) untouched.
+- [x] Update `TestCaseSchema` Zod + round-trip contract test, same PR.
 
 Bug report v2 (`prompts/bug_report_v2.rs`, VERSION `bug_report_v2`):
-- [ ] Add `stepsToReproduce[]` (minItems 1, numbered actions).
-- [ ] Split `severity` (`blocker|critical|major|minor|trivial`) from `priority` (`p0|p1|p2|p3`).
-- [ ] Add `reproducibility` enum `always|intermittent|once`, `workaround?`, `component?`.
-- [ ] Create dedicated `packages/shared/src/schemas/bug-report.schema.ts` + round-trip contract test (closes the free-form-JSON gap).
+- [x] Add `stepsToReproduce[]` (minItems 1, numbered actions).
+- [x] Split `severity` (`blocker|critical|major|minor|trivial`) from `priority` (`p0|p1|p2|p3`).
+- [x] Add `reproducibility` enum `always|intermittent|once`, `workaround?`, `component?`.
+- [x] Create dedicated `packages/shared/src/schemas/bug-report.schema.ts` + round-trip contract test (closes the free-form-JSON gap).
 
 Shared:
-- [ ] `generation_service` routes both artifacts to v2 modules.
-- [ ] `artifact-detail-drawer.tsx` renders step tables + new fields.
-- [ ] Insta snapshots added for both v2 modules.
+- [x] `generation_service` routes both artifacts to v2 modules.
+- [x] `artifact-detail-drawer.tsx` renders step tables + new fields.
+- [x] Insta snapshots added for both v2 modules.
 
 ### Phase 2 — Planning + analysis artifacts (`feat/artifact-planning-v2`)
 
