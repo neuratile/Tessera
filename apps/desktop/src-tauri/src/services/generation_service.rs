@@ -1313,7 +1313,58 @@ fn normalize_value_recursively(data: &mut JsonValue, schema: &JsonValue) {
                 }
             }
 
-            // 2. Missing arrays normalization: Insert [] for required array fields if absent
+            // 2. Re-nest flattened object fields: models sometimes emit the
+            // keys of a nested object (e.g. `location.symbol` on a defect
+            // finding, `rootCause.symbol` on a bug) at the parent level,
+            // which `additionalProperties: false` rejects. Move any key
+            // that is unknown at this level but declared by exactly one
+            // object-typed property into that object. Ambiguous keys
+            // (claimed by two nested objects) are left for validation to
+            // report rather than guessed at.
+            let unknown_keys: Vec<String> = obj
+                .keys()
+                .filter(|k| !properties.contains_key(*k))
+                .cloned()
+                .collect();
+            for key in unknown_keys {
+                let norm_key = normalize_key_name(&key);
+                let mut owners = properties.iter().filter(|(_, prop_schema)| {
+                    prop_schema.get("type").and_then(|t| t.as_str()) == Some("object")
+                        && prop_schema
+                            .get("properties")
+                            .and_then(|p| p.as_object())
+                            .is_some_and(|nested| {
+                                nested.keys().any(|nk| normalize_key_name(nk) == norm_key)
+                            })
+                });
+                let Some((owner_name, _)) = owners.next() else {
+                    continue;
+                };
+                if owners.next().is_some() {
+                    continue;
+                }
+                let owner_name = owner_name.clone();
+                let Some(val) = obj.remove(&key) else {
+                    continue;
+                };
+                match obj.get_mut(&owner_name) {
+                    Some(JsonValue::Object(nested)) => {
+                        nested.entry(key).or_insert(val);
+                    }
+                    None => {
+                        let mut nested = serde_json::Map::new();
+                        nested.insert(key, val);
+                        obj.insert(owner_name, JsonValue::Object(nested));
+                    }
+                    // Owner exists but is not an object — restore the key
+                    // untouched and let validation surface the mismatch.
+                    Some(_) => {
+                        obj.insert(key, val);
+                    }
+                }
+            }
+
+            // 3. Missing arrays normalization: Insert [] for required array fields if absent
             if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
                 for req_key_val in required {
                     let Some(key) = req_key_val.as_str() else {
@@ -1333,7 +1384,7 @@ fn normalize_value_recursively(data: &mut JsonValue, schema: &JsonValue) {
                 }
             }
 
-            // 3. Recurse into each object property
+            // 4. Recurse into each object property
             for (schema_key, property_schema) in properties {
                 if let Some(val) = obj.get_mut(schema_key) {
                     normalize_value_recursively(val, property_schema);
@@ -1351,11 +1402,13 @@ fn normalize_value_recursively(data: &mut JsonValue, schema: &JsonValue) {
     }
 }
 
-/// Fill missing required array fields with empty arrays and recursively normalize keys that exhibit casing differences.
+/// Fill missing required array fields with empty arrays, recursively normalize keys that exhibit
+/// casing differences, and re-nest flattened nested-object fields.
 ///
 /// Small / non-tool-trained LLMs frequently omit object keys whose value would be an empty array,
-/// and they often emit keys with incorrect casing (`camelCase` instead of `snake_case`).
-/// This function normalizes both casing differences and missing arrays recursively.
+/// emit keys with incorrect casing (`camelCase` instead of `snake_case`), or flatten a nested
+/// object's keys onto its parent (e.g. `location.symbol` emitted as a top-level `symbol` on a
+/// defect finding). This function normalizes all three recursively.
 pub(crate) fn normalize_missing_arrays(data: &mut JsonValue, tool: &ToolSchema) {
     normalize_value_recursively(data, &tool.parameters_schema);
 }
@@ -2371,5 +2424,99 @@ mod tests {
         assert_eq!(data["entryCriteria"], serde_json::json!(["code merged"]));
         assert!(data.get("entry_criteria").is_none());
         assert_eq!(data["exitCriteria"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn normalize_renests_flattened_defect_location_fields() {
+        // Reproduces the live failure: the model emitted the `location`
+        // object's keys at the finding level, which
+        // `additionalProperties: false` rejected with "Additional
+        // properties are not allowed ('end_line', 'file_hint',
+        // 'start_line', 'symbol' were unexpected)".
+        let schema = defect_report_v1::tool();
+        let mut data = serde_json::json!({
+            "findings": [{
+                "id": "DEF-UNHANDLED-ERROR",
+                "severity": "major",
+                "category": "error_handling",
+                "confidence": "high",
+                "symbol": "saveReport",
+                "start_line": 10,
+                "end_line": 20,
+                "file_hint": "src/report.ts",
+                "description": "The save path does not handle provider errors.",
+                "impact": "Users can lose generated report data.",
+                "suggested_fix": "Catch the provider error and surface a retryable failure."
+            }],
+            "summary": "One high-confidence defect found."
+        });
+        normalize_missing_arrays(&mut data, &schema);
+        validate_tool_output(&schema, &data).expect("flattened location heals to valid");
+        let finding = &data["findings"][0];
+        assert_eq!(finding["location"]["symbol"], "saveReport");
+        assert_eq!(finding["location"]["start_line"], 10);
+        assert_eq!(finding["location"]["end_line"], 20);
+        assert_eq!(finding["location"]["file_hint"], "src/report.ts");
+        assert!(finding.get("symbol").is_none());
+        assert!(finding.get("start_line").is_none());
+    }
+
+    #[test]
+    fn normalize_renests_flattened_bug_root_cause_fields() {
+        // Same flattening failure mode for bug reports: rootCause keys
+        // emitted at the bug level, including a snake_case variant that
+        // the casing pass then fixes after the move.
+        let schema = bug_report_v2::tool();
+        let mut data = serde_json::json!({
+            "bugs": [{
+                "id": "BUG-SAVE-RACE",
+                "title": "Report save races under load",
+                "severity": "major",
+                "priority": "p1",
+                "reproducibility": "always",
+                "stepsToReproduce": ["1. Save twice quickly"],
+                "expectedBehavior": "One report row is written",
+                "actualBehavior": "Two rows are written",
+                "symbol": "saveReport",
+                "file_hint": "src/report.ts",
+                "explanation": "No write lock around the insert."
+            }]
+        });
+        normalize_missing_arrays(&mut data, &schema);
+        validate_tool_output(&schema, &data).expect("flattened rootCause heals to valid");
+        let bug = &data["bugs"][0];
+        assert_eq!(bug["rootCause"]["symbol"], "saveReport");
+        assert_eq!(bug["rootCause"]["fileHint"], "src/report.ts");
+        assert_eq!(
+            bug["rootCause"]["explanation"],
+            "No write lock around the insert."
+        );
+        assert!(bug.get("symbol").is_none());
+        assert!(bug.get("file_hint").is_none());
+    }
+
+    #[test]
+    fn normalize_renest_does_not_clobber_existing_nested_values() {
+        let schema = defect_report_v1::tool();
+        let mut data = serde_json::json!({
+            "findings": [{
+                "id": "DEF-X",
+                "severity": "major",
+                "category": "logic_error",
+                "confidence": "high",
+                // Partial location present; stray duplicate symbol at the
+                // finding level must not overwrite the nested one.
+                "location": { "symbol": "realSymbol", "start_line": 1, "end_line": 2 },
+                "symbol": "straySymbol",
+                "description": "A description long enough.",
+                "impact": "Some impact.",
+                "suggested_fix": "Some fix."
+            }],
+            "summary": "s"
+        });
+        normalize_missing_arrays(&mut data, &schema);
+        let finding = &data["findings"][0];
+        assert_eq!(finding["location"]["symbol"], "realSymbol");
+        assert!(finding.get("symbol").is_none());
     }
 }
