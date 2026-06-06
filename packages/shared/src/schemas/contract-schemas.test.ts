@@ -871,6 +871,7 @@ describe('TestPlanSchema', () => {
   });
 
   it('rejects v1-style flat scopeIn/scopeOut', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `scope`
     const { scope: _scope, ...flat } = v2Plan;
     expect(() =>
       TestPlanSchema.parse({ ...flat, scopeIn: ['auth module'], scopeOut: [] }),
@@ -883,8 +884,10 @@ describe('TestPlanSchema', () => {
   });
 
   it('rejects a plan missing suspensionCriteria or deliverables', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `suspensionCriteria`
     const { suspensionCriteria: _s, ...withoutSuspension } = v2Plan;
     expect(() => TestPlanSchema.parse(withoutSuspension)).toThrow();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `deliverables`
     const { deliverables: _d, ...withoutDeliverables } = v2Plan;
     expect(() => TestPlanSchema.parse(withoutDeliverables)).toThrow();
   });
@@ -926,6 +929,7 @@ describe('DefectReportSchema', () => {
   });
 
   it('rejects a finding missing fixSuggestion', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `fixSuggestion`
     const { fixSuggestion: _f, ...withoutFix } = v2Finding;
     expect(() => DefectReportSchema.parse({ findings: [withoutFix] })).toThrow();
   });
