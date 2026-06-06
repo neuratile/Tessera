@@ -735,6 +735,7 @@ describe('TestCaseSchema', () => {
   });
 
   it('rejects a case missing the type discriminator', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `type`
     const { type: _type, ...withoutType } = v2Case;
     expect(() => TestCaseSchema.parse({ cases: [withoutType] })).toThrow();
   });
@@ -827,6 +828,7 @@ describe('BugReportSchema', () => {
   });
 
   it('rejects a bug missing the priority split', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `priority`
     const { priority: _priority, ...withoutPriority } = v2Bug;
     expect(() => BugReportSchema.parse({ bugs: [withoutPriority] })).toThrow();
   });
