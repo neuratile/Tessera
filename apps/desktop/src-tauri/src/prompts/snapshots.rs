@@ -13,8 +13,8 @@
 #![cfg(test)]
 
 use super::{
-    bug_report_v1, bug_report_v2, context_md_v1, defect_report_v1, test_cases_v1, test_cases_v2,
-    test_plan_v1, PromptContext,
+    bug_report_v1, bug_report_v2, context_md_v1, defect_report_v1, defect_report_v2,
+    test_cases_v1, test_cases_v2, test_plan_v1, test_plan_v2, PromptContext,
 };
 use crate::providers::llm::types::Content;
 use crate::services::chunking_service::{Chunk, ChunkKind};
@@ -141,6 +141,35 @@ fn snapshot_defect_report_v1_tool() {
     insta::assert_yaml_snapshot!(
         "defect_report_v1_tool",
         defect_report_v1::tool().parameters_schema
+    );
+}
+
+#[test]
+fn snapshot_test_plan_v2_messages() {
+    let chunks = fixture_chunks();
+    let ctx = fixture_ctx(&chunks);
+    let msgs = test_plan_v2::build_messages(&ctx);
+    insta::assert_yaml_snapshot!("test_plan_v2_messages", dump_messages(&msgs));
+}
+
+#[test]
+fn snapshot_test_plan_v2_tool() {
+    insta::assert_yaml_snapshot!("test_plan_v2_tool", test_plan_v2::tool().parameters_schema);
+}
+
+#[test]
+fn snapshot_defect_report_v2_messages() {
+    let chunks = fixture_chunks();
+    let ctx = fixture_ctx(&chunks);
+    let msgs = defect_report_v2::build_messages(&ctx);
+    insta::assert_yaml_snapshot!("defect_report_v2_messages", dump_messages(&msgs));
+}
+
+#[test]
+fn snapshot_defect_report_v2_tool() {
+    insta::assert_yaml_snapshot!(
+        "defect_report_v2_tool",
+        defect_report_v2::tool().parameters_schema
     );
 }
 

@@ -324,13 +324,16 @@ describe('Schema validity catalog', () => {
     const structuredData = StructuredDataSchema.parse({
       summary: 'Summary',
       objectives: ['Objective'],
-      scopeIn: ['API'],
-      scopeOut: [],
+      scope: { inScope: ['API'], outOfScope: [] },
       strategy: 'Risk based',
+      testLevels: ['unit'],
+      testTypes: ['functional'],
       environments: ['local'],
       risks: [],
       entryCriteria: [],
       exitCriteria: [],
+      suspensionCriteria: [],
+      deliverables: [],
     });
     expect('summary' in structuredData ? structuredData.summary : undefined).toBe('Summary');
     expect(
@@ -434,7 +437,18 @@ describe('Schema validity catalog', () => {
     expect(DefectSeveritySchema.parse('critical')).toBe('critical');
     expect(
       DefectReportSchema.parse({
-        findings: [{ severity: 'major', category: 'logic', location: 'api.ts:42', description: 'Issue' }],
+        findings: [
+          {
+            id: 'DEF-PARSE-CRASH',
+            severity: 'major',
+            category: 'logic',
+            confidence: 'high',
+            location: { symbol: 'parseUser', startLine: 1, endLine: 10, fileHint: 'api.ts' },
+            description: 'Unvalidated JSON.parse crashes on bad input.',
+            impact: 'Request handler panics.',
+            fixSuggestion: 'Wrap in try/catch and return 400.',
+          },
+        ],
       }).findings.length,
     ).toBe(1);
     expect(TestCasePrioritySchema.parse('p1')).toBe('p1');
@@ -458,13 +472,16 @@ describe('Schema validity catalog', () => {
       TestPlanSchema.parse({
         summary: 'Summary',
         objectives: ['Objective'],
-        scopeIn: ['Auth'],
-        scopeOut: [],
+        scope: { inScope: ['Auth'], outOfScope: ['Migrations'] },
         strategy: 'Risk based',
+        testLevels: ['unit', 'e2e'],
+        testTypes: ['functional', 'security'],
         environments: ['local'],
         risks: [{ description: 'Service instability', mitigation: 'Retries' }],
         entryCriteria: ['Build green'],
         exitCriteria: ['Artifacts reviewed'],
+        suspensionCriteria: ['Environment outage'],
+        deliverables: ['Test report'],
       }).strategy,
     ).toBe('Risk based');
 
@@ -487,13 +504,16 @@ describe('Schema validity catalog', () => {
     expectInvalid(TestPlanSchema, {
       summary: 'Summary',
       objectives: 'not-an-array',
-      scopeIn: [],
-      scopeOut: [],
+      scope: { inScope: [], outOfScope: [] },
       strategy: 'Risk based',
+      testLevels: [],
+      testTypes: [],
       environments: [],
       risks: [],
       entryCriteria: [],
       exitCriteria: [],
+      suspensionCriteria: [],
+      deliverables: [],
     });
   });
 

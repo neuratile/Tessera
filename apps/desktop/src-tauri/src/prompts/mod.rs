@@ -17,8 +17,12 @@
 //! - [`test_cases_v2`] — v1 plus `TestRail` separated steps
 //!   (`{ action, expectedResult }`), case `type`, `testData`,
 //!   `postconditions`; the runnable `files[]` contract is unchanged.
+//! - [`test_plan_v2`] — v1 plus nested `scope`, `suspensionCriteria`,
+//!   `testLevels` / `testTypes` enums, `deliverables` (29119-lite).
 //! - [`defect_report_v1`] — static-analysis findings (severity,
 //!   category, location, suggested fix, confidence).
+//! - [`defect_report_v2`] — v1 plus CWE-aligned categories, required
+//!   `fixSuggestion`, evidence parity with the bug report.
 //! - [`bug_report_v1`] — runtime-issue tracking docs formatted for
 //!   issue-tracker import.
 //! - [`bug_report_v2`] — v1 plus severity↔priority split (5-level
@@ -41,9 +45,11 @@ pub mod bug_report_v1;
 pub mod bug_report_v2;
 pub mod context_md_v1;
 pub mod defect_report_v1;
+pub mod defect_report_v2;
 pub mod test_cases_v1;
 pub mod test_cases_v2;
 pub mod test_plan_v1;
+pub mod test_plan_v2;
 
 #[cfg(test)]
 mod snapshots;

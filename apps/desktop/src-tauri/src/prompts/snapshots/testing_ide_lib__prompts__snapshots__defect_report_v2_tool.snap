@@ -1,0 +1,84 @@
+---
+source: src/prompts/snapshots.rs
+expression: "defect_report_v2::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  findings:
+    items:
+      additionalProperties: false
+      properties:
+        category:
+          description: "CWE top-class alignment: input_validation (CWE-20), auth (CWE-287/862), resource_management (CWE-400/401), logic (CWE-840), error_handling (CWE-755), concurrency (CWE-362)."
+          enum:
+            - input_validation
+            - auth
+            - resource_management
+            - logic
+            - error_handling
+            - concurrency
+          type: string
+        confidence:
+          enum:
+            - high
+            - medium
+          type: string
+        description:
+          minLength: 10
+          type: string
+        evidenceSnippet:
+          description: Short verbatim quote of the offending code.
+          type: string
+        fixSuggestion:
+          minLength: 5
+          type: string
+        id:
+          description: "Stable id, prefix `DEF-`. MUST use ONLY uppercase letters, digits, hyphens, and underscores (e.g. 'DEF-NULL-POINTER' in all-caps, NOT 'DEF-Null-Pointer')."
+          pattern: "^DEF-[A-Z0-9_-]+$"
+          type: string
+        impact:
+          minLength: 5
+          type: string
+        location:
+          additionalProperties: false
+          properties:
+            endLine:
+              minimum: 1
+              type: integer
+            fileHint:
+              type: string
+            startLine:
+              minimum: 1
+              type: integer
+            symbol:
+              minLength: 1
+              type: string
+          required:
+            - symbol
+            - startLine
+            - endLine
+          type: object
+        severity:
+          enum:
+            - critical
+            - major
+            - minor
+            - trivial
+          type: string
+      required:
+        - id
+        - severity
+        - category
+        - confidence
+        - location
+        - description
+        - impact
+        - fixSuggestion
+      type: object
+    type: array
+  summary:
+    description: One-paragraph overview written after the findings list.
+    type: string
+required:
+  - findings
+type: object

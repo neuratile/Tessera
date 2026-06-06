@@ -35,13 +35,24 @@ export type BugReproducibility = z.infer<typeof BugReproducibilitySchema>;
  * Root-cause analysis block — mirrors the `rootCause` object in the Rust
  * `emit_bug_report` v2 tool schema (`prompts/bug_report_v2.rs`).
  */
-export const BugRootCauseSchema = z.object({
-  symbol: z.string().min(1),
-  startLine: z.number().int().min(1).optional(),
-  endLine: z.number().int().min(1).optional(),
-  fileHint: z.string().optional(),
-  explanation: z.string().min(10),
-});
+export const BugRootCauseSchema = z
+  .object({
+    symbol: z.string().min(1),
+    startLine: z.number().int().min(1).optional(),
+    endLine: z.number().int().min(1).optional(),
+    fileHint: z.string().optional(),
+    explanation: z.string().min(10),
+  })
+  .refine(
+    (cause) =>
+      cause.startLine === undefined ||
+      cause.endLine === undefined ||
+      cause.endLine >= cause.startLine,
+    {
+      message: 'endLine must be greater than or equal to startLine',
+      path: ['endLine'],
+    },
+  );
 
 export type BugRootCause = z.infer<typeof BugRootCauseSchema>;
 

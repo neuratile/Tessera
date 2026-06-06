@@ -65,19 +65,19 @@ Shared:
 ### Phase 2 — Planning + analysis artifacts (`feat/artifact-planning-v2`)
 
 Test plan v2 (`prompts/test_plan_v2.rs`, VERSION `test_plan_v2`) — 29119-lite:
-- [ ] Add `scope { inScope[], outOfScope[] }`.
-- [ ] Add `entryCriteria[]`, `exitCriteria[]`, `suspensionCriteria[]`.
-- [ ] Add `testLevels[]` (unit/integration/e2e), `testTypes[]` (functional/perf/security/...), `deliverables[]`.
-- [ ] Update `TestPlanSchema` Zod + contract test.
+- [x] Add `scope { inScope[], outOfScope[] }`.
+- [x] Add `entryCriteria[]`, `exitCriteria[]`, `suspensionCriteria[]`.
+- [x] Add `testLevels[]` (unit/integration/e2e), `testTypes[]` (functional/perf/security/...), `deliverables[]`.
+- [x] Update `TestPlanSchema` Zod + contract test.
 
 Defect report v2 (`prompts/defect_report_v2.rs`, VERSION `defect_report_v2`):
-- [ ] `category` enum aligned to CWE top classes (input validation, auth, resource mgmt, logic, error handling, concurrency).
-- [ ] Add `fixSuggestion` per finding.
-- [ ] Evidence fields at parity with bug report (`evidence_snippet`, `file_hint`, line range).
-- [ ] Update `DefectReportSchema` Zod + contract test.
+- [x] `category` enum aligned to CWE top classes (input validation, auth, resource mgmt, logic, error handling, concurrency).
+- [x] Add `fixSuggestion` per finding.
+- [x] Evidence fields at parity with bug report (`evidence_snippet`, `file_hint`, line range).
+- [x] Update `DefectReportSchema` Zod + contract test.
 
 Shared:
-- [ ] Routing, drawer rendering, insta snapshots — same mechanics as Phase 1.
+- [x] Routing, drawer rendering, insta snapshots — same mechanics as Phase 1.
 
 ### Phase 3 — Prompt quality + verification (`feat/artifact-prompt-quality`)
 

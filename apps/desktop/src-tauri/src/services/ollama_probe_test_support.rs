@@ -8,8 +8,8 @@ use serde_json::Value as JsonValue;
 
 use crate::config::{AppConfig, DEFAULT_OLLAMA_BASE_URL};
 use crate::db::init_pool_at;
-use crate::prompts::test_cases_v1;
-use crate::prompts::test_plan_v1;
+use crate::prompts::test_cases_v2;
+use crate::prompts::test_plan_v2;
 use crate::prompts::PromptContext;
 use crate::providers::factory::{self, ProviderConfig, ProviderKind};
 use crate::providers::llm::{
@@ -83,16 +83,18 @@ fn select_prompt(
     artifact_type: ArtifactType,
     context: &PromptContext<'_>,
 ) -> (Vec<Message>, ToolSchema, &'static str) {
+    // Mirrors `generation_service::build_prompt` v2 routing so the golden
+    // suite exercises the same prompts the desktop app ships.
     match artifact_type {
         ArtifactType::TestPlan => (
-            test_plan_v1::build_messages(context),
-            test_plan_v1::tool(),
-            test_plan_v1::VERSION,
+            test_plan_v2::build_messages(context),
+            test_plan_v2::tool(),
+            test_plan_v2::VERSION,
         ),
         ArtifactType::TestCases => (
-            test_cases_v1::build_messages(context),
-            test_cases_v1::tool(),
-            test_cases_v1::VERSION,
+            test_cases_v2::build_messages(context),
+            test_cases_v2::tool(),
+            test_cases_v2::VERSION,
         ),
         _ => unreachable!("probe only accepts test-plan and test-cases"),
     }

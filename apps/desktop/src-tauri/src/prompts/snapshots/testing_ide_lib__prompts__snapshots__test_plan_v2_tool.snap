@@ -1,0 +1,111 @@
+---
+source: src/prompts/snapshots.rs
+expression: "test_plan_v2::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  deliverables:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  entryCriteria:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  environments:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  exitCriteria:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  objectives:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  risks:
+    items:
+      additionalProperties: false
+      properties:
+        description:
+          minLength: 1
+          type: string
+        mitigation:
+          minLength: 1
+          type: string
+      required:
+        - description
+      type: object
+    type: array
+  scope:
+    additionalProperties: false
+    properties:
+      inScope:
+        items:
+          minLength: 1
+          type: string
+        type: array
+      outOfScope:
+        items:
+          minLength: 1
+          type: string
+        type: array
+    required:
+      - inScope
+      - outOfScope
+    type: object
+  strategy:
+    maxLength: 2000
+    minLength: 1
+    type: string
+  summary:
+    maxLength: 1500
+    minLength: 1
+    type: string
+  suspensionCriteria:
+    items:
+      minLength: 1
+      type: string
+    type: array
+  testLevels:
+    items:
+      enum:
+        - unit
+        - integration
+        - system
+        - e2e
+        - acceptance
+      type: string
+    type: array
+  testTypes:
+    items:
+      enum:
+        - functional
+        - performance
+        - security
+        - usability
+        - reliability
+        - compatibility
+        - regression
+      type: string
+    type: array
+required:
+  - summary
+  - objectives
+  - scope
+  - strategy
+  - testLevels
+  - testTypes
+  - environments
+  - risks
+  - entryCriteria
+  - exitCriteria
+  - suspensionCriteria
+  - deliverables
+type: object

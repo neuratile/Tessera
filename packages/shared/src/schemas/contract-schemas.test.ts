@@ -30,6 +30,8 @@ import {
   RunResultSchema,
   TestCaseSchema,
   BugReportSchema,
+  TestPlanSchema,
+  DefectReportSchema,
 } from '../index';
 
 describe('RegisterSchema', () => {
@@ -842,6 +844,127 @@ describe('BugReportSchema', () => {
   it('rejects a lowercase-mixed bug id', () => {
     expect(() => BugReportSchema.parse({ bugs: [{ ...v2Bug, id: 'BUG-Save-Race' }] })).toThrow();
   });
+
+  it('rejects an inverted rootCause line range (endLine < startLine)', () => {
+    expect(() =>
+      BugReportSchema.parse({
+        bugs: [
+          {
+            ...v2Bug,
+            rootCause: {
+              symbol: 'saveReport',
+              startLine: 20,
+              endLine: 10,
+              explanation: 'No write lock around the insert.',
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('TestPlanSchema', () => {
+  /** Minimal valid v2 plan — nested scope + 29119 backbone sections. */
+  const v2Plan = {
+    summary: 'Validate the auth subsystem.',
+    objectives: ['Verify login'],
+    scope: { inScope: ['auth module'], outOfScope: ['migrations'] },
+    strategy: 'Risk-based API checks.',
+    testLevels: ['unit', 'integration'],
+    testTypes: ['functional', 'security'],
+    environments: ['local'],
+    risks: [{ description: 'Session leak' }],
+    entryCriteria: ['Build green'],
+    exitCriteria: ['Cases reviewed'],
+    suspensionCriteria: ['Environment outage'],
+    deliverables: ['Test case suite'],
+  };
+
+  it('round-trips the full v2 field set', () => {
+    const parsed = TestPlanSchema.parse(v2Plan);
+    expect(parsed.scope.inScope).toEqual(['auth module']);
+    expect(parsed.testLevels).toContain('integration');
+    expect(parsed.suspensionCriteria).toHaveLength(1);
+  });
+
+  it('rejects v1-style flat scopeIn/scopeOut', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `scope`
+    const { scope: _scope, ...flat } = v2Plan;
+    expect(() =>
+      TestPlanSchema.parse({ ...flat, scopeIn: ['auth module'], scopeOut: [] }),
+    ).toThrow();
+  });
+
+  it('rejects unknown test levels and types', () => {
+    expect(() => TestPlanSchema.parse({ ...v2Plan, testLevels: ['smoke'] })).toThrow();
+    expect(() => TestPlanSchema.parse({ ...v2Plan, testTypes: ['exploratory'] })).toThrow();
+  });
+
+  it('rejects a plan missing suspensionCriteria or deliverables', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `suspensionCriteria`
+    const { suspensionCriteria: _s, ...withoutSuspension } = v2Plan;
+    expect(() => TestPlanSchema.parse(withoutSuspension)).toThrow();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `deliverables`
+    const { deliverables: _d, ...withoutDeliverables } = v2Plan;
+    expect(() => TestPlanSchema.parse(withoutDeliverables)).toThrow();
+  });
+});
+
+describe('DefectReportSchema', () => {
+  /** Minimal valid v2 finding — CWE category + evidence parity. */
+  const v2Finding = {
+    id: 'DEF-PARSE-CRASH',
+    severity: 'major',
+    category: 'input_validation',
+    confidence: 'high',
+    location: { symbol: 'parseUser', startLine: 1, endLine: 10 },
+    description: 'Unvalidated JSON.parse crashes on bad input.',
+    impact: 'Request handler panics.',
+    fixSuggestion: 'Wrap in try/catch and return 400.',
+  };
+
+  it('round-trips the full v2 field set', () => {
+    const parsed = DefectReportSchema.parse({
+      findings: [
+        {
+          ...v2Finding,
+          location: { ...v2Finding.location, fileHint: 'src/api.ts' },
+          evidenceSnippet: 'return JSON.parse(s);',
+        },
+      ],
+      summary: 'One high-confidence defect.',
+    });
+    expect(parsed.findings[0]?.category).toBe('input_validation');
+    expect(parsed.findings[0]?.location.fileHint).toBe('src/api.ts');
+    expect(parsed.findings[0]?.evidenceSnippet).toContain('JSON.parse');
+  });
+
+  it('rejects categories outside the CWE-aligned enum', () => {
+    expect(() =>
+      DefectReportSchema.parse({ findings: [{ ...v2Finding, category: 'null_safety' }] }),
+    ).toThrow();
+  });
+
+  it('rejects a finding missing fixSuggestion', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit `fixSuggestion`
+    const { fixSuggestion: _f, ...withoutFix } = v2Finding;
+    expect(() => DefectReportSchema.parse({ findings: [withoutFix] })).toThrow();
+  });
+
+  it('rejects v1-style string locations', () => {
+    expect(() =>
+      DefectReportSchema.parse({ findings: [{ ...v2Finding, location: 'api.ts:42' }] }),
+    ).toThrow();
+  });
+
+  it('rejects an inverted location line range (endLine < startLine)', () => {
+    expect(() =>
+      DefectReportSchema.parse({
+        findings: [{ ...v2Finding, location: { symbol: 'parseUser', startLine: 10, endLine: 5 } }],
+      }),
+    ).toThrow();
+  });
 });
 
 describe('ArtifactSchema', () => {
@@ -855,13 +978,16 @@ describe('ArtifactSchema', () => {
       structuredData: {
         summary: 'S',
         objectives: ['O'],
-        scopeIn: ['A'],
-        scopeOut: [],
+        scope: { inScope: ['A'], outOfScope: [] },
         strategy: 'T',
+        testLevels: ['unit'],
+        testTypes: ['functional'],
         environments: ['local'],
         risks: [],
         entryCriteria: [],
         exitCriteria: [],
+        suspensionCriteria: [],
+        deliverables: [],
       },
       status: 'draft',
       version: 1,
