@@ -602,6 +602,37 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn run_persists_error_run_when_runner_image_is_missing() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        let runner: Arc<dyn TestRunner> = Arc::new(ScriptedRunner::new(Scripted::Fail(
+            RunnerError::ImageMissing("runner image `tessera-runner-js` is not built".into()),
+        )));
+        let registry = RunRegistry::new();
+        let deps = SandboxDeps { pool: &pool, runner, registry: &registry };
+
+        let result = run(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            &deps,
+        )
+        .await
+        .expect("runner failure is persisted, not propagated");
+
+        assert_eq!(result.status, RunStatus::Error);
+        let message = result.error_message.expect("error message present");
+        assert!(message.contains("RUNNER_IMAGE_MISSING"), "got: {message}");
+        assert!(message.contains("not built"), "got: {message}");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_rejects_artifact_without_files() {
         let (pool, path) = open_pool().await;
         let now = Utc::now().to_rfc3339();

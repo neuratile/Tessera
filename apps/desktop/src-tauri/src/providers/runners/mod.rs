@@ -398,6 +398,13 @@ pub enum RunnerError {
     #[error("docker unavailable: {0}")]
     DockerUnavailable(String),
 
+    /// The pre-built runner image is absent from the local daemon. The image
+    /// is built locally, never pulled from a registry (local-first guarantee),
+    /// so without this preflight a missing image surfaces as a cryptic
+    /// registry-pull failure from `docker run`. Carries the build command.
+    #[error("runner image missing: {0}")]
+    ImageMissing(String),
+
     /// The supplied [`RunInput`] failed validation (empty / unsafe path /
     /// no test file).
     #[error("invalid run input: {0}")]
@@ -430,6 +437,7 @@ impl RunnerError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::DockerUnavailable(_) => "DOCKER_UNAVAILABLE",
+            Self::ImageMissing(_) => "RUNNER_IMAGE_MISSING",
             Self::InvalidInput(_) => "INVALID_INPUT",
             Self::Timeout(_) => "RUNNER_TIMEOUT",
             Self::Cancelled => "RUNNER_CANCELLED",
@@ -680,6 +688,10 @@ mod tests {
         assert_eq!(
             RunnerError::DockerUnavailable("x".into()).code(),
             "DOCKER_UNAVAILABLE"
+        );
+        assert_eq!(
+            RunnerError::ImageMissing("x".into()).code(),
+            "RUNNER_IMAGE_MISSING"
         );
     }
 

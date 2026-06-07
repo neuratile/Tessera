@@ -99,6 +99,7 @@ impl TestRunner for DockerJsRunner {
     ) -> Result<RunnerOutput, RunnerError> {
         input.validate()?;
         ensure_docker_available().await?;
+        ensure_runner_image().await?;
 
         // Workspace is removed when `guard` drops — covers the happy path,
         // every `?` early-return, and a panic (§10: always cleaned up).
@@ -169,6 +170,34 @@ async fn ensure_docker_available() -> Result<(), RunnerError> {
         return Err(RunnerError::DockerUnavailable(format!(
             "docker daemon unreachable: {}",
             stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Preflight: verify the locally-built runner image exists on the daemon.
+///
+/// The image is built locally and never published to a registry (local-first
+/// guarantee, see `docker/Dockerfile.runner-js`), so `docker run` against a
+/// missing image fails with a cryptic registry-pull error (`pull access
+/// denied`, exit 125) instead of anything actionable. Checked after
+/// [`ensure_docker_available`] so an inspect failure can only mean the image
+/// is absent — the returned error carries the exact build command.
+async fn ensure_runner_image() -> Result<(), RunnerError> {
+    let output = Command::new("docker")
+        .args(["image", "inspect", RUNNER_IMAGE])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| RunnerError::DockerUnavailable(format!("docker binary not found: {e}")))?;
+
+    if !output.status.success() {
+        return Err(RunnerError::ImageMissing(format!(
+            "runner image `{RUNNER_IMAGE}` is not built; build it from the repo root with: \
+             docker build -t {RUNNER_IMAGE} \
+             -f apps/desktop/src-tauri/docker/Dockerfile.runner-js \
+             apps/desktop/src-tauri/docker"
         )));
     }
     Ok(())

@@ -33,7 +33,12 @@ RUN npm install -g --no-fund --no-audit \
   && npm cache clean --force
 
 # Make the global modules resolvable from the per-run workspace (which has a
-# minimal package.json with no local deps).
+# minimal package.json with no local deps). NODE_PATH only covers CJS
+# `require` — ESM imports (`vitest.config.ts` importing `vitest/config`) and
+# vite's own resolution (loading `@vitest/coverage-istanbul`) ignore it and
+# instead walk `node_modules` up the directory tree from /work. A symlink at
+# the filesystem root terminates that walk at the global install.
+RUN ln -s /usr/local/lib/node_modules /node_modules
 ENV NODE_PATH=/usr/local/lib/node_modules
 
 # Defence in depth: never execute the suite as root. Combined with the
