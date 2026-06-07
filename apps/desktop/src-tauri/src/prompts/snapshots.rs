@@ -14,7 +14,7 @@
 
 use super::{
     bug_report_v1, bug_report_v2, context_md_v1, defect_report_v1, defect_report_v2,
-    test_cases_v1, test_cases_v2, test_plan_v1, test_plan_v2, PromptContext,
+    runnable_files_v1, test_cases_v1, test_cases_v2, test_plan_v1, test_plan_v2, PromptContext,
 };
 use crate::providers::llm::types::Content;
 use crate::services::chunking_service::{Chunk, ChunkKind};
@@ -202,6 +202,23 @@ fn snapshot_bug_report_v2_tool() {
     insta::assert_yaml_snapshot!(
         "bug_report_v2_tool",
         bug_report_v2::tool().parameters_schema
+    );
+}
+
+#[test]
+fn snapshot_runnable_files_v1_messages() {
+    let chunks = fixture_chunks();
+    let ctx = fixture_ctx(&chunks);
+    let cases_json = r#"[{"id":"TC-LOGIN-SUCCESS","title":"login succeeds with valid creds"}]"#;
+    let msgs = runnable_files_v1::build_messages(&ctx, cases_json);
+    insta::assert_yaml_snapshot!("runnable_files_v1_messages", dump_messages(&msgs));
+}
+
+#[test]
+fn snapshot_runnable_files_v1_tool() {
+    insta::assert_yaml_snapshot!(
+        "runnable_files_v1_tool",
+        runnable_files_v1::tool().parameters_schema
     );
 }
 

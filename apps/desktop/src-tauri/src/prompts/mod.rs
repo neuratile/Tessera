@@ -27,6 +27,9 @@
 //!   issue-tracker import.
 //! - [`bug_report_v2`] — v1 plus severity↔priority split (5-level
 //!   severity), `reproducibility`, `workaround`, `component`.
+//! - [`runnable_files_v1`] — focused repair pass that emits only the
+//!   runnable `files[]` workspace when a test-cases generation skipped
+//!   the optional array (sandbox prerequisite).
 //!
 //! Every prompt:
 //! - Returns `Vec<Message>` ready to feed into an `LlmProvider`.
@@ -46,6 +49,7 @@ pub mod bug_report_v2;
 pub mod context_md_v1;
 pub mod defect_report_v1;
 pub mod defect_report_v2;
+pub mod runnable_files_v1;
 pub mod test_cases_v1;
 pub mod test_cases_v2;
 pub mod test_plan_v1;
