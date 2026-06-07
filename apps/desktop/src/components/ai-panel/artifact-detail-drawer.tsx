@@ -2,17 +2,34 @@ import type {
   ArtifactDetail,
   ArtifactSummary,
   ArtifactVersionSummary,
+  ExportFormat,
 } from '@testing-ide/shared';
-import { CheckCircle2, Download, GitCompare, Loader2, RefreshCw, X, XCircle } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCopy,
+  Download,
+  GitCompare,
+  Loader2,
+  RefreshCw,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { MarkdownView } from '@/components/markdown/markdown-view';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { toArtifactSummary } from '@/lib/artifact';
 import { useDialogTitleId } from '@/lib/dialog-title';
+import { exportArtifactToFile } from '@/lib/export-artifact';
 import { exportMarkdownDocument } from '@/lib/export-markdown';
-import { artifacts as artifactsIpc, generation, getErrorMessage } from '@/lib/ipc';
+import {
+  artifacts as artifactsIpc,
+  exports as exportsIpc,
+  generation,
+  getErrorMessage,
+} from '@/lib/ipc';
 import { useAiStore } from '@/stores/ai-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -45,6 +62,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
   const [regenerating, setRegenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // Version chain — fetched lazily when the version picker or diff
   // toggle is used. Empty array means "not loaded yet"; once loaded
@@ -246,6 +264,63 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     })();
   }, [detail]);
 
+  /**
+   * Structured-data exports (xlsx / csv) and the clipboard TSV path
+   * share an error shape: a `null`-payload artifact is rejected
+   * Rust-side, so the message steers the user to the markdown export
+   * that always works.
+   */
+  const describeExportError = useCallback((err: unknown): string => {
+    const message = getErrorMessage(err);
+    return message.includes('no structured data')
+      ? `${message} — use "Markdown (.md)" instead.`
+      : message;
+  }, []);
+
+  const handleExportFile = useCallback(
+    (format: ExportFormat) => {
+      if (detail === null) {
+        return;
+      }
+
+      setExporting(true);
+      setError(null);
+      setExportStatus(null);
+
+      void (async () => {
+        try {
+          const outcome = await exportArtifactToFile(summary.id, detail.title, format);
+          if (outcome !== null) {
+            setExportStatus(`Exported: ${outcome.files.join(', ')}`);
+          }
+        } catch (err) {
+          setError(describeExportError(err));
+        } finally {
+          setExporting(false);
+        }
+      })();
+    },
+    [detail, summary.id, describeExportError],
+  );
+
+  const handleCopyTsv = useCallback(() => {
+    setExporting(true);
+    setError(null);
+    setExportStatus(null);
+
+    void (async () => {
+      try {
+        const tsv = await exportsIpc.getArtifactTsv(summary.id);
+        await navigator.clipboard.writeText(tsv);
+        setExportStatus('Copied TSV — paste straight into Google Sheets.');
+      } catch (err) {
+        setError(describeExportError(err));
+      } finally {
+        setExporting(false);
+      }
+    })();
+  }, [summary.id, describeExportError]);
+
   const isPending =
     detail?.status === 'draft' || detail?.status === 'in_review' || detail === null;
   const titleId = useDialogTitleId();
@@ -397,16 +472,71 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                 {detail?.status === 'approved' ? 'Approved' : 'Rejected'}
               </span>
             )}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleExportMarkdown}
-              disabled={detail === null || exporting}
-            >
-              {exporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-              Export markdown
-            </Button>
+            <div className="relative">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setExportMenuOpen((open) => !open)}
+                disabled={detail === null || exporting}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+              >
+                {exporting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Download className="size-3.5" />
+                )}
+                Export
+                <ChevronDown className="size-3" />
+              </Button>
+              {exportMenuOpen ? (
+                <>
+                  <button
+                    type="button"
+                    className="fixed inset-0 z-10 cursor-default"
+                    onClick={() => setExportMenuOpen(false)}
+                    aria-label="Close export menu"
+                    tabIndex={-1}
+                  />
+                  <div
+                    role="menu"
+                    aria-label="Export format"
+                    className="absolute bottom-full left-0 z-20 mb-1 w-48 rounded-md border border-border bg-card p-1 shadow-lg"
+                  >
+                    <ExportMenuItem
+                      label="Markdown (.md)"
+                      onSelect={() => {
+                        setExportMenuOpen(false);
+                        handleExportMarkdown();
+                      }}
+                    />
+                    <ExportMenuItem
+                      label="Excel (.xlsx)"
+                      onSelect={() => {
+                        setExportMenuOpen(false);
+                        handleExportFile('xlsx');
+                      }}
+                    />
+                    <ExportMenuItem
+                      label="CSV (.csv)"
+                      onSelect={() => {
+                        setExportMenuOpen(false);
+                        handleExportFile('csv');
+                      }}
+                    />
+                    <ExportMenuItem
+                      icon={<ClipboardCopy className="size-3" />}
+                      label="Copy as TSV"
+                      onSelect={() => {
+                        setExportMenuOpen(false);
+                        handleCopyTsv();
+                      }}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </div>
             <Button
               type="button"
               size="sm"
@@ -431,6 +561,29 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
           {exportStatus !== null ? <p className="text-muted-foreground text-[10px]">{exportStatus}</p> : null}
         </footer>
     </Dialog>
+  );
+}
+
+/** One row of the export dropdown menu. */
+function ExportMenuItem({
+  label,
+  onSelect,
+  icon,
+}: {
+  label: string;
+  onSelect: () => void;
+  icon?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onSelect}
+      className="text-foreground hover:bg-surface-2 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors"
+    >
+      {icon ?? <Download className="size-3" />}
+      {label}
+    </button>
   );
 }
 

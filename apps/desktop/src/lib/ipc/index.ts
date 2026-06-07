@@ -11,6 +11,7 @@
 export * as analysis from './analysis';
 export * as artifacts from './artifacts';
 export * as auth from './auth';
+export * as exports from './exports';
 export * as filesystem from './filesystem';
 export * as generation from './generation';
 export * as hardware from './hardware';

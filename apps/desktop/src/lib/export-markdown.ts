@@ -2,18 +2,11 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 
 import { getTestingIdeWriteTextFile, isTestingIdeE2eEnabled } from './e2e-bridge';
+import { buildExportFilename } from './export-artifact';
 import { IpcError, asMessage } from './ipc/error';
 
 export function buildMarkdownFilename(title: string): string {
-  const trimmed = title.trim();
-  const normalized = trimmed.length > 0 ? trimmed : 'artifact';
-  const slug = normalized
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .slice(0, 80);
-
-  return `${slug.length > 0 ? slug : 'artifact'}.md`;
+  return buildExportFilename(title, 'md');
 }
 
 export async function exportMarkdownDocument(
