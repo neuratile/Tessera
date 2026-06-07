@@ -77,8 +77,7 @@ pub async fn export_artifact(
     format: ExportFormat,
     dest_path: &Path,
 ) -> AppResult<Vec<PathBuf>> {
-    let artifact = artifact_repo::fetch(pool, artifact_id).await?;
-    let doc = build_export_doc(&artifact)?;
+    let doc = load_export_doc(pool, artifact_id).await?;
     let dest = validate_dest_path(dest_path, format)?;
 
     // File IO is blocking; keep it off the async executor.
@@ -95,9 +94,15 @@ pub async fn export_artifact(
 /// - [`AppError::InvalidInput`] when the artifact has no structured
 ///   data.
 pub async fn artifact_tsv(pool: &SqlitePool, artifact_id: &str) -> AppResult<String> {
-    let artifact = artifact_repo::fetch(pool, artifact_id).await?;
-    let doc = build_export_doc(&artifact)?;
+    let doc = load_export_doc(pool, artifact_id).await?;
     Ok(render_tsv(&doc))
+}
+
+/// Shared first half of every export flow: fetch the artifact row
+/// and map it into the IR.
+async fn load_export_doc(pool: &SqlitePool, artifact_id: &str) -> AppResult<ExportDoc> {
+    let artifact = artifact_repo::fetch(pool, artifact_id).await?;
+    build_export_doc(&artifact)
 }
 
 fn write_doc(doc: &ExportDoc, format: ExportFormat, dest: &Path) -> AppResult<Vec<PathBuf>> {

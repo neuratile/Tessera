@@ -241,85 +241,69 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     })();
   }, [canRegenerate, project, activeProvider, summary, feedback, upsertArtifact]);
 
-  const handleExportMarkdown = useCallback(() => {
-    if (detail === null) {
-      return;
-    }
-
+  /**
+   * Shared mechanics for every export action: busy flag, status /
+   * error reset, and error mapping. Each handler supplies only the
+   * task; a `null` result means "user cancelled, say nothing".
+   *
+   * A `null`-payload artifact is rejected Rust-side with a
+   * "no structured data" message, so the error text steers the user
+   * to the markdown export that always works.
+   */
+  const runExport = useCallback((task: () => Promise<string | null>) => {
     setExporting(true);
     setError(null);
     setExportStatus(null);
 
     void (async () => {
       try {
-        const exportedPath = await exportMarkdownDocument(detail.title, detail.contentMd);
-        if (exportedPath !== null) {
-          setExportStatus('Exported markdown.');
+        const status = await task();
+        if (status !== null) {
+          setExportStatus(status);
         }
       } catch (err) {
-        setError(getErrorMessage(err));
+        const message = getErrorMessage(err);
+        setError(
+          message.includes('no structured data')
+            ? `${message} — use "Markdown (.md)" instead.`
+            : message,
+        );
       } finally {
         setExporting(false);
       }
     })();
-  }, [detail]);
-
-  /**
-   * Structured-data exports (xlsx / csv) and the clipboard TSV path
-   * share an error shape: a `null`-payload artifact is rejected
-   * Rust-side, so the message steers the user to the markdown export
-   * that always works.
-   */
-  const describeExportError = useCallback((err: unknown): string => {
-    const message = getErrorMessage(err);
-    return message.includes('no structured data')
-      ? `${message} — use "Markdown (.md)" instead.`
-      : message;
   }, []);
+
+  const handleExportMarkdown = useCallback(() => {
+    if (detail === null) {
+      return;
+    }
+    runExport(async () => {
+      const exportedPath = await exportMarkdownDocument(detail.title, detail.contentMd);
+      return exportedPath !== null ? 'Exported markdown.' : null;
+    });
+  }, [detail, runExport]);
 
   const handleExportFile = useCallback(
     (format: ExportFormat) => {
       if (detail === null) {
         return;
       }
-
-      setExporting(true);
-      setError(null);
-      setExportStatus(null);
-
-      void (async () => {
-        try {
-          const outcome = await exportArtifactToFile(summary.id, detail.title, format);
-          if (outcome !== null) {
-            setExportStatus(`Exported: ${outcome.files.join(', ')}`);
-          }
-        } catch (err) {
-          setError(describeExportError(err));
-        } finally {
-          setExporting(false);
-        }
-      })();
+      runExport(async () => {
+        const outcome = await exportArtifactToFile(summary.id, detail.title, format);
+        return outcome !== null ? `Exported: ${outcome.files.join(', ')}` : null;
+      });
     },
-    [detail, summary.id, describeExportError],
+    [detail, summary.id, runExport],
   );
 
   const handleCopyTsv = useCallback(() => {
-    setExporting(true);
-    setError(null);
-    setExportStatus(null);
-
-    void (async () => {
-      try {
-        const tsv = await exportsIpc.getArtifactTsv(summary.id);
-        await navigator.clipboard.writeText(tsv);
-        setExportStatus('Copied TSV — paste straight into Google Sheets.');
-      } catch (err) {
-        setError(describeExportError(err));
-      } finally {
-        setExporting(false);
-      }
-    })();
-  }, [summary.id, describeExportError]);
+    runExport(async () => {
+      const tsv = await exportsIpc.getArtifactTsv(summary.id);
+      await navigator.clipboard.writeText(tsv);
+      return 'Copied TSV — paste straight into Google Sheets.';
+    });
+  }, [summary.id, runExport]);
 
   const isPending =
     detail?.status === 'draft' || detail?.status === 'in_review' || detail === null;
