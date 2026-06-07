@@ -38,6 +38,12 @@ type Props = {
  * via `artifact_repo::insert`'s `parent_id` handling.
  */
 export function ArtifactDetailDrawer({ summary, onClose }: Props) {
+  // The artifact the drawer is currently showing. Starts as the opened
+  // summary but advances to the freshly generated version after a
+  // regenerate — header, version chain, lifecycle actions, and the
+  // sandbox panel must all follow the new artifact id, not the
+  // originally opened one.
+  const [current, setCurrent] = useState<ArtifactSummary>(summary);
   const [detail, setDetail] = useState<ArtifactDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,13 +71,20 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
   const activeProvider = useAiStore((s) => s.activeProvider);
   const upsertArtifact = useAiStore((s) => s.upsertArtifact);
 
+  // Re-sync when the drawer is pointed at a different artifact from
+  // the queue (the parent re-mounts per `summary`, but keep this safe
+  // against prop changes without a remount).
+  useEffect(() => {
+    setCurrent(summary);
+  }, [summary]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     void (async () => {
       try {
-        const d = await artifactsIpc.getArtifact(summary.id);
+        const d = await artifactsIpc.getArtifact(current.id);
         if (!cancelled) setDetail(d);
       } catch (err) {
         if (!cancelled) setError(getErrorMessage(err));
@@ -82,7 +95,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [summary.id]);
+  }, [current.id]);
 
   // Fetch the full version chain when the drawer mounts so the
   // "Diff" toggle in the header can flip to diff mode in a single
@@ -94,7 +107,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     setChainLoading(true);
     void (async () => {
       try {
-        const list = await artifactsIpc.listArtifactVersions(summary.id);
+        const list = await artifactsIpc.listArtifactVersions(current.id);
         if (cancelled) return;
         setChain(list);
         // Default comparison target = direct parent. Fall back to
@@ -102,9 +115,9 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         // has no parent_id but the chain has earlier entries (the
         // user may have opened a child whose root is older).
         const fallback =
-          summary.parentId ??
+          current.parentId ??
           (() => {
-            const idx = list.findIndex((v) => v.id === summary.id);
+            const idx = list.findIndex((v) => v.id === current.id);
             return idx > 0 ? (list[idx - 1]?.id ?? null) : null;
           })();
         setCompareId(fallback);
@@ -118,7 +131,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [summary.id, summary.parentId]);
+  }, [current.id, current.parentId]);
 
   // Lazy-load the comparison body once the user actually flips to
   // diff mode AND a base is selected. Caches per-id so flipping
@@ -149,7 +162,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     return chain.find((v) => v.id === compareId) ?? null;
   }, [chain, compareId]);
 
-  const canDiff = chain.length > 1 && compareId !== null && compareId !== summary.id;
+  const canDiff = chain.length > 1 && compareId !== null && compareId !== current.id;
 
   // v2 structured payloads render as step tables / triage fields; v1
   // payloads (or anything the Zod mirror rejects) fall back to the
@@ -165,26 +178,28 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
   const handleApprove = useCallback(() => {
     void (async () => {
       try {
-        await artifactsIpc.approveArtifact(summary.id);
-        upsertArtifact({ ...summary, status: 'approved' });
+        await artifactsIpc.approveArtifact(current.id);
+        upsertArtifact({ ...current, status: 'approved' });
+        setCurrent({ ...current, status: 'approved' });
         if (detail !== null) setDetail({ ...detail, status: 'approved' });
       } catch (err) {
         setError(getErrorMessage(err));
       }
     })();
-  }, [summary, detail, upsertArtifact]);
+  }, [current, detail, upsertArtifact]);
 
   const handleReject = useCallback(() => {
     void (async () => {
       try {
-        await artifactsIpc.rejectArtifact(summary.id);
-        upsertArtifact({ ...summary, status: 'rejected' });
+        await artifactsIpc.rejectArtifact(current.id);
+        upsertArtifact({ ...current, status: 'rejected' });
+        setCurrent({ ...current, status: 'rejected' });
         if (detail !== null) setDetail({ ...detail, status: 'rejected' });
       } catch (err) {
         setError(getErrorMessage(err));
       }
     })();
-  }, [summary, detail, upsertArtifact]);
+  }, [current, detail, upsertArtifact]);
 
   const canRegenerate =
     project !== null &&
@@ -203,16 +218,20 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         const result = await generation.generateArtifact({
           projectId: project.id,
           projectName: project.name,
-          artifactType: summary.artifactType,
+          artifactType: current.artifactType,
           model,
           provider: activeProvider.provider,
-          parentId: summary.id,
+          parentId: current.id,
           reviewerFeedback: feedback,
         });
         const fresh = await artifactsIpc.getArtifact(result.artifactId);
-        upsertArtifact(toArtifactSummary(fresh));
-        // Replace the drawer's view with the fresh version so the user
-        // sees the regenerated output immediately.
+        const freshSummary = toArtifactSummary(fresh);
+        upsertArtifact(freshSummary);
+        // Advance the drawer to the fresh version: header (vN, status),
+        // version chain, approve/reject, and the sandbox panel all
+        // re-bind to the new artifact id. `setDetail` shows the body
+        // immediately; the `current.id` effects refresh the chain.
+        setCurrent(freshSummary);
         setDetail(fresh);
         setFeedback('');
       } catch (err) {
@@ -221,7 +240,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         setRegenerating(false);
       }
     })();
-  }, [canRegenerate, project, activeProvider, summary, feedback, upsertArtifact]);
+  }, [canRegenerate, project, activeProvider, current, feedback, upsertArtifact]);
 
   const handleExportMarkdown = useCallback(() => {
     if (detail === null) {
@@ -256,10 +275,10 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.12em]">
-                {summary.artifactType} · v{summary.version}
+                {current.artifactType} · v{current.version}
               </p>
-              <span className={`pill pill-${summary.status.replace('_', '-')}`}>
-                {summary.status.replace('_', ' ')}
+              <span className={`pill pill-${current.status.replace('_', '-')}`}>
+                {current.status.replace('_', ' ')}
               </span>
               {chain.length > 1 ? (
                 <select
@@ -274,7 +293,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                 >
                   <option value="">no compare</option>
                   {chain
-                    .filter((v) => v.id !== summary.id)
+                    .filter((v) => v.id !== current.id)
                     .map((v) => (
                       <option key={v.id} value={v.id}>
                         compare vs v{v.version}
@@ -286,12 +305,12 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
             <h2
               id={titleId}
               className="mt-1 truncate font-mono text-sm font-semibold text-foreground"
-              title={summary.title}
+              title={current.title}
             >
-              {summary.title}
+              {current.title}
             </h2>
             <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">
-              {summary.provider} · {summary.model}
+              {current.provider} · {current.model}
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -330,7 +349,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
               compareLoading={compareLoading}
               currentDetail={detail}
               compareDetail={compareDetail}
-              currentVersion={summary.version}
+              currentVersion={current.version}
               baseVersion={baseVersion?.version ?? null}
             />
           ) : detail !== null ? (
@@ -341,9 +360,16 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
             )
           ) : null}
 
-          {viewMode === 'content' && summary.artifactType === 'test-cases' ? (
+          {viewMode === 'content' && current.artifactType === 'test-cases' ? (
             <div className="mt-4">
-              <SandboxRunPanel artifactId={summary.id} />
+              <SandboxRunPanel
+                artifactId={current.id}
+                hasFiles={
+                  structured?.kind === 'test-cases'
+                    ? (structured.data.files?.length ?? 0) > 0
+                    : undefined
+                }
+              />
             </div>
           ) : null}
         </div>
