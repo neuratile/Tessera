@@ -249,6 +249,14 @@ jobs:
           OLLAMA_MAX_LOADED_MODELS: "2"
           OLLAMA_KEEP_ALIVE: "30m"
           OLLAMA_NUM_PARALLEL: "1"
+          # Ollama defaults to a 4096-token context. The v2 test-cases
+          # prompt plus the 6k response reserve overflows that, forcing
+          # a server-side context shift that discards the prompt — the
+          # model then rambles to max_tokens and trips the 600s client
+          # timeout (StreamInterrupted). 16k fits prompt + response with
+          # headroom; KV cache for a 3B model at 16k is well within the
+          # 7 GB runner.
+          OLLAMA_CONTEXT_LENGTH: "16384"
     steps:
       - uses: actions/checkout@v6
 
@@ -312,9 +320,11 @@ jobs:
 
       - name: Warm up Ollama models
         # First chat / embedding request after `ollama pull` triggers a
-        # cold load that can take 60s+ on the free runner. Warming up
-        # here means the Vitest suite hits an already-loaded model and
-        # does not race the 300s HTTP timeout in the Rust client.
+        # cold load that can take 60s+ on the free runner — and with
+        # OLLAMA_CONTEXT_LENGTH=16384 the load also pre-allocates the
+        # full 16k KV cache. Warming up here means the Vitest suite hits
+        # an already-loaded model and does not race the 600s HTTP
+        # timeout in the Rust client.
         run: |
           curl --fail --silent --max-time 300 http://127.0.0.1:11434/api/generate \
             -d '{"model":"qwen2.5-coder:3b","prompt":"hi","stream":false,"keep_alive":"30m"}' >/dev/null

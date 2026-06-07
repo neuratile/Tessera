@@ -72,6 +72,19 @@ function Pill({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Verbatim code-evidence block shared by bug and defect cards. */
+function EvidenceBlock({ snippet }: { snippet: string | undefined }) {
+  if (snippet === undefined || snippet.length === 0) return null;
+  return (
+    <div>
+      <p className={FIELD_LABEL_CLASS}>Evidence</p>
+      <pre className="bg-surface-2 mt-1 overflow-x-auto rounded border border-border p-2 font-mono text-[11px]">
+        {snippet}
+      </pre>
+    </div>
+  );
+}
+
 function StringList({ label, items }: { label: string; items: readonly string[] | undefined }) {
   if (items === undefined || items.length === 0) return null;
   return (
@@ -186,14 +199,7 @@ function BugReportView({ data }: { data: BugReport }) {
             </p>
             <p className="mt-1 text-xs">{bug.rootCause.explanation}</p>
           </div>
-          {bug.evidenceSnippet !== undefined && bug.evidenceSnippet.length > 0 ? (
-            <div>
-              <p className={FIELD_LABEL_CLASS}>Evidence</p>
-              <pre className="bg-surface-2 mt-1 overflow-x-auto rounded border border-border p-2 font-mono text-[11px]">
-                {bug.evidenceSnippet}
-              </pre>
-            </div>
-          ) : null}
+          <EvidenceBlock snippet={bug.evidenceSnippet} />
         </article>
       ))}
     </div>
@@ -281,14 +287,7 @@ function DefectReportView({ data }: { data: DefectReport }) {
             <p className={FIELD_LABEL_CLASS}>Suggested fix</p>
             <p className="mt-1 text-xs">{finding.fixSuggestion}</p>
           </div>
-          {finding.evidenceSnippet !== undefined && finding.evidenceSnippet.length > 0 ? (
-            <div>
-              <p className={FIELD_LABEL_CLASS}>Evidence</p>
-              <pre className="bg-surface-2 mt-1 overflow-x-auto rounded border border-border p-2 font-mono text-[11px]">
-                {finding.evidenceSnippet}
-              </pre>
-            </div>
-          ) : null}
+          <EvidenceBlock snippet={finding.evidenceSnippet} />
         </article>
       ))}
     </div>

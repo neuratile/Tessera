@@ -8,11 +8,12 @@
 //! one boundary case per covered feature. The runnable `files[]` payload
 //! is byte-identical to v1 — the sandbox runner contract is unchanged.
 
-use std::fmt::Write as _;
-
 use crate::providers::llm::types::{Message, ToolSchema};
 
-use super::{runnable_files_schema, system_text, tool_schema, user_text, PromptContext};
+use super::{
+    render_user_body, runnable_files_schema, system_text, tool_schema, user_text, PromptContext,
+    UserBodyOptions,
+};
 
 pub const VERSION: &str = "test_cases_v2";
 
@@ -72,27 +73,15 @@ The structured payload MUST have the following JSON structure:
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
-    let mut user_body = String::new();
-    writeln!(user_body, "# Project: {}\n", ctx.project_name).expect("write");
-
-    if !ctx.scope_hint.is_empty() {
-        writeln!(user_body, "Scope: {}\n", ctx.scope_hint).expect("write");
-    }
-
-    if !ctx.project_summary.is_empty() {
-        user_body.push_str("## Project context\n\n");
-        user_body.push_str(ctx.project_summary);
-        user_body.push_str("\n\n");
-    }
-
-    if !ctx.reviewer_feedback.is_empty() {
-        user_body.push_str("## Reviewer feedback\n\n");
-        user_body.push_str(ctx.reviewer_feedback);
-        user_body.push_str("\n\n");
-    }
-
-    user_body.push_str("## Code to cover\n\n");
-    user_body.push_str(&ctx.render_chunks());
+    let mut user_body = render_user_body(
+        ctx,
+        &UserBodyOptions {
+            context_heading: "Project context",
+            empty_context_note: None,
+            feedback_heading: "Reviewer feedback",
+            code_heading: "Code to cover",
+        },
+    );
     user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_test_cases` tool with the structured cases.\n\
     The JSON payload MUST use ONLY these top-level keys: `cases` (required) and `files` (optional — the runnable workspace):\n\
     {\n\

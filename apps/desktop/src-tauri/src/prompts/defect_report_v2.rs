@@ -7,11 +7,11 @@
 //! Field names are camelCase to match the shared Zod mirror
 //! (`packages/shared/src/schemas/defect-report.schema.ts`).
 
-use std::fmt::Write as _;
-
 use crate::providers::llm::types::{Message, ToolSchema};
 
-use super::{system_text, tool_schema, user_text, PromptContext};
+use super::{
+    render_user_body, system_text, tool_schema, user_text, PromptContext, UserBodyOptions,
+};
 
 pub const VERSION: &str = "defect_report_v2";
 
@@ -63,27 +63,15 @@ The structured payload MUST have the following JSON structure:
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
-    let mut user_body = String::new();
-    writeln!(user_body, "# Project: {}\n", ctx.project_name).expect("write");
-
-    if !ctx.scope_hint.is_empty() {
-        writeln!(user_body, "Scope: {}\n", ctx.scope_hint).expect("write");
-    }
-
-    if !ctx.project_summary.is_empty() {
-        user_body.push_str("## Project context\n\n");
-        user_body.push_str(ctx.project_summary);
-        user_body.push_str("\n\n");
-    }
-
-    if !ctx.reviewer_feedback.is_empty() {
-        user_body.push_str("## Reviewer feedback\n\n");
-        user_body.push_str(ctx.reviewer_feedback);
-        user_body.push_str("\n\n");
-    }
-
-    user_body.push_str("## Code under review\n\n");
-    user_body.push_str(&ctx.render_chunks());
+    let mut user_body = render_user_body(
+        ctx,
+        &UserBodyOptions {
+            context_heading: "Project context",
+            empty_context_note: None,
+            feedback_heading: "Reviewer feedback",
+            code_heading: "Code under review",
+        },
+    );
     user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_defect_report` tool with the structured findings.\n\
     The JSON payload MUST have exactly these keys (and no others):\n\
     {\n\

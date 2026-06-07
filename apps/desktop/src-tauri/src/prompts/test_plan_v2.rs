@@ -7,11 +7,11 @@
 //! artifact-review UI; downstream prompts (`test_cases_v2`) generate the
 //! individual cases that satisfy this plan.
 
-use std::fmt::Write as _;
-
 use crate::providers::llm::types::{Message, ToolSchema};
 
-use super::{system_text, tool_schema, user_text, PromptContext};
+use super::{
+    render_user_body, system_text, tool_schema, user_text, PromptContext, UserBodyOptions,
+};
 
 pub const VERSION: &str = "test_plan_v2";
 
@@ -65,29 +65,15 @@ The structured payload MUST have the following JSON structure:
 
 #[must_use]
 pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
-    let mut user_body = String::new();
-    writeln!(user_body, "# Project: {}\n", ctx.project_name).expect("write");
-
-    if !ctx.scope_hint.is_empty() {
-        writeln!(user_body, "Scope: {}\n", ctx.scope_hint).expect("write");
-    }
-
-    user_body.push_str("## Project context (auto-generated)\n\n");
-    if ctx.project_summary.is_empty() {
-        user_body.push_str("(none — proceed from chunks alone)\n\n");
-    } else {
-        user_body.push_str(ctx.project_summary);
-        user_body.push_str("\n\n");
-    }
-
-    if !ctx.reviewer_feedback.is_empty() {
-        user_body.push_str("## Previous reviewer feedback\n\n");
-        user_body.push_str(ctx.reviewer_feedback);
-        user_body.push_str("\n\n");
-    }
-
-    user_body.push_str("## Relevant code\n\n");
-    user_body.push_str(&ctx.render_chunks());
+    let mut user_body = render_user_body(
+        ctx,
+        &UserBodyOptions {
+            context_heading: "Project context (auto-generated)",
+            empty_context_note: Some("(none — proceed from chunks alone)"),
+            feedback_heading: "Previous reviewer feedback",
+            code_heading: "Relevant code",
+        },
+    );
     user_body.push_str("\n\n[CRITICAL INSTRUCTION] You MUST now invoke the `emit_test_plan` tool with the structured plan.\n\
     The JSON payload MUST have exactly these keys (and no others):\n\
     {\n\
