@@ -44,7 +44,11 @@ test.describe('desktop app flow', () => {
     ).toBeVisible();
 
     await drawer.getByRole('button', { name: 'Approve' }).click();
-    await expect(drawer.getByText('Approved')).toBeVisible();
+    // Both the header status pill ("approved") and the footer lifecycle
+    // pill ("Approved") flip after approval now that the header tracks
+    // the live artifact summary — a bare substring match resolves to two
+    // elements under strict mode, so assert the exact footer text.
+    await expect(drawer.getByText('Approved', { exact: true })).toBeVisible();
 
     await drawer.getByRole('button', { name: 'Export markdown' }).click();
     await expect

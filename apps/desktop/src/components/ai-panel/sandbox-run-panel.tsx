@@ -10,6 +10,14 @@ import { useUiStore } from '@/stores/ui-store';
 type Props = {
   /** The test-cases artifact id (a UUID). */
   artifactId: string;
+  /**
+   * Whether the artifact's `structured_data` carries a non-empty
+   * runnable `files[]` workspace. `false` disables Run with guidance
+   * (the backend would reject the run anyway); `undefined` (unknown —
+   * e.g. a v1 payload the Zod mirror rejects) keeps Run enabled and
+   * lets the backend decide.
+   */
+  hasFiles?: boolean | undefined;
 };
 
 /**
@@ -21,8 +29,9 @@ type Props = {
  * (blocking) run IPC returns. A Docker-unavailable / failed run is not an
  * exception; it returns a `RunResult` with `status: 'error'`.
  */
-export function SandboxRunPanel({ artifactId }: Props) {
+export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
   const optIn = useUiStore((s) => s.sandboxOptIn);
+  const runnable = hasFiles !== false;
   const runState = useSandboxStore((s) => s.byArtifact[artifactId] ?? IDLE_RUN);
   const start = useSandboxStore((s) => s.start);
   const finish = useSandboxStore((s) => s.finish);
@@ -50,7 +59,7 @@ export function SandboxRunPanel({ artifactId }: Props) {
   );
 
   const handleRun = useCallback(() => {
-    if (!optIn) return;
+    if (!optIn || !runnable) return;
     const clientRunId = crypto.randomUUID();
     start(artifactId, clientRunId);
     void (async () => {
@@ -65,7 +74,7 @@ export function SandboxRunPanel({ artifactId }: Props) {
         fail(artifactId, getErrorMessage(err));
       }
     })();
-  }, [optIn, artifactId, start, finish, fail]);
+  }, [optIn, runnable, artifactId, start, finish, fail]);
 
   const handleStop = useCallback(() => {
     if (runState.clientRunId === null) return;
@@ -90,9 +99,15 @@ export function SandboxRunPanel({ artifactId }: Props) {
             size="sm"
             variant="secondary"
             onClick={handleRun}
-            disabled={!optIn}
+            disabled={!optIn || !runnable}
             className="ml-auto"
-            title={optIn ? 'Run tests in the local Docker sandbox' : 'Enable local test execution in Settings'}
+            title={
+              !optIn
+                ? 'Enable local test execution in Settings'
+                : !runnable
+                  ? 'This artifact has no runnable files — regenerate the test cases'
+                  : 'Run tests in the local Docker sandbox'
+            }
           >
             <Play className="size-3.5" /> Run
           </Button>
@@ -102,6 +117,13 @@ export function SandboxRunPanel({ artifactId }: Props) {
       {!optIn ? (
         <p className="text-muted-foreground text-[10px]">
           Local test execution is off. Enable it in Settings to run these tests in a Docker sandbox.
+        </p>
+      ) : null}
+
+      {optIn && !runnable ? (
+        <p className="text-muted-foreground text-[10px]">
+          This artifact carries no runnable <code className="font-mono">files[]</code> workspace,
+          so there is nothing to execute. Regenerate the test cases to produce one.
         </p>
       ) : null}
 

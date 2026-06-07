@@ -1,0 +1,31 @@
+---
+source: src/prompts/snapshots.rs
+expression: "runnable_files_v1::tool().parameters_schema"
+---
+additionalProperties: false
+properties:
+  files:
+    description: "Runnable workspace mirroring the supplied cases: minimal source-under-test plus generated vitest specs. Required — at least one source file and one spec."
+    items:
+      additionalProperties: false
+      properties:
+        contents:
+          description: Full file contents.
+          type: string
+        isTest:
+          description: true for a generated vitest spec; false for source-under-test.
+          type: boolean
+        path:
+          description: "Workspace-relative path, e.g. `src/add.ts` or `add.test.ts`. No absolute paths, no `..`."
+          minLength: 1
+          type: string
+      required:
+        - path
+        - contents
+        - isTest
+      type: object
+    minItems: 1
+    type: array
+required:
+  - files
+type: object

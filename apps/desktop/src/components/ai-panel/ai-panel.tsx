@@ -177,7 +177,7 @@ export function AiPanel() {
   const lastGeneratedTypeRef = useRef<GenerationArtifactType | null>(null);
 
   const handleGenerate = useCallback(
-    (artifactType: GenerationArtifactType) => {
+    (artifactType: GenerationArtifactType, parentId?: string) => {
       if (project === null || activeProvider === null) return;
       const model = activeProvider.defaultModel;
       if (typeof model !== 'string' || model.length === 0) return;
@@ -191,6 +191,7 @@ export function AiPanel() {
             artifactType,
             model,
             provider: activeProvider.provider,
+            ...(parentId !== undefined ? { parentId } : {}),
           });
           // Pull the freshly-saved row so we have the canonical metadata
           // (status, version, parent chain) rather than reconstructing
@@ -240,15 +241,19 @@ export function AiPanel() {
   // no-ops on the very first session before any generator has been
   // clicked — the menu item still shows, but `Cmd/Ctrl+G` is a
   // no-op rather than an error, which feels right when there is
-  // nothing to regenerate.
+  // nothing to regenerate. Chains the new artifact onto the newest
+  // existing artifact of that type (queue is newest-first) so a menu /
+  // shortcut regenerate bumps the version instead of creating an
+  // orphan v1.
   useCommand(
     COMMAND.AiRegenerate,
     useCallback(() => {
       const last = lastGeneratedTypeRef.current;
       if (last === null) return;
       if (!canGenerate) return;
-      handleGenerate(last);
-    }, [canGenerate, handleGenerate]),
+      const parent = reviewQueue.find((a) => a.artifactType === last);
+      handleGenerate(last, parent?.id);
+    }, [canGenerate, handleGenerate, reviewQueue]),
   );
 
   const handleApprove = useCallback(
@@ -279,7 +284,6 @@ export function AiPanel() {
     [setArtifactsError, upsertArtifact],
   );
 
-  console.log("DEBUG: AiPanel rendering, project is:", project);
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-3 h-8 flex items-center justify-between bg-card">
