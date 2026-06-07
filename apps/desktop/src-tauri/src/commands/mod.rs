@@ -13,12 +13,13 @@
 //! at the function level rather than tightening the lint globally — the
 //! constraint is real and Tauri-imposed.
 //!
-//! Sub-modules: `auth`, `analysis`, `generation`, `hardware`, `health`,
-//! `ollama`, `projects`, `providers`.
+//! Sub-modules: `auth`, `analysis`, `embeddings`, `generation`,
+//! `hardware`, `health`, `ollama`, `projects`, `providers`.
 
 pub mod analysis;
 pub mod artifacts;
 pub mod auth;
+pub mod embeddings;
 pub mod exports;
 pub mod generation;
 pub mod hardware;

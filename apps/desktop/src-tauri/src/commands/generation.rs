@@ -3,18 +3,16 @@
 //! Per `rules.md` §4.2.1: accepts IPC arguments, builds provider
 //! instances, delegates to the generation service.
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::providers::embeddings::OllamaEmbeddingProvider;
 use crate::providers::factory;
 use crate::repositories::artifact_repo::ArtifactType;
 use crate::repositories::provider_config_repo;
+use crate::services::embedding_config_service;
 use crate::services::generation_service::{
     self, GenerationDeps, GenerationRequest, StreamEvent, StreamSink,
 };
@@ -101,9 +99,10 @@ pub async fn generate_artifact(
 
     let llm = factory::build_llm_provider(&provider_config).map_err(|e| e.to_string())?;
 
-    let embeddings: Arc<dyn crate::providers::embeddings::EmbeddingProvider> = Arc::new(
-        OllamaEmbeddingProvider::new(config.ollama_base_url.clone()).map_err(|e| e.to_string())?,
-    );
+    let embeddings =
+        embedding_config_service::resolve_provider(&pool, &crypto, &config.ollama_base_url)
+            .await
+            .map_err(|e| e.to_string())?;
 
     let request = GenerationRequest {
         project_id: args.project_id,

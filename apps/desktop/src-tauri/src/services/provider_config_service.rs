@@ -116,21 +116,15 @@ pub fn build_provider_config(
 ) -> AppResult<ProviderConfig> {
     let kind = ProviderKind::from_str_value(&row.provider)?;
 
-    let api_key =
-        match (&row.api_key_encrypted, &row.api_key_nonce) {
-            (Some(ct), Some(nonce)) => {
-                let plaintext = crypto.decrypt(ct, nonce)?;
-                Some(String::from_utf8(plaintext).map_err(|_| {
-                    AppError::Internal(anyhow::anyhow!("decrypted key is not UTF-8"))
-                })?)
-            }
-            (None, None) => None,
-            _ => {
-                return Err(AppError::Internal(anyhow::anyhow!(
-                    "provider config key material is incomplete"
-                )))
-            }
-        };
+    let api_key = match (&row.api_key_encrypted, &row.api_key_nonce) {
+        (Some(ct), Some(nonce)) => Some(crypto.decrypt_string(ct, nonce)?),
+        (None, None) => None,
+        _ => {
+            return Err(AppError::Internal(anyhow::anyhow!(
+                "provider config key material is incomplete"
+            )))
+        }
+    };
 
     Ok(ProviderConfig {
         kind,

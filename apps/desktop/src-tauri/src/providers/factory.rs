@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::embeddings::{EmbeddingProvider, OllamaEmbeddingProvider};
+use super::embeddings::{
+    EmbeddingProvider, HuggingFaceEmbeddingProvider, OllamaEmbeddingProvider,
+    OpenAiCompatEmbeddingProvider,
+};
 use super::llm::anthropic::AnthropicProvider;
 use super::llm::error::LlmError;
 use super::llm::gemini::GeminiProvider;
@@ -182,24 +185,134 @@ pub fn build_llm_provider(config: &ProviderConfig) -> Result<Arc<dyn LlmProvider
     }
 }
 
-/// Build an `EmbeddingProvider`. Phase 2 only ships Ollama; cloud
-/// embedding providers (`OpenAI`, Voyage AI) follow at the same shape.
+/// Discriminator for the embedding provider selected in the Settings
+/// UI. Stored on `user_embedding_configs.provider`. Deliberately
+/// separate from [`ProviderKind`]: the LLM catalog (Anthropic,
+/// `OpenRouter`) and the embedding catalog (Hugging Face) diverge, and
+/// fusing them would force permanent `Unsupported` arms in both
+/// directions (`plan/EMBEDDING_PROVIDER_SELECT.md` §5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EmbeddingProviderKind {
+    #[serde(rename = "ollama")]
+    Ollama,
+    #[serde(rename = "ollama-cloud")]
+    OllamaCloud,
+    #[serde(rename = "openai")]
+    OpenAi,
+    #[serde(rename = "gemini")]
+    Gemini,
+    #[serde(rename = "huggingface")]
+    HuggingFace,
+}
+
+impl EmbeddingProviderKind {
+    /// Stable string used in DB rows and IPC payloads. Mirrors the
+    /// serde representation so the round-trip is lossless.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::OllamaCloud => "ollama-cloud",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+            Self::HuggingFace => "huggingface",
+        }
+    }
+
+    /// Parse the stable wire/database string used across IPC and `SQLite`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::InvalidInput` when `value` does not match one
+    /// of the supported embedding provider identifiers.
+    pub fn from_str_value(value: &str) -> AppResult<Self> {
+        match value.trim() {
+            "ollama" => Ok(Self::Ollama),
+            "ollama-cloud" => Ok(Self::OllamaCloud),
+            "openai" => Ok(Self::OpenAi),
+            "gemini" => Ok(Self::Gemini),
+            "huggingface" => Ok(Self::HuggingFace),
+            _ => Err(AppError::InvalidInput(format!(
+                "unknown embedding provider kind `{value}`"
+            ))),
+        }
+    }
+
+    /// Whether this provider needs an API key. Local Ollama is the
+    /// only `false`.
+    #[must_use]
+    pub fn requires_api_key(self) -> bool {
+        !matches!(self, Self::Ollama)
+    }
+
+    /// The runtime `EmbeddingProvider::name()` the built provider will
+    /// report — Ollama Cloud reuses the local Ollama impl, so both map
+    /// to `"ollama"`. Single definition of the kind → runtime-name
+    /// mapping; `embedding_config_service` composes chunk-scope strings
+    /// from it without building a provider (no key needed). Kept honest
+    /// by the `runtime_name_matches_built_provider` test below.
+    #[must_use]
+    pub fn runtime_provider_name(self) -> &'static str {
+        match self {
+            Self::Ollama | Self::OllamaCloud => "ollama",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+            Self::HuggingFace => "huggingface",
+        }
+    }
+}
+
+/// Resolved embedding configuration handed to the factory by
+/// `embedding_config_service`. `api_key` is decrypted just before
+/// construction and never persisted in plaintext (`rules.md` §9).
+#[derive(Clone)]
+pub struct EmbeddingConfig {
+    pub kind: EmbeddingProviderKind,
+    pub model: String,
+    /// `0` builds the provider in probe mode (dimension discovery for
+    /// the Settings connection test) — see `EmbeddingProvider::dimension`.
+    pub dimension: usize,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
+impl std::fmt::Debug for EmbeddingConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Manual impl so a decrypted API key can never leak through
+        // `{:?}` logging (rules.md §5.4).
+        f.debug_struct("EmbeddingConfig")
+            .field("kind", &self.kind)
+            .field("model", &self.model)
+            .field("dimension", &self.dimension)
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+/// Build an `EmbeddingProvider` matching `config.kind`.
 ///
 /// # Errors
 ///
-/// See concrete provider constructors.
+/// Returns `LlmError::AuthFailed` when the kind requires an API key
+/// and none was supplied; otherwise whatever the concrete constructor
+/// returns.
 pub fn build_embedding_provider(
-    config: &ProviderConfig,
+    config: &EmbeddingConfig,
 ) -> Result<Arc<dyn EmbeddingProvider>, LlmError> {
     match config.kind {
-        ProviderKind::Ollama => {
+        EmbeddingProviderKind::Ollama => {
             let base = config
                 .base_url
                 .as_deref()
                 .unwrap_or(DEFAULT_OLLAMA_BASE_URL);
-            Ok(Arc::new(OllamaEmbeddingProvider::new(base.to_string())?))
+            Ok(Arc::new(OllamaEmbeddingProvider::with_model(
+                base,
+                &config.model,
+                config.dimension,
+            )?))
         }
-        ProviderKind::OllamaCloud => {
+        EmbeddingProviderKind::OllamaCloud => {
             // Same fallback rule as `build_llm_provider`: no stored
             // base URL means the official cloud endpoint, never the
             // localhost default. ollama.com requires a Bearer key.
@@ -210,15 +323,72 @@ pub fn build_embedding_provider(
             let key = config
                 .api_key
                 .as_deref()
-                .ok_or_else(missing_api_key(ProviderKind::OllamaCloud))?;
+                .ok_or_else(missing_embedding_api_key(EmbeddingProviderKind::OllamaCloud))?;
             Ok(Arc::new(
-                OllamaEmbeddingProvider::new(base.to_string())?.with_api_key(key),
+                OllamaEmbeddingProvider::with_model(base, &config.model, config.dimension)?
+                    .with_api_key(key),
             ))
         }
-        kind => Err(LlmError::Unsupported {
-            provider: provider_name_for(kind),
-            feature: "embeddings",
-        }),
+        EmbeddingProviderKind::OpenAi => {
+            let key = config
+                .api_key
+                .as_deref()
+                .ok_or_else(missing_embedding_api_key(EmbeddingProviderKind::OpenAi))?;
+            let base = config
+                .base_url
+                .as_deref()
+                .unwrap_or(super::llm::openai::DEFAULT_BASE_URL);
+            // Only `text-embedding-3-*` accepts the `dimensions`
+            // request field; probe mode (dimension 0) never sends it.
+            let request_dimensions = (config.model.starts_with("text-embedding-3")
+                && config.dimension > 0)
+                .then(|| u32::try_from(config.dimension).unwrap_or(u32::MAX));
+            Ok(Arc::new(OpenAiCompatEmbeddingProvider::new(
+                "openai",
+                format!("{}/v1/embeddings", base.trim_end_matches('/')),
+                &config.model,
+                config.dimension,
+                request_dimensions,
+                key,
+            )?))
+        }
+        EmbeddingProviderKind::Gemini => {
+            let key = config
+                .api_key
+                .as_deref()
+                .ok_or_else(missing_embedding_api_key(EmbeddingProviderKind::Gemini))?;
+            let base = config
+                .base_url
+                .as_deref()
+                .unwrap_or(super::llm::gemini::DEFAULT_BASE_URL);
+            Ok(Arc::new(OpenAiCompatEmbeddingProvider::new(
+                "gemini",
+                format!("{}/v1beta/openai/embeddings", base.trim_end_matches('/')),
+                &config.model,
+                config.dimension,
+                None,
+                key,
+            )?))
+        }
+        EmbeddingProviderKind::HuggingFace => {
+            let key = config
+                .api_key
+                .as_deref()
+                .ok_or_else(missing_embedding_api_key(EmbeddingProviderKind::HuggingFace))?;
+            let provider =
+                HuggingFaceEmbeddingProvider::new(key, &config.model, config.dimension)?;
+            Ok(Arc::new(match config.base_url.as_deref() {
+                Some(base) => provider.with_base_url(base),
+                None => provider,
+            }))
+        }
+    }
+}
+
+fn missing_embedding_api_key(kind: EmbeddingProviderKind) -> impl FnOnce() -> LlmError {
+    move || LlmError::AuthFailed {
+        provider: kind.as_str(),
+        message: "API key not configured for this provider".into(),
     }
 }
 
@@ -442,55 +612,143 @@ mod tests {
         assert_eq!(name, "openai");
     }
 
+    fn embedding_cfg(kind: EmbeddingProviderKind, api_key: Option<&str>) -> EmbeddingConfig {
+        EmbeddingConfig {
+            kind,
+            model: "test-model".into(),
+            dimension: 768,
+            base_url: None,
+            api_key: api_key.map(str::to_string),
+        }
+    }
+
     #[test]
-    fn build_embedding_provider_ollama_succeeds() {
-        let cfg = ProviderConfig {
-            kind: ProviderKind::Ollama,
-            base_url: Some("http://localhost:11434".into()),
-            api_key: None,
-        };
-        let (name, dim) = build_embedding_provider(&cfg)
-            .map(|p| (p.name(), p.dimension()))
+    fn embedding_provider_kind_round_trips_through_serde() {
+        let cases = [
+            (EmbeddingProviderKind::Ollama, "\"ollama\""),
+            (EmbeddingProviderKind::OllamaCloud, "\"ollama-cloud\""),
+            (EmbeddingProviderKind::OpenAi, "\"openai\""),
+            (EmbeddingProviderKind::Gemini, "\"gemini\""),
+            (EmbeddingProviderKind::HuggingFace, "\"huggingface\""),
+        ];
+        for (kind, expected) in cases {
+            let json = serde_json::to_string(&kind).expect("serialize");
+            assert_eq!(json, expected);
+            let back: EmbeddingProviderKind = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, kind);
+            assert_eq!(json, format!("\"{}\"", kind.as_str()));
+            assert_eq!(
+                EmbeddingProviderKind::from_str_value(kind.as_str()).expect("parse"),
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn embedding_provider_kind_from_str_value_rejects_unknown() {
+        let err =
+            EmbeddingProviderKind::from_str_value("voyage").expect_err("must reject");
+        assert_eq!(err.code(), "INVALID_INPUT");
+    }
+
+    #[test]
+    fn embedding_requires_api_key_only_false_for_local_ollama() {
+        assert!(!EmbeddingProviderKind::Ollama.requires_api_key());
+        assert!(EmbeddingProviderKind::OllamaCloud.requires_api_key());
+        assert!(EmbeddingProviderKind::OpenAi.requires_api_key());
+        assert!(EmbeddingProviderKind::Gemini.requires_api_key());
+        assert!(EmbeddingProviderKind::HuggingFace.requires_api_key());
+    }
+
+    #[test]
+    fn build_embedding_provider_ollama_works_without_api_key() {
+        let mut cfg = embedding_cfg(EmbeddingProviderKind::Ollama, None);
+        cfg.model = "nomic-embed-text".into();
+        let (name, dim, model) = build_embedding_provider(&cfg)
+            .map(|p| (p.name(), p.dimension(), p.model_id().to_string()))
             .expect("ollama embed ok");
         assert_eq!(name, "ollama");
         assert_eq!(dim, 768);
+        assert_eq!(model, "nomic-embed-text");
     }
 
     #[test]
-    fn build_embedding_provider_ollama_cloud_requires_api_key() {
-        let cfg = ProviderConfig {
-            kind: ProviderKind::OllamaCloud,
-            base_url: None,
-            api_key: None,
-        };
-        let err = build_embedding_provider(&cfg).err().expect("must reject");
-        assert_eq!(err.code(), "LLM_AUTH_FAILED");
-        assert_eq!(err.provider(), "ollama");
+    fn build_embedding_provider_requires_key_for_cloud_kinds() {
+        for kind in [
+            EmbeddingProviderKind::OllamaCloud,
+            EmbeddingProviderKind::OpenAi,
+            EmbeddingProviderKind::Gemini,
+            EmbeddingProviderKind::HuggingFace,
+        ] {
+            let err = build_embedding_provider(&embedding_cfg(kind, None))
+                .err()
+                .expect("must reject");
+            assert_eq!(err.code(), "LLM_AUTH_FAILED", "kind {kind:?}");
+        }
     }
 
     #[test]
-    fn build_embedding_provider_ollama_cloud_with_key_succeeds() {
-        let cfg = ProviderConfig {
-            kind: ProviderKind::OllamaCloud,
-            base_url: None,
-            api_key: Some("oll-test".into()),
-        };
+    fn build_embedding_provider_openai_with_key_succeeds() {
+        let mut cfg = embedding_cfg(EmbeddingProviderKind::OpenAi, Some("sk-test"));
+        cfg.model = "text-embedding-3-small".into();
+        cfg.dimension = 1536;
         let (name, dim) = build_embedding_provider(&cfg)
             .map(|p| (p.name(), p.dimension()))
-            .expect("cloud embed ok");
-        assert_eq!(name, "ollama");
-        assert_eq!(dim, 768);
+            .expect("openai embed ok");
+        assert_eq!(name, "openai");
+        assert_eq!(dim, 1536);
     }
 
     #[test]
-    fn build_embedding_provider_unsupported_for_anthropic() {
-        let cfg = ProviderConfig {
-            kind: ProviderKind::Anthropic,
-            base_url: None,
-            api_key: Some("k".into()),
-        };
-        let err = build_embedding_provider(&cfg).err().expect("must reject");
-        assert_eq!(err.code(), "LLM_UNSUPPORTED");
+    fn build_embedding_provider_gemini_with_key_succeeds() {
+        let mut cfg = embedding_cfg(EmbeddingProviderKind::Gemini, Some("AIza-test"));
+        cfg.model = "gemini-embedding-001".into();
+        cfg.dimension = 3072;
+        let name = build_embedding_provider(&cfg)
+            .map(|p| p.name())
+            .expect("gemini embed ok");
+        assert_eq!(name, "gemini");
+    }
+
+    #[test]
+    fn build_embedding_provider_huggingface_with_key_succeeds() {
+        let mut cfg = embedding_cfg(EmbeddingProviderKind::HuggingFace, Some("hf_test"));
+        cfg.model = "BAAI/bge-m3".into();
+        cfg.dimension = 1024;
+        let (name, model) = build_embedding_provider(&cfg)
+            .map(|p| (p.name(), p.model_id().to_string()))
+            .expect("hf embed ok");
+        assert_eq!(name, "huggingface");
+        assert_eq!(model, "BAAI/bge-m3");
+    }
+
+    #[test]
+    fn runtime_name_matches_built_provider() {
+        // Guards the kind → runtime-name mapping against drifting from
+        // what the concrete impls actually report via `name()`.
+        for kind in [
+            EmbeddingProviderKind::Ollama,
+            EmbeddingProviderKind::OllamaCloud,
+            EmbeddingProviderKind::OpenAi,
+            EmbeddingProviderKind::Gemini,
+            EmbeddingProviderKind::HuggingFace,
+        ] {
+            let provider = build_embedding_provider(&embedding_cfg(kind, Some("test-key")))
+                .expect("provider builds");
+            assert_eq!(
+                provider.name(),
+                kind.runtime_provider_name(),
+                "kind {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn embedding_config_debug_redacts_api_key() {
+        let cfg = embedding_cfg(EmbeddingProviderKind::OpenAi, Some("sk-super-secret"));
+        let debug = format!("{cfg:?}");
+        assert!(!debug.contains("sk-super-secret"));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

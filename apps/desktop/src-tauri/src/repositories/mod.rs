@@ -14,11 +14,14 @@
 //! - [`project_file_repo`] (Phase 4) — project file metadata persistence.
 //! - [`project_repo`] (Phase 4) — project-level persistence.
 //! - [`provider_config_repo`] (Phase 4) — provider configuration persistence.
+//! - [`embedding_config_repo`] — embedding provider selection persistence
+//!   (`plan/EMBEDDING_PROVIDER_SELECT.md`).
 //! - [`test_run_repo`] (sandbox runner Phase 1) — sandboxed test-run,
 //!   per-case, and coverage persistence.
 //!
 pub mod artifact_repo;
 pub mod chunk_repo;
+pub mod embedding_config_repo;
 pub mod project_file_repo;
 pub mod project_repo;
 pub mod provider_config_repo;

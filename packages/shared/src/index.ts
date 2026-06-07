@@ -20,6 +20,7 @@ export * from './schemas/auth.schema';
 export * from './schemas/bug-report.schema';
 export * from './schemas/code-chunk.schema';
 export * from './schemas/defect-report.schema';
+export * from './schemas/embedding-config.schema';
 export * from './schemas/export.schema';
 export * from './schemas/hardware.schema';
 export * from './schemas/health.schema';

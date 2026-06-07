@@ -209,7 +209,7 @@ async fn run_pipeline(
         let vectors = embeddings.embed(texts).await?;
 
         let dim = u32::try_from(embeddings.dimension()).unwrap_or(u32::MAX);
-        let provider_name = format!("{}-{}", embeddings.name(), embeddings.model_id());
+        let provider_name = embeddings.chunk_scope();
 
         let inserts: Vec<chunk_repo::ChunkInsert> = batch
             .iter()

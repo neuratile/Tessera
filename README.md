@@ -26,7 +26,7 @@
 
 Tessera is a desktop IDE that runs **static-only** analysis on a codebase and uses an LLM to generate structured QA artifacts — test plans, test cases, defect reports, bug reports. Everything runs on your machine (local LLM, local SQLite, local AST parsing), so it works on closed-source, regulated, and offline codebases.
 
-Open a folder → Tessera parses it with Tree-sitter, embeds chunks via Ollama, and indexes them in SQLite (`sqlite-vec`). Click an artifact button → the active LLM provider runs a versioned, JSON-Schema-constrained prompt over RAG-retrieved context. Output is validated against a Zod schema, then you approve, reject, regenerate-with-feedback, or export to Markdown. **Source never leaves the machine on the default Ollama provider.**
+Open a folder → Tessera parses it with Tree-sitter, embeds chunks via the configured embedding provider (local Ollama by default; OpenAI, Google Gemini, or Hugging Face Inference optional), and indexes them in SQLite (`sqlite-vec`). Click an artifact button → the active LLM provider runs a versioned, JSON-Schema-constrained prompt over RAG-retrieved context. Output is validated against a Zod schema, then you approve, reject, regenerate-with-feedback, or export to Markdown. **Source never leaves the machine on the default Ollama provider.** Choosing a cloud embedding provider sends code snippets to that provider for embedding — the Settings UI says so explicitly.
 
 ### Why it's different
 

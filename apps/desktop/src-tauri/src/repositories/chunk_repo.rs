@@ -293,6 +293,49 @@ pub async fn count_for_tuple(
     Ok(u32::try_from(row.0).unwrap_or(u32::MAX))
 }
 
+/// One distinct `(provider, model, dimension)` signature present in a
+/// project's embedded chunks, with its row count. Used by
+/// `embedding_config_service::index_status` to detect stale indexes
+/// after the user switches embedding provider/model.
+#[derive(Debug, Clone)]
+pub struct EmbeddingSignature {
+    pub provider: String,
+    pub model: String,
+    pub dimension: u32,
+    pub chunk_count: u64,
+}
+
+/// Distinct embedding signatures for one project's embedded chunks.
+/// Empty for never-indexed projects.
+///
+/// # Errors
+///
+/// Returns [`AppError::Database`] on `SQLx` errors.
+pub async fn embedding_signatures(
+    pool: &SqlitePool,
+    project_id: &str,
+) -> AppResult<Vec<EmbeddingSignature>> {
+    let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT embedding_provider, embedding_model, embedding_dim, COUNT(*) \
+         FROM code_chunks \
+         WHERE project_id = ? AND embedding IS NOT NULL \
+         GROUP BY embedding_provider, embedding_model, embedding_dim",
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(provider, model, dimension, count)| EmbeddingSignature {
+            provider,
+            model,
+            dimension: u32::try_from(dimension).unwrap_or(u32::MAX),
+            chunk_count: u64::try_from(count).unwrap_or(0),
+        })
+        .collect())
+}
+
 async fn enforce_tuple_caps(pool: &SqlitePool, inserts: &[ChunkInsert]) -> AppResult<()> {
     use std::collections::HashMap;
     let mut buckets: HashMap<(String, String, u32), u32> = HashMap::new();

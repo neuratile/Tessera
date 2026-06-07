@@ -114,6 +114,12 @@ pub fn run() {
             commands::providers::delete_provider_config,
             commands::providers::test_provider_connection,
             commands::providers::list_ollama_models,
+            // Embedding config commands (plan/EMBEDDING_PROVIDER_SELECT.md)
+            commands::embeddings::get_embedding_config,
+            commands::embeddings::save_embedding_config,
+            commands::embeddings::test_embedding_connection,
+            commands::embeddings::list_embedding_presets,
+            commands::embeddings::get_index_status,
             // Artifact commands (Phase 11)
             commands::artifacts::list_artifacts,
             commands::artifacts::get_artifact,

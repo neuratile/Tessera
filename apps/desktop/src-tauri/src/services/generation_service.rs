@@ -1393,7 +1393,7 @@ async fn retrieve_chunks(
     };
 
     let dim = u32::try_from(deps.embeddings.dimension()).unwrap_or(u32::MAX);
-    let provider_name = format!("{}-{}", deps.embeddings.name(), deps.embeddings.model_id());
+    let provider_name = deps.embeddings.chunk_scope();
     let hits = chunk_repo::search_similar(
         deps.pool,
         &request.project_id,

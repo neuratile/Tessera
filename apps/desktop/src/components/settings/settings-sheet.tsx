@@ -6,6 +6,7 @@ import type {
 import { Check, Loader2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { EmbeddingConfigPanel } from '@/components/settings/embedding-config-panel';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -634,6 +635,8 @@ export function SettingsSheet() {
               </Button>
             </div>
           </section>
+
+          <EmbeddingConfigPanel />
         </div>
     </Dialog>
   );

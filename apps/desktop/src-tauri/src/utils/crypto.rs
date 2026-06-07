@@ -99,6 +99,20 @@ impl CryptoKey {
             .decrypt(nonce, ciphertext)
             .map_err(|error| AppError::Internal(anyhow::anyhow!("decryption failed: {error}")))
     }
+
+    /// Decrypt a stored API key into a UTF-8 string. Shared by
+    /// `provider_config_service` and `embedding_config_service` so the
+    /// decrypt-then-validate-UTF-8 mechanics have one definition.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::decrypt`], plus `AppError::Internal` when the
+    /// plaintext is not valid UTF-8 (corrupt row or wrong key).
+    pub fn decrypt_string(&self, ciphertext: &[u8], nonce_bytes: &[u8]) -> AppResult<String> {
+        let plaintext = self.decrypt(ciphertext, nonce_bytes)?;
+        String::from_utf8(plaintext)
+            .map_err(|_| AppError::Internal(anyhow::anyhow!("decrypted key is not UTF-8")))
+    }
 }
 
 #[cfg(test)]

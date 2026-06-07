@@ -202,7 +202,8 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
 
         let mut out = Vec::with_capacity(parsed.data.len());
         for entry in parsed.data {
-            if entry.embedding.len() != self.dimension {
+            // dimension 0 = probe mode (see `EmbeddingProvider::dimension`).
+            if self.dimension != 0 && entry.embedding.len() != self.dimension {
                 return Err(LlmError::InvalidResponse {
                     provider: PROVIDER_NAME,
                     message: format!(

@@ -9,6 +9,7 @@ import {
 import { COMMAND, useCommand } from '@/lib/command-bus';
 import { useUiStore, type PanelSizes } from '@/stores/ui-store';
 
+import { IndexStaleBanner } from '@/components/layout/index-stale-banner';
 import { StatusBar } from '@/components/layout/status-bar';
 import { Toolbar } from '@/components/layout/toolbar';
 import { BoardPanel } from '@/components/boards/board-panel';
@@ -68,6 +69,7 @@ export function AppShell({ sidebar, editor, aiPanel }: Props) {
   return (
     <div className="bg-background text-foreground flex h-screen w-screen flex-col overflow-hidden">
       <Toolbar />
+      <IndexStaleBanner />
       <div className="flex-1 overflow-hidden">
         {mode === 'boards' ? (
           <BoardPanel />

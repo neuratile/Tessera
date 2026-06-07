@@ -3,9 +3,12 @@ import type {
   AnalysisOutcome,
   ArtifactDetail,
   ArtifactSummary,
+  EmbeddingConfigView,
+  EmbeddingPreset,
   GenerateResponse,
   HardwareInfo,
   HealthStatus,
+  IndexStatus,
   OllamaStatus,
   Project,
   ProviderConfigView,
@@ -58,6 +61,48 @@ function buildProject(rootPath: string, status: Project['status']): Project {
     languageBreakdown: status === 'ready' ? { typescript: 4 } : {},
     createdAt: timestamp,
     updatedAt: timestamp,
+  };
+}
+
+function buildEmbeddingConfig(): EmbeddingConfigView {
+  // `id: null` mirrors the backend's implicit local-Ollama default
+  // before any save (`embedding_config_service::get_active_view`).
+  return {
+    id: null,
+    provider: 'ollama',
+    model: 'nomic-embed-text',
+    dimension: 768,
+    baseUrl: null,
+    hasApiKey: false,
+    isActive: true,
+  };
+}
+
+function buildEmbeddingPresets(): EmbeddingPreset[] {
+  return [
+    { provider: 'ollama', model: 'nomic-embed-text', dimension: 768, isDefault: true },
+    { provider: 'ollama', model: 'mxbai-embed-large', dimension: 1024, isDefault: false },
+    { provider: 'openai', model: 'text-embedding-3-small', dimension: 1536, isDefault: true },
+    { provider: 'gemini', model: 'gemini-embedding-001', dimension: 3072, isDefault: true },
+    { provider: 'huggingface', model: 'BAAI/bge-m3', dimension: 1024, isDefault: true },
+  ];
+}
+
+function buildIndexStatus(config: EmbeddingConfigView): IndexStatus {
+  // The mock pipeline always indexes with the active config, so the
+  // banner stays hidden unless an e2e flow explicitly changes config
+  // between analyze runs.
+  const signature = {
+    provider: `${config.provider}-${config.model}`,
+    model: config.model,
+    dimension: config.dimension,
+  };
+  return {
+    projectId: MOCK_PROJECT_ID,
+    embeddedChunks: 9,
+    indexedWith: signature,
+    activeConfig: signature,
+    isStale: false,
   };
 }
 
@@ -312,6 +357,7 @@ export function installE2eTauriMocks(): void {
   let project: Project | null = null;
   let artifact: MockArtifactState | null = null;
   const provider = buildProviderConfig();
+  let embeddingConfig = buildEmbeddingConfig();
 
   mockIPC(async (command, payload) => {
     switch (command) {
@@ -402,6 +448,38 @@ export function installE2eTauriMocks(): void {
 
       case 'list_provider_configs':
         return [provider];
+
+      case 'get_embedding_config':
+        return embeddingConfig;
+
+      case 'save_embedding_config': {
+        const args = (
+          payload as {
+            args?: {
+              provider?: EmbeddingConfigView['provider'];
+              model?: string;
+              dimension?: number;
+            };
+          }
+        ).args;
+        embeddingConfig = {
+          ...embeddingConfig,
+          id: MOCK_PROVIDER_ID,
+          provider: args?.provider ?? embeddingConfig.provider,
+          model: args?.model ?? embeddingConfig.model,
+          dimension: args?.dimension ?? embeddingConfig.dimension,
+        };
+        return embeddingConfig;
+      }
+
+      case 'test_embedding_connection':
+        return { latencyMs: 12, detectedDimension: embeddingConfig.dimension };
+
+      case 'list_embedding_presets':
+        return buildEmbeddingPresets();
+
+      case 'get_index_status':
+        return buildIndexStatus(embeddingConfig);
 
       case 'generate_artifact': {
         if (project === null) {
