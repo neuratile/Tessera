@@ -6,6 +6,9 @@ on:
     branches:
       - main
       - master
+  # Manual re-runs without an empty commit — handy when a job failed on
+  # runner flake (registry 429s, apt mirrors) rather than code.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +24,7 @@ jobs:
   conflict-marker-check:
     name: conflict-marker-check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - name: Scan for unresolved Git conflict markers
@@ -46,6 +50,7 @@ jobs:
     # (see release.yml). Running lint × 3 OS on every push burned
     # ~13× the billed minutes for no extra signal.
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
@@ -94,6 +99,7 @@ jobs:
     name: typecheck
     # Ubuntu-only — TypeScript output is identical across runners.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -121,6 +127,7 @@ jobs:
     # cross-platform contract is covered without paying for it on
     # every push.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
@@ -160,6 +167,36 @@ jobs:
       - name: Run unit tests
         run: pnpm test
 
+  build-check:
+    name: build-check
+    # Production Vite build of the renderer. typecheck and unit-test do
+    # not exercise Rollup: asset imports, dynamic-import splitting, and
+    # plugin config can all break the production bundle while tsc and
+    # Vitest stay green — which previously only surfaced when release.yml
+    # ran tauri-action on a tag push. Node-only (no Rust/Tauri compile),
+    # so the gate costs ~1-2 minutes. Verified locally: `vite build`
+    # ~30s on the current tree.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production renderer bundle
+        run: pnpm --filter @testing-ide/desktop run vite:build
+
   server-check:
     name: server-check
     # The boards server (apps/server) is a standalone Rust crate outside the
@@ -167,6 +204,7 @@ jobs:
     # It uses runtime sqlx queries only (no `query!` macros), so clippy and
     # the unit tests need no database or DATABASE_URL to build.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -192,6 +230,7 @@ jobs:
     # including the sandbox Run/Stop + results panel from the test-runner
     # feature. Ubuntu-only: the DOM + mocks are platform-independent.
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 

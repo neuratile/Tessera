@@ -17,6 +17,10 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual dispatch re-runs a failed platform bundle without re-tagging.
+  # Run it from the tag ref in the dispatch UI so tauri-action resolves
+  # the matching release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -32,6 +36,9 @@ jobs:
           - { label: macos,   runner: macos-latest,   args: '--target universal-apple-darwin' }
           - { label: windows, runner: windows-latest, args: '' }
     runs-on: ${{ matrix.platform.runner }}
+    # Full Tauri bundles (Rust release build + installers) run 20-40 min
+    # per platform; 90 keeps a wedged runner from burning the 6 h default.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
