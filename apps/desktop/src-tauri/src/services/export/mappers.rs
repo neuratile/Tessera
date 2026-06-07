@@ -1,15 +1,10 @@
 //! Per-artifact-type mappers from `structured_data` JSON into the
 //! export IR.
 //!
-//! Payload shapes mirror the prompt tool schemas (`prompts/*_v1.rs` /
-//! `*_v2.rs`). Every field uses `#[serde(default)]` plus aliases for
-//! legacy spellings (v1 `snake_case` vs v2 `camelCase`) so old DB rows and
-//! partially-populated payloads map without panicking. A fully empty
-//! payload (`null` / `{}`) is rejected with
-//! [`AppError::InvalidInput`] so the frontend can suggest the
-//! markdown export instead.
-
-use serde::Deserialize;
+//! Payload shapes live in `payload.rs` (shared with the markdown
+//! writer in `markdown_writer.rs`). A fully empty payload (`null` /
+//! `{}`) is rejected with [`AppError::InvalidInput`] so the frontend
+//! can suggest the markdown export instead.
 
 use crate::error::{AppError, AppResult};
 use crate::repositories::artifact_repo::{Artifact, ArtifactType};
@@ -17,6 +12,10 @@ use crate::repositories::artifact_repo::{Artifact, ArtifactType};
 use super::ir::{
     clamp_cell, joined_lines, numbered_lines, ExportDoc, ExportSection, ExportTable,
     KeyValueSection,
+};
+use super::payload::{
+    BugReportPayload, ContextMdPayload, DefectReportPayload, TestCasesPayload, TestPlanPayload,
+    TestStep,
 };
 
 /// Build the writer-agnostic [`ExportDoc`] for an artifact. Pure —
@@ -55,68 +54,6 @@ pub fn build_export_doc(artifact: &Artifact) -> AppResult<ExportDoc> {
 // ---------------------------------------------------------------------------
 // test_cases (v1 + v2)
 // ---------------------------------------------------------------------------
-
-/// One test step. v2 uses separated `{ action, expectedResult }`
-/// objects; v1 rows carry plain strings. `untagged` lets one payload
-/// mix both (defensive — should not happen in practice).
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum TestStep {
-    Separated {
-        #[serde(default)]
-        action: String,
-        #[serde(default, alias = "expected_result")]
-        #[serde(rename = "expectedResult")]
-        expected_result: String,
-    },
-    Plain(String),
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct TestCase {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    title: String,
-    /// v2 only — positive / negative / boundary / error / security.
-    #[serde(default, rename = "type")]
-    case_type: String,
-    #[serde(default)]
-    priority: String,
-    #[serde(default)]
-    preconditions: Vec<String>,
-    /// v2 only.
-    #[serde(default, rename = "testData", alias = "test_data")]
-    test_data: String,
-    #[serde(default)]
-    steps: Vec<TestStep>,
-    /// v1 only — single case-level expected result.
-    #[serde(default, rename = "expectedResult", alias = "expected_result")]
-    expected_result: String,
-    /// v2 only.
-    #[serde(default)]
-    postconditions: Vec<String>,
-    #[serde(default)]
-    traceability: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RunnableFile {
-    #[serde(default)]
-    path: String,
-    #[serde(default)]
-    contents: String,
-    #[serde(default, rename = "isTest", alias = "is_test")]
-    is_test: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct TestCasesPayload {
-    #[serde(default)]
-    cases: Vec<TestCase>,
-    #[serde(default)]
-    files: Vec<RunnableFile>,
-}
 
 fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let payload: TestCasesPayload = serde_json::from_value(data.clone())?;
@@ -210,62 +147,6 @@ fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
 // defect_report
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Deserialize)]
-struct DefectLocation {
-    #[serde(default)]
-    symbol: String,
-    #[serde(default, alias = "startLine")]
-    start_line: u64,
-    #[serde(default, alias = "endLine")]
-    end_line: u64,
-    #[serde(default, alias = "fileHint")]
-    file_hint: String,
-}
-
-impl DefectLocation {
-    fn flatten(&self) -> String {
-        let mut parts = Vec::new();
-        if !self.file_hint.is_empty() {
-            parts.push(self.file_hint.clone());
-        }
-        if !self.symbol.is_empty() {
-            parts.push(format!("`{}`", self.symbol));
-        }
-        if self.start_line > 0 {
-            parts.push(format!("lines {}–{}", self.start_line, self.end_line));
-        }
-        parts.join(" · ")
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct DefectFinding {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    severity: String,
-    #[serde(default)]
-    category: String,
-    #[serde(default)]
-    confidence: String,
-    #[serde(default)]
-    location: DefectLocation,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    impact: String,
-    #[serde(default, rename = "suggested_fix", alias = "suggestedFix")]
-    suggested_fix: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DefectReportPayload {
-    #[serde(default)]
-    findings: Vec<DefectFinding>,
-    #[serde(default)]
-    summary: String,
-}
-
 fn map_defect_report(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let payload: DefectReportPayload = serde_json::from_value(data.clone())?;
 
@@ -316,79 +197,6 @@ fn map_defect_report(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> 
 // ---------------------------------------------------------------------------
 // bug_report (v1 + v2)
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Default, Deserialize)]
-struct BugRootCause {
-    #[serde(default)]
-    symbol: String,
-    #[serde(default, rename = "startLine", alias = "start_line")]
-    start_line: u64,
-    #[serde(default, rename = "endLine", alias = "end_line")]
-    end_line: u64,
-    #[serde(default, rename = "fileHint", alias = "file_hint")]
-    file_hint: String,
-    #[serde(default)]
-    explanation: String,
-}
-
-impl BugRootCause {
-    fn flatten(&self) -> String {
-        let mut lines = Vec::new();
-        if !self.symbol.is_empty() {
-            lines.push(format!("Symbol: {}", self.symbol));
-        }
-        if !self.file_hint.is_empty() {
-            lines.push(format!("File: {}", self.file_hint));
-        }
-        if self.start_line > 0 {
-            lines.push(format!("Lines: {}–{}", self.start_line, self.end_line));
-        }
-        if !self.explanation.is_empty() {
-            lines.push(format!("Explanation: {}", self.explanation));
-        }
-        lines.join("\n")
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct Bug {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    severity: String,
-    /// v2 only — fix urgency, split from severity.
-    #[serde(default)]
-    priority: String,
-    /// v2 only.
-    #[serde(default)]
-    reproducibility: String,
-    #[serde(default)]
-    environment: String,
-    /// v2 only.
-    #[serde(default)]
-    component: String,
-    #[serde(default, rename = "stepsToReproduce", alias = "steps_to_reproduce")]
-    steps_to_reproduce: Vec<String>,
-    #[serde(default, rename = "expectedBehavior", alias = "expected_behavior")]
-    expected_behavior: String,
-    #[serde(default, rename = "actualBehavior", alias = "actual_behavior")]
-    actual_behavior: String,
-    /// v2 only.
-    #[serde(default)]
-    workaround: String,
-    #[serde(default, rename = "rootCause", alias = "root_cause")]
-    root_cause: BugRootCause,
-    #[serde(default, rename = "evidenceSnippet", alias = "evidence_snippet")]
-    evidence_snippet: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct BugReportPayload {
-    #[serde(default)]
-    bugs: Vec<Bug>,
-}
 
 fn map_bug_report(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let payload: BugReportPayload = serde_json::from_value(data.clone())?;
@@ -441,36 +249,6 @@ fn map_bug_report(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
 // ---------------------------------------------------------------------------
 // test_plan
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Default, Deserialize)]
-struct TestPlanRisk {
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    mitigation: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct TestPlanPayload {
-    #[serde(default)]
-    summary: String,
-    #[serde(default)]
-    objectives: Vec<String>,
-    #[serde(default, rename = "scopeIn", alias = "scope_in")]
-    scope_in: Vec<String>,
-    #[serde(default, rename = "scopeOut", alias = "scope_out")]
-    scope_out: Vec<String>,
-    #[serde(default)]
-    strategy: String,
-    #[serde(default)]
-    environments: Vec<String>,
-    #[serde(default)]
-    risks: Vec<TestPlanRisk>,
-    #[serde(default, rename = "entryCriteria", alias = "entry_criteria")]
-    entry_criteria: Vec<String>,
-    #[serde(default, rename = "exitCriteria", alias = "exit_criteria")]
-    exit_criteria: Vec<String>,
-}
 
 fn map_test_plan(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let payload: TestPlanPayload = serde_json::from_value(data.clone())?;
@@ -526,38 +304,6 @@ fn map_test_plan(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
 // ---------------------------------------------------------------------------
 // context_md
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Default, Deserialize)]
-struct KeyModule {
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    responsibility: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct DataFlow {
-    #[serde(default)]
-    producer: String,
-    #[serde(default)]
-    consumer: String,
-    #[serde(default)]
-    payload: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContextMdPayload {
-    #[serde(default)]
-    summary: String,
-    #[serde(default, rename = "architecture_notes", alias = "architectureNotes")]
-    architecture_notes: String,
-    #[serde(default, rename = "key_modules", alias = "keyModules")]
-    key_modules: Vec<KeyModule>,
-    #[serde(default, rename = "data_flows", alias = "dataFlows")]
-    data_flows: Vec<DataFlow>,
-    #[serde(default, rename = "known_risks", alias = "knownRisks")]
-    known_risks: Vec<String>,
-}
 
 fn map_context_md(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let payload: ContextMdPayload = serde_json::from_value(data.clone())?;
