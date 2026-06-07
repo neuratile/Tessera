@@ -120,6 +120,9 @@ pub fn run() {
             commands::artifacts::list_artifact_versions,
             commands::artifacts::approve_artifact,
             commands::artifacts::reject_artifact,
+            // Artifact export commands (plan/ARTIFACT_EXPORT.md Phases 1-2)
+            commands::exports::export_artifact,
+            commands::exports::get_artifact_tsv,
             // Health / system commands
             commands::health::health_check,
             // Hardware detection command (Phase 8)

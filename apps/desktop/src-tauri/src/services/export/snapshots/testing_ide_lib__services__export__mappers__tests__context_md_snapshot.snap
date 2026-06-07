@@ -1,0 +1,19 @@
+---
+source: src/services/export/mappers.rs
+expression: doc
+---
+title: Sample artifact
+sections:
+  - KeyValues:
+      name: Context
+      entries:
+        - - Summary
+          - Local-first testing IDE.
+        - - Architecture Notes
+          - "* Tauri shell\n* Rust services"
+        - - Key Modules
+          - 1. generation_service — LLM orchestration
+        - - Data Flows
+          - "1. chunk_repo → generation_service: chunks"
+        - - Known Risks
+          - 1. No Python chunker coverage

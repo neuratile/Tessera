@@ -1,0 +1,27 @@
+---
+source: src/services/export/mappers.rs
+expression: doc
+---
+title: Sample artifact
+sections:
+  - KeyValues:
+      name: Test Plan
+      entries:
+        - - Summary
+          - Plan for auth module.
+        - - Strategy
+          - Unit-first with sandbox runs.
+        - - Objectives
+          - "1. Cover login\n2. Cover logout"
+        - - Scope In
+          - 1. src/auth.ts
+        - - Scope Out
+          - 1. legacy/
+        - - Environments
+          - 1. node 20
+        - - Risks
+          - "1. Flaky network mocks — Mitigation: Use msw\n2. No CI minutes"
+        - - Entry Criteria
+          - 1. Build green
+        - - Exit Criteria
+          - 1. All p0 pass

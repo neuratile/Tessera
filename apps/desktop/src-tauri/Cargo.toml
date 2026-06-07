@@ -48,6 +48,8 @@ argon2 = { version = "0.5", features = ["std"] }
 jsonwebtoken = "9"
 email_address = "0.2"
 dotenvy = "0.15"
+rust_xlsxwriter = "0.92.0"
+csv = "1.4.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

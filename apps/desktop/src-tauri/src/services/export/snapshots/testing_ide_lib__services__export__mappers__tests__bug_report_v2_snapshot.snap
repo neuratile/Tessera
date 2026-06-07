@@ -1,0 +1,36 @@
+---
+source: src/services/export/mappers.rs
+expression: doc
+---
+title: Sample artifact
+sections:
+  - Table:
+      name: Bugs
+      columns:
+        - ID
+        - Title
+        - Severity
+        - Priority
+        - Reproducibility
+        - Environment
+        - Component
+        - Steps to Reproduce
+        - Expected Behavior
+        - Actual Behavior
+        - Workaround
+        - Root Cause
+        - Evidence
+      rows:
+        - - BUG-SESSION-LEAK
+          - Session handle leaks on logout
+          - critical
+          - p1
+          - always
+          - Windows 11 / Node 20
+          - auth
+          - "1. Log in\n2. Log out\n3. Inspect open handles"
+          - Handle closed
+          - Handle stays open
+          - Restart the app
+          - "Symbol: logout\nFile: src/auth.ts\nLines: 10–20\nExplanation: Missing dispose() call."
+          - "function logout() { /* no dispose */ }"

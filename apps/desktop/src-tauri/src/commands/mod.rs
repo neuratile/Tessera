@@ -19,6 +19,7 @@
 pub mod analysis;
 pub mod artifacts;
 pub mod auth;
+pub mod exports;
 pub mod generation;
 pub mod hardware;
 pub mod health;

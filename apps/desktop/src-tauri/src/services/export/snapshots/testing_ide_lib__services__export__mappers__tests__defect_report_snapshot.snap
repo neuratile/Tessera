@@ -1,0 +1,31 @@
+---
+source: src/services/export/mappers.rs
+expression: doc
+---
+title: Sample artifact
+sections:
+  - Table:
+      name: Findings
+      columns:
+        - ID
+        - Severity
+        - Category
+        - Confidence
+        - Location
+        - Description
+        - Impact
+        - Suggested Fix
+      rows:
+        - - DEF-NULL-POINTER
+          - major
+          - null_safety
+          - high
+          - "src/store.ts · `save` · lines 5–15"
+          - save() dereferences a nullable handle.
+          - Crash on empty store.
+          - Guard with early return.
+  - KeyValues:
+      name: Summary
+      entries:
+        - - Summary
+          - One null-safety finding.

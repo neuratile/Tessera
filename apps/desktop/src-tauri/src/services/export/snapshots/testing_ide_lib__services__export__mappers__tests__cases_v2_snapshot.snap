@@ -1,0 +1,43 @@
+---
+source: src/services/export/mappers.rs
+expression: doc
+---
+title: Sample artifact
+sections:
+  - Table:
+      name: Test Cases
+      columns:
+        - ID
+        - Title
+        - Type
+        - Priority
+        - Preconditions
+        - Test Data
+        - Steps
+        - Expected Result
+        - Postconditions
+        - Traceability
+      rows:
+        - - TC-LOGIN-SUCCESS
+          - Valid login succeeds
+          - positive
+          - p0
+          - 1. User exists
+          - user@example.com / hunter2
+          - "1. Open login page\n2. Submit valid creds"
+          - "1. Form renders\n2. Redirect to home"
+          - 1. Session cookie set
+          - "src/auth.ts#login"
+  - Table:
+      name: Files
+      columns:
+        - Path
+        - Role
+        - Contents
+      rows:
+        - - src/auth.ts
+          - source
+          - "export function login() {}"
+        - - auth.test.ts
+          - test
+          - "import { it } from 'vitest'"
