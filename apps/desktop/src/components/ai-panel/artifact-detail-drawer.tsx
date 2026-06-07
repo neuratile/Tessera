@@ -15,7 +15,15 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { MarkdownView } from '@/components/markdown/markdown-view';
 import { Button } from '@/components/ui/button';
@@ -63,6 +71,8 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Version chain — fetched lazily when the version picker or diff
   // toggle is used. Empty array means "not loaded yet"; once loaded
@@ -305,6 +315,73 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     });
   }, [summary.id, runExport]);
 
+  /** Close the export menu and hand focus back to its trigger. */
+  const closeExportMenu = useCallback(() => {
+    setExportMenuOpen(false);
+    exportTriggerRef.current?.focus();
+  }, []);
+
+  // Move focus into the menu when it opens so arrow-key navigation
+  // works immediately (WAI-ARIA menu pattern).
+  useEffect(() => {
+    if (exportMenuOpen) {
+      exportMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    }
+  }, [exportMenuOpen]);
+
+  /**
+   * Keyboard contract implied by `role="menu"` / `role="menuitem"`:
+   * ArrowUp/ArrowDown cycle focus, Home/End jump, Escape closes and
+   * restores focus to the trigger.
+   */
+  const handleExportMenuKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const menu = exportMenuRef.current;
+      if (menu === null) {
+        return;
+      }
+      const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+      if (items.length === 0) {
+        return;
+      }
+      const activeIndex = items.findIndex((item) => item === document.activeElement);
+      const step = (delta: number): void => {
+        const next =
+          activeIndex === -1
+            ? delta > 0
+              ? 0
+              : items.length - 1
+            : (activeIndex + delta + items.length) % items.length;
+        items[next]?.focus();
+      };
+      switch (event.key) {
+        case 'Escape':
+          event.preventDefault();
+          closeExportMenu();
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          step(1);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          step(-1);
+          break;
+        case 'Home':
+          event.preventDefault();
+          items[0]?.focus();
+          break;
+        case 'End':
+          event.preventDefault();
+          items[items.length - 1]?.focus();
+          break;
+        default:
+          break;
+      }
+    },
+    [closeExportMenu],
+  );
+
   const isPending =
     detail?.status === 'draft' || detail?.status === 'in_review' || detail === null;
   const titleId = useDialogTitleId();
@@ -458,6 +535,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
             )}
             <div className="relative">
               <Button
+                ref={exportTriggerRef}
                 type="button"
                 size="sm"
                 variant="outline"
@@ -484,28 +562,30 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                     tabIndex={-1}
                   />
                   <div
+                    ref={exportMenuRef}
                     role="menu"
                     aria-label="Export format"
+                    onKeyDown={handleExportMenuKeyDown}
                     className="absolute bottom-full left-0 z-20 mb-1 w-48 rounded-md border border-border bg-card p-1 shadow-lg"
                   >
                     <ExportMenuItem
                       label="Markdown (.md)"
                       onSelect={() => {
-                        setExportMenuOpen(false);
+                        closeExportMenu();
                         handleExportMarkdown();
                       }}
                     />
                     <ExportMenuItem
                       label="Excel (.xlsx)"
                       onSelect={() => {
-                        setExportMenuOpen(false);
+                        closeExportMenu();
                         handleExportFile('xlsx');
                       }}
                     />
                     <ExportMenuItem
                       label="CSV (.csv)"
                       onSelect={() => {
-                        setExportMenuOpen(false);
+                        closeExportMenu();
                         handleExportFile('csv');
                       }}
                     />
@@ -513,7 +593,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                       icon={<ClipboardCopy className="size-3" />}
                       label="Copy as TSV"
                       onSelect={() => {
-                        setExportMenuOpen(false);
+                        closeExportMenu();
                         handleCopyTsv();
                       }}
                     />
