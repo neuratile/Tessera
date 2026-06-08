@@ -6,8 +6,11 @@
 //! `{}`) is rejected with [`AppError::InvalidInput`] so the frontend
 //! can suggest the markdown export instead.
 
+use std::collections::HashMap;
+
 use crate::error::{AppError, AppResult};
 use crate::repositories::artifact_repo::{Artifact, ArtifactType};
+use crate::repositories::test_case_result_repo::{TestCaseResultRow, TestCaseResultStatus};
 
 use super::ir::{
     clamp_cell, joined_lines, numbered_lines, ExportDoc, ExportSection, ExportTable,
@@ -22,13 +25,19 @@ use super::payload::{
 /// this is the seam every destination (csv/tsv/xlsx, later Jira)
 /// consumes.
 ///
+/// `results` is the per-case execution-outcome sidecar
+/// (`test_case_results`) joined onto a test-cases artifact so the
+/// exported table carries the Actual output / Result and remarks
+/// columns (`plan/TEST_CASE_TABLE.md` §5, Phase 3). It is empty for every
+/// other artifact type.
+///
 /// # Errors
 ///
 /// - [`AppError::InvalidInput`] when `structured_data` is `null` or an
 ///   empty object — there is nothing tabular to export.
 /// - [`AppError::Serde`] when the payload cannot deserialize into the
 ///   artifact type's expected shape.
-pub fn build_export_doc(artifact: &Artifact) -> AppResult<ExportDoc> {
+pub fn build_export_doc(artifact: &Artifact, results: &[TestCaseResultRow]) -> AppResult<ExportDoc> {
     let data = &artifact.structured_data;
     let is_empty_object = data.as_object().is_some_and(serde_json::Map::is_empty);
     if data.is_null() || is_empty_object {
@@ -38,7 +47,7 @@ pub fn build_export_doc(artifact: &Artifact) -> AppResult<ExportDoc> {
     }
 
     let sections = match artifact.artifact_type {
-        ArtifactType::TestCases => map_test_cases(data)?,
+        ArtifactType::TestCases => map_test_cases(data, results)?,
         ArtifactType::DefectReport => map_defect_report(data)?,
         ArtifactType::BugReport => map_bug_report(data)?,
         ArtifactType::TestPlan => map_test_plan(data)?,
@@ -55,8 +64,17 @@ pub fn build_export_doc(artifact: &Artifact) -> AppResult<ExportDoc> {
 // test_cases (v1 + v2)
 // ---------------------------------------------------------------------------
 
-fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
+fn map_test_cases(
+    data: &serde_json::Value,
+    results: &[TestCaseResultRow],
+) -> AppResult<Vec<ExportSection>> {
     let payload: TestCasesPayload = serde_json::from_value(data.clone())?;
+
+    // Sidecar lookup so cols 8–9 attach to their case in O(1) (no N+1).
+    let outcomes: HashMap<&str, &TestCaseResultRow> = results
+        .iter()
+        .map(|r| (r.case_id.as_str(), r))
+        .collect();
 
     let rows = payload
         .cases
@@ -87,15 +105,27 @@ fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
                 numbered_lines(&per_step_results)
             };
 
+            // Cols 8–9 from the sidecar; blank when no outcome recorded.
+            let outcome = outcomes.get(case.id.as_str());
+            let actual_output = outcome
+                .and_then(|o| o.actual_output.clone())
+                .unwrap_or_default();
+            let result_and_remarks = outcome.map_or_else(String::new, |o| result_and_remarks(o));
+
+            // The fixed 9-column view (minus the auto Sr-no index) followed
+            // by the optional toggle columns, so the export stays a
+            // superset of the table (plan §5, Phase 3).
             vec![
                 clamp_cell(case.id.clone()),
                 clamp_cell(case.title.clone()),
+                clamp_cell(numbered_lines(&case.preconditions)),
+                clamp_cell(numbered_lines(&actions)),
+                clamp_cell(case.test_data.clone()),
+                clamp_cell(expected),
+                clamp_cell(actual_output),
+                clamp_cell(result_and_remarks),
                 clamp_cell(case.case_type.clone()),
                 clamp_cell(case.priority.clone()),
-                clamp_cell(numbered_lines(&case.preconditions)),
-                clamp_cell(case.test_data.clone()),
-                clamp_cell(numbered_lines(&actions)),
-                clamp_cell(expected),
                 clamp_cell(numbered_lines(&case.postconditions)),
                 clamp_cell(joined_lines(&case.traceability)),
             ]
@@ -105,14 +135,16 @@ fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     let mut sections = vec![ExportSection::Table(ExportTable {
         name: "Test Cases".into(),
         columns: [
-            "ID",
-            "Title",
+            "Test Case ID",
+            "Description",
+            "Precondition",
+            "Steps to Reproduce",
+            "Input Steps",
+            "Expected Output",
+            "Actual Output",
+            "Result and Remarks",
             "Type",
             "Priority",
-            "Preconditions",
-            "Test Data",
-            "Steps",
-            "Expected Result",
             "Postconditions",
             "Traceability",
         ]
@@ -141,6 +173,26 @@ fn map_test_cases(data: &serde_json::Value) -> AppResult<Vec<ExportSection>> {
     }
 
     Ok(sections)
+}
+
+/// Human label for a stored execution result.
+fn result_label(status: TestCaseResultStatus) -> &'static str {
+    match status {
+        TestCaseResultStatus::Pass => "Pass",
+        TestCaseResultStatus::Fail => "Fail",
+        TestCaseResultStatus::Blocked => "Blocked",
+        TestCaseResultStatus::NotRun => "Not run",
+    }
+}
+
+/// Render the combined "Result and Remarks" cell — the result label,
+/// followed by `— remarks` when a tester left a note.
+fn result_and_remarks(row: &TestCaseResultRow) -> String {
+    let label = result_label(row.result);
+    match row.remarks.as_deref() {
+        Some(remarks) if !remarks.trim().is_empty() => format!("{label} — {remarks}"),
+        _ => label.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,27 +433,31 @@ mod tests {
     #[test]
     fn null_payload_is_rejected() {
         let artifact = artifact_with(ArtifactType::TestCases, serde_json::Value::Null);
-        let err = build_export_doc(&artifact).expect_err("must reject");
+        let err = build_export_doc(&artifact, &[]).expect_err("must reject");
         assert_eq!(err.code(), "INVALID_INPUT");
     }
 
     #[test]
     fn empty_object_payload_is_rejected() {
         let artifact = artifact_with(ArtifactType::BugReport, serde_json::json!({}));
-        let err = build_export_doc(&artifact).expect_err("must reject");
+        let err = build_export_doc(&artifact, &[]).expect_err("must reject");
         assert_eq!(err.code(), "INVALID_INPUT");
     }
 
     #[test]
     fn empty_cases_array_still_yields_header_only_table() {
         let artifact = artifact_with(ArtifactType::TestCases, serde_json::json!({ "cases": [] }));
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         assert_eq!(doc.sections.len(), 1);
         match &doc.sections[0] {
             ExportSection::Table(t) => {
                 assert_eq!(t.name, "Test Cases");
                 assert!(t.rows.is_empty());
-                assert_eq!(t.columns.len(), 10);
+                // 8 core columns (the 9-col view minus the auto Sr-no
+                // index) + 4 trailing optional/superset columns.
+                assert_eq!(t.columns.len(), 12);
+                assert_eq!(t.columns[6], "Actual Output");
+                assert_eq!(t.columns[7], "Result and Remarks");
             }
             ExportSection::KeyValues(_) => panic!("expected table"),
         }
@@ -432,7 +488,7 @@ mod tests {
                 ]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         insta::assert_yaml_snapshot!(doc);
     }
 
@@ -451,15 +507,73 @@ mod tests {
                 }]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         match &doc.sections[0] {
             ExportSection::Table(t) => {
                 let row = &t.rows[0];
-                assert_eq!(row[6], "1. Call add(1, 2)\n2. Inspect return value");
-                assert_eq!(row[7], "Returns 3");
-                // v1 has no type / testData / postconditions.
-                assert_eq!(row[2], "");
-                assert_eq!(row[5], "");
+                // New order: id, description, precondition, steps,
+                // input, expected, actual, result+remarks, type,
+                // priority, postconditions, traceability.
+                assert_eq!(row[3], "1. Call add(1, 2)\n2. Inspect return value");
+                assert_eq!(row[5], "Returns 3");
+                // No sidecar passed → cols 8–9 blank.
+                assert_eq!(row[6], "");
+                assert_eq!(row[7], "");
+                // v1 has no type / input(testData) / postconditions.
+                assert_eq!(row[8], "");
+                assert_eq!(row[4], "");
+            }
+            ExportSection::KeyValues(_) => panic!("expected table"),
+        }
+    }
+
+    #[test]
+    fn test_cases_sidecar_fills_actual_and_result_columns() {
+        use crate::repositories::test_case_result_repo::{
+            TestCaseResultRow, TestCaseResultSource, TestCaseResultStatus,
+        };
+        let artifact = artifact_with(
+            ArtifactType::TestCases,
+            serde_json::json!({
+                "cases": [
+                    {
+                        "id": "TC-A",
+                        "title": "Adds two numbers",
+                        "type": "positive",
+                        "priority": "p1",
+                        "steps": [{ "action": "call add", "expectedResult": "returns 3" }]
+                    },
+                    {
+                        "id": "TC-B",
+                        "title": "Rejects bad input",
+                        "type": "negative",
+                        "priority": "p2",
+                        "steps": [{ "action": "call add(null)", "expectedResult": "throws" }]
+                    }
+                ]
+            }),
+        );
+        let results = vec![TestCaseResultRow {
+            id: "r1".into(),
+            artifact_id: "a1".into(),
+            case_id: "TC-A".into(),
+            actual_output: Some("returned 3".into()),
+            result: TestCaseResultStatus::Pass,
+            remarks: Some("looks good".into()),
+            source: TestCaseResultSource::Manual,
+            run_id: None,
+            created_at: "2026-06-08T00:00:00Z".into(),
+            updated_at: "2026-06-08T00:00:00Z".into(),
+        }];
+        let doc = build_export_doc(&artifact, &results).expect("doc");
+        match &doc.sections[0] {
+            ExportSection::Table(t) => {
+                // TC-A has a sidecar row → cols 8–9 filled.
+                assert_eq!(t.rows[0][6], "returned 3");
+                assert_eq!(t.rows[0][7], "Pass — looks good");
+                // TC-B has no outcome → blank.
+                assert_eq!(t.rows[1][6], "");
+                assert_eq!(t.rows[1][7], "");
             }
             ExportSection::KeyValues(_) => panic!("expected table"),
         }
@@ -488,7 +602,7 @@ mod tests {
                 "summary": "One null-safety finding."
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         insta::assert_yaml_snapshot!(doc);
     }
 
@@ -520,7 +634,7 @@ mod tests {
                 }]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         insta::assert_yaml_snapshot!(doc);
     }
 
@@ -548,7 +662,7 @@ mod tests {
                 }]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         match &doc.sections[0] {
             ExportSection::Table(t) => {
                 let row = &t.rows[0];
@@ -584,7 +698,7 @@ mod tests {
                 "exitCriteria": ["All p0 pass"]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         insta::assert_yaml_snapshot!(doc);
     }
 
@@ -604,7 +718,7 @@ mod tests {
                 "known_risks": ["No Python chunker coverage"]
             }),
         );
-        let doc = build_export_doc(&artifact).expect("doc");
+        let doc = build_export_doc(&artifact, &[]).expect("doc");
         insta::assert_yaml_snapshot!(doc);
     }
 
@@ -629,7 +743,7 @@ mod tests {
         ];
         for (artifact_type, data) in cases {
             let artifact = artifact_with(artifact_type, data);
-            build_export_doc(&artifact).expect("must map without panic");
+            build_export_doc(&artifact, &[]).expect("must map without panic");
         }
     }
 }

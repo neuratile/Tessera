@@ -139,6 +139,9 @@ pub fn run() {
             // Sandbox test-runner commands (sandbox runner Phase 2 + Phase 5 Stop)
             commands::sandbox::run_test_sandbox,
             commands::sandbox::cancel_test_sandbox,
+            // Test-case result sidecar commands (Test Case table cols 8–9)
+            commands::test_case_results::list_test_case_results,
+            commands::test_case_results::upsert_test_case_result,
             // Tracker config and push commands
             commands::trackers::save_tracker_config,
             commands::trackers::list_tracker_configs,

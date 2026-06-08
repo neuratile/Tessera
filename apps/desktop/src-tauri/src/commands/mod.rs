@@ -28,6 +28,7 @@ pub mod ollama;
 pub mod projects;
 pub mod providers;
 pub mod sandbox;
+pub mod test_case_results;
 pub mod trackers;
 
 

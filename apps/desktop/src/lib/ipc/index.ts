@@ -23,6 +23,7 @@ export * as providers from './providers';
 export * as sandbox from './sandbox';
 export * as streaming from './streaming';
 export * as system from './system';
+export * as testCaseResults from './test-case-results';
 export * as trackers from './trackers';
 
 export { IpcError, getErrorMessage } from './error';
