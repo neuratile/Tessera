@@ -6,6 +6,8 @@ import {
 } from '@testing-ide/shared';
 import type { BugReport, DefectReport, TestCase, TestPlan } from '@testing-ide/shared';
 
+import { TestCaseTable } from '@/components/ai-panel/test-case-table';
+
 /**
  * Structured renderers for v2 artifact payloads (plan/ARTIFACT_QUALITY_V2.md
  * Phases 1 + 2): step tables for test cases, repro steps + severity/priority
@@ -47,10 +49,16 @@ export function parseStructuredArtifact(
   return null;
 }
 
-export function ArtifactStructuredView({ parsed }: { parsed: ParsedStructuredArtifact }) {
+export function ArtifactStructuredView({
+  parsed,
+  artifactId,
+}: {
+  parsed: ParsedStructuredArtifact;
+  artifactId: string;
+}) {
   switch (parsed.kind) {
     case 'test-cases':
-      return <TestCasesView data={parsed.data} />;
+      return <TestCaseTable artifactId={artifactId} data={parsed.data} />;
     case 'bug-report':
       return <BugReportView data={parsed.data} />;
     case 'test-plan':
@@ -96,53 +104,6 @@ function StringList({ label, items }: { label: string; items: readonly string[] 
           <li key={`${label}-${i}`}>{item}</li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-function TestCasesView({ data }: { data: TestCase }) {
-  return (
-    <div className="space-y-4">
-      {data.cases.map((tc) => (
-        <article key={tc.id} className="rounded-md border border-border bg-card p-3 space-y-2">
-          <header className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs font-semibold text-foreground">{tc.id}</span>
-            <Pill label="type" value={tc.type} />
-            <Pill label="priority" value={tc.priority} />
-          </header>
-          <h3 className="text-sm font-medium text-foreground">{tc.title}</h3>
-          <StringList label="Preconditions" items={tc.preconditions} />
-          {tc.testData !== undefined && tc.testData.length > 0 ? (
-            <div>
-              <p className={FIELD_LABEL_CLASS}>Test data</p>
-              <p className="mt-1 font-mono text-xs">{tc.testData}</p>
-            </div>
-          ) : null}
-          <div>
-            <p className={FIELD_LABEL_CLASS}>Steps</p>
-            <table className="mt-1 w-full border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-border text-left">
-                  <th className="text-muted-foreground w-8 py-1 pr-2 font-semibold">#</th>
-                  <th className="text-muted-foreground py-1 pr-2 font-semibold">Action</th>
-                  <th className="text-muted-foreground py-1 font-semibold">Expected result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tc.steps.map((step, i) => (
-                  <tr key={`${tc.id}-step-${i}`} className="border-b border-border/50 align-top">
-                    <td className="text-muted-foreground py-1 pr-2 font-mono">{i + 1}</td>
-                    <td className="py-1 pr-2">{step.action}</td>
-                    <td className="py-1">{step.expectedResult}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <StringList label="Postconditions" items={tc.postconditions} />
-          <StringList label="Traceability" items={tc.traceability} />
-        </article>
-      ))}
     </div>
   );
 }

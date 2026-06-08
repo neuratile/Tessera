@@ -7,25 +7,29 @@ sections:
   - Table:
       name: Test Cases
       columns:
-        - ID
-        - Title
+        - Test Case ID
+        - Description
+        - Precondition
+        - Steps to Reproduce
+        - Input Steps
+        - Expected Output
+        - Actual Output
+        - Result and Remarks
         - Type
         - Priority
-        - Preconditions
-        - Test Data
-        - Steps
-        - Expected Result
         - Postconditions
         - Traceability
       rows:
         - - TC-LOGIN-SUCCESS
           - Valid login succeeds
+          - 1. User exists
+          - "1. Open login page\n2. Submit valid creds"
+          - user@example.com / hunter2
+          - "1. Form renders\n2. Redirect to home"
+          - ""
+          - ""
           - positive
           - p0
-          - 1. User exists
-          - user@example.com / hunter2
-          - "1. Open login page\n2. Submit valid creds"
-          - "1. Form renders\n2. Redirect to home"
           - 1. Session cookie set
           - "src/auth.ts#login"
   - Table:

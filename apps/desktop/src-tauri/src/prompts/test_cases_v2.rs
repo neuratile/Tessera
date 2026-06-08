@@ -49,6 +49,10 @@ Rules:
   relative path. Use workspace-relative paths only — never an absolute \
   path or a `..` segment. Omit `files` only when the scope has no \
   executable behavior (e.g. pure type declarations).
+- Each generated spec's top-level `it`/`test` title MUST begin with the \
+  owning case `id` as its first token, e.g. \
+  `it('TC-LOGIN-01 rejects empty password', …)`. The sandbox runner parses \
+  that leading token to map an assertion's pass/fail back to its test case.
 - Always invoke the `emit_test_cases` tool with the structured payload. \
   Never reply with free-form prose.
 
@@ -107,6 +111,7 @@ pub fn build_messages(ctx: &PromptContext<'_>) -> Vec<Message> {
     }\n\
     Every `steps` entry is an OBJECT with `action` and `expectedResult` — never a plain string. Include at least one `negative` and one `boundary` case per covered feature.\n\
     Include `files` so the cases run in the local sandbox: the minimal source-under-test (marked isTest:false) plus one vitest spec per source file (marked isTest:true), using workspace-relative paths only (no absolute paths, no `..`). Omit `files` only when the scope has no executable behavior.\n\
+    Each spec's top-level `it`/`test` title MUST begin with the owning case `id` token (e.g. `it('TC-LOGIN-01 rejects empty password', …)`) so sandbox results map back to the case.\n\
     Do NOT output fields from the codebase (like architect, location, timeline, bhk_display, category, etc.) at the top level. You MUST use only the keys listed above. Do NOT reply with free-form prose, apologies, or explanations. You MUST invoke the tool.");
 
     vec![system_text(SYSTEM_INSTRUCTIONS), user_text(user_body)]
@@ -310,6 +315,14 @@ mod tests {
     fn prompt_mandates_negative_and_boundary_cases() {
         assert!(SYSTEM_INSTRUCTIONS.contains("at least one `negative` case"));
         assert!(SYSTEM_INSTRUCTIONS.contains("at least one `boundary` case"));
+    }
+
+    #[test]
+    fn prompt_requires_tc_id_prefixed_spec_titles() {
+        // plan/TEST_CASE_TABLE.md §4.2 name→id bridge: specs must lead
+        // with the case id so sandbox results re-attach to the case.
+        assert!(SYSTEM_INSTRUCTIONS.contains("MUST begin with the"));
+        assert!(SYSTEM_INSTRUCTIONS.contains("TC-LOGIN-01 rejects empty password"));
     }
 
     #[test]

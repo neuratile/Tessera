@@ -30,7 +30,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::error::{AppError, AppResult};
-use crate::repositories::artifact_repo;
+use crate::repositories::{artifact_repo, test_case_result_repo};
 
 pub use csv_writer::render_tsv;
 pub use ir::ExportDoc;
@@ -163,11 +163,18 @@ pub async fn artifact_tsv(pool: &SqlitePool, artifact_id: &str) -> AppResult<Str
     Ok(render_tsv(&doc))
 }
 
-/// Shared first half of every export flow: fetch the artifact row
-/// and map it into the IR.
+/// Shared first half of every export flow: fetch the artifact row,
+/// join its per-case execution-outcome sidecar, and map both into the
+/// IR. The sidecar drives the Actual output / Result and remarks
+/// columns for test-cases artifacts; it is empty for every other type.
 async fn load_export_doc(pool: &SqlitePool, artifact_id: &str) -> AppResult<ExportDoc> {
     let artifact = artifact_repo::fetch(pool, artifact_id).await?;
-    build_export_doc(&artifact)
+    let results = if artifact.artifact_type == artifact_repo::ArtifactType::TestCases {
+        test_case_result_repo::list_by_artifact(pool, artifact_id).await?
+    } else {
+        Vec::new()
+    };
+    build_export_doc(&artifact, &results)
 }
 
 fn write_doc(doc: &ExportDoc, format: ExportFormat, dest: &Path) -> AppResult<Vec<PathBuf>> {
@@ -582,7 +589,7 @@ mod tests {
         let primary = std::fs::read(&written[0]).expect("read back");
         // BOM is CSV-only — a BOM in TSV breaks tab-aware CLI tools.
         assert_ne!(&primary[..3], csv_writer::UTF8_BOM);
-        assert!(primary.starts_with(b"ID\t"));
+        assert!(primary.starts_with(b"Test Case ID\t"));
 
         pool.close().await;
         let _ = std::fs::remove_dir_all(&dir);
@@ -703,7 +710,7 @@ mod tests {
             seeded_pool_with_artifact(ArtifactType::TestCases, test_cases_payload()).await;
         let tsv = artifact_tsv(&pool, &id).await.expect("tsv");
         // Multi-section doc: section names included.
-        assert!(tsv.starts_with("Test Cases\r\nID\tTitle"));
+        assert!(tsv.starts_with("Test Cases\r\nTest Case ID\tDescription"));
         assert!(tsv.contains("TC-1\tFirst case"));
         pool.close().await;
         let _ = std::fs::remove_file(&db_path);

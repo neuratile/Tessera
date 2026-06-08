@@ -23,7 +23,7 @@
 //! (opt-out, missing / wrong-type artifact, unbuildable workspace) short
 //! circuit with an `Err`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
@@ -32,9 +32,12 @@ use serde_json::Value as JsonValue;
 use crate::error::{AppError, AppResult};
 use crate::providers::runners::{
     CancelToken, RunInput, RunRequest, RunResult, RunStatus, RunnerError, RunnerLanguage,
-    RunnerOutput, ResourceLimits, TestRunner, TestStatus, WorkspaceFile,
+    RunnerOutput, ResourceLimits, TestResult, TestRunner, TestStatus, WorkspaceFile,
 };
 use crate::repositories::artifact_repo::{self, ArtifactType};
+use crate::repositories::test_case_result_repo::{
+    self, TestCaseResultSource, TestCaseResultStatus, TestCaseResultUpsert,
+};
 use crate::repositories::test_run_repo::{self, RunOutcome, TestRunInsert};
 
 /// In-flight run → [`CancelToken`] map, shared between [`run`] (which
@@ -139,8 +142,11 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
         )));
     }
 
-    // 3. Build the workspace contract from the artifact.
+    // 3. Build the workspace contract from the artifact. The case ids
+    //    are collected up front so the post-run name→id bridge (plan
+    //    §4.2) can fold executed assertions back onto their cases.
     let input = build_run_input(&artifact.structured_data)?;
+    let case_ids = collect_case_ids(&artifact.structured_data);
 
     // 4. Open the run row.
     let run_id = test_run_repo::insert_run(
@@ -187,7 +193,9 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     }
 
     match outcome {
-        Ok(output) => persist_success(deps, &run_id, &artifact.id, output, duration_ms).await?,
+        Ok(output) => {
+            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids).await?;
+        }
         Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms).await?,
     }
 
@@ -212,6 +220,7 @@ async fn persist_success(
     artifact_id: &str,
     output: RunnerOutput,
     duration_ms: u32,
+    case_ids: &HashSet<String>,
 ) -> AppResult<()> {
     // Capture insert errors instead of `?`-returning, so `finalize_run` is
     // always reached. Otherwise a failure between the two inserts (e.g.
@@ -244,6 +253,12 @@ async fn persist_success(
         },
     )
     .await?;
+
+    // Name→id bridge (plan §4.2): fold executed assertions back onto
+    // their test cases and auto-fill the sidecar's Actual output /
+    // Result columns. Best-effort — a failure here must not fail the
+    // run, whose canonical state is already persisted above.
+    bridge_sandbox_results(deps, run_id, artifact_id, &output.tests, case_ids).await;
 
     if let Some(crypto) = deps.crypto {
         let _ = crate::services::jira_push_service::post_run_comment(
@@ -374,6 +389,131 @@ fn count_status(tests: &[crate::providers::runners::TestResult], status: TestSta
 
 fn elapsed_ms(started: Instant) -> u32 {
     u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX)
+}
+
+/// Collect the `TC-…` ids declared in the artifact's
+/// `structured_data.cases[]`. The name→id bridge only auto-fills cases
+/// that actually exist, so a stray assertion naming a non-existent id
+/// is ignored rather than creating an orphan sidecar row.
+fn collect_case_ids(structured_data: &JsonValue) -> HashSet<String> {
+    structured_data
+        .get("cases")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|case| case.get("id").and_then(JsonValue::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Parse the leading `^TC-[A-Z0-9_-]+` token from an assertion name
+/// (plan §4.2). The generated spec convention is to begin each
+/// top-level `it`/`test` title with the case id, e.g.
+/// `it('TC-LOGIN-01 rejects empty password', …)`. Returns `None` when
+/// the name does not start with a well-formed `TC-` token.
+fn parse_case_id(name: &str) -> Option<&str> {
+    let trimmed = name.trim_start();
+    if !trimmed.starts_with("TC-") {
+        return None;
+    }
+    let end = trimmed
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '-' || *c == '_'))
+        .map_or(trimmed.len(), |(i, _)| i);
+    let token = &trimmed[..end];
+    // Require at least one character after the `TC-` prefix.
+    (token.len() > 3).then_some(token)
+}
+
+/// Fold executed assertions into one outcome per case (plan §4.2). An
+/// assertion is matched to a case only when its leading token parses to
+/// a known case id; unmatched assertions are dropped (still recorded as
+/// raw `test_run_cases` rows elsewhere). A case is `fail` if any of its
+/// assertions failed, else `pass`; `actual_output` is the concatenated
+/// failure messages, or `"All N assertions passed."`. First-seen order
+/// is preserved so the batch write is deterministic.
+fn fold_sandbox_results(
+    case_ids: &HashSet<String>,
+    tests: &[TestResult],
+) -> Vec<(String, TestCaseResultStatus, String)> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut groups: HashMap<&str, Vec<&TestResult>> = HashMap::new();
+    for test in tests {
+        let Some(case_id) = parse_case_id(&test.name) else {
+            continue;
+        };
+        if !case_ids.contains(case_id) {
+            continue;
+        }
+        groups
+            .entry(case_id)
+            .or_insert_with(|| {
+                order.push(case_id);
+                Vec::new()
+            })
+            .push(test);
+    }
+
+    order
+        .into_iter()
+        .map(|case_id| {
+            let group = &groups[case_id];
+            let failures: Vec<&str> = group
+                .iter()
+                .filter(|t| t.status == TestStatus::Failed)
+                .filter_map(|t| t.failure_message.as_deref())
+                .collect();
+            let any_failed = group.iter().any(|t| t.status == TestStatus::Failed);
+            let (status, actual) = if any_failed {
+                let message = if failures.is_empty() {
+                    "Assertion failed (no message reported).".to_string()
+                } else {
+                    failures.join("\n")
+                };
+                (TestCaseResultStatus::Fail, message)
+            } else {
+                let n = group.len();
+                let noun = if n == 1 { "assertion" } else { "assertions" };
+                (TestCaseResultStatus::Pass, format!("All {n} {noun} passed."))
+            };
+            (case_id.to_string(), status, actual)
+        })
+        .collect()
+}
+
+/// Best-effort name→id auto-fill: fold the run's assertions onto their
+/// cases and upsert the outcomes with `source = sandbox`. Any failure
+/// is logged and swallowed — the run's own result is already durable.
+async fn bridge_sandbox_results(
+    deps: &SandboxDeps<'_>,
+    run_id: &str,
+    artifact_id: &str,
+    tests: &[TestResult],
+    case_ids: &HashSet<String>,
+) {
+    if case_ids.is_empty() {
+        return;
+    }
+    let folded = fold_sandbox_results(case_ids, tests);
+    if folded.is_empty() {
+        return;
+    }
+    let rows: Vec<TestCaseResultUpsert> = folded
+        .into_iter()
+        .map(|(case_id, result, actual_output)| TestCaseResultUpsert {
+            artifact_id: artifact_id.to_string(),
+            case_id,
+            actual_output: Some(actual_output),
+            result,
+            remarks: None,
+            source: TestCaseResultSource::Sandbox,
+            run_id: Some(run_id.to_string()),
+        })
+        .collect();
+
+    if let Err(e) = test_case_result_repo::batch_upsert(deps.pool, &rows).await {
+        tracing::warn!(run_id, error = %e, "sandbox name→id auto-fill failed");
+    }
 }
 
 #[cfg(test)]
@@ -888,6 +1028,144 @@ mod tests {
 
         // 5. Assert mock comment was posted
         mock.assert_async().await;
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn tc_test(name: &str, status: TestStatus, failure: Option<&str>) -> TestResult {
+        TestResult {
+            name: name.into(),
+            status,
+            duration_ms: 1,
+            failure_message: failure.map(str::to_string),
+            source_line: None,
+        }
+    }
+
+    #[test]
+    fn parse_case_id_reads_only_a_leading_tc_token() {
+        assert_eq!(parse_case_id("TC-LOGIN-01 rejects empty"), Some("TC-LOGIN-01"));
+        assert_eq!(parse_case_id("  TC-A_B-2 does things"), Some("TC-A_B-2"));
+        // Non-TC names and lowercase / bare prefixes do not match.
+        assert_eq!(parse_case_id("adds two numbers"), None);
+        assert_eq!(parse_case_id("tc-login-01 lowercase"), None);
+        assert_eq!(parse_case_id("TC- empty token"), None);
+    }
+
+    #[test]
+    fn fold_matches_single_and_multi_and_ignores_unmatched() {
+        let case_ids: HashSet<String> =
+            ["TC-A".to_string(), "TC-B".to_string()].into_iter().collect();
+        let tests = vec![
+            // TC-A: single passing assertion.
+            tc_test("TC-A returns 3", TestStatus::Passed, None),
+            // TC-B: two assertions, one fails → case fails, messages concatenated.
+            tc_test("TC-B handles zero", TestStatus::Passed, None),
+            tc_test("TC-B handles max", TestStatus::Failed, Some("expected 2 to equal 3")),
+            // Unmatched: parses to a TC id absent from the artifact → dropped.
+            tc_test("TC-GHOST orphaned", TestStatus::Failed, Some("boom")),
+            // Unmatched: no TC token at all → dropped.
+            tc_test("plain assertion", TestStatus::Passed, None),
+        ];
+
+        let folded = fold_sandbox_results(&case_ids, &tests);
+        assert_eq!(folded.len(), 2, "only the two real cases are folded");
+
+        let (a_id, a_status, a_actual) = &folded[0];
+        assert_eq!(a_id, "TC-A");
+        assert_eq!(*a_status, TestCaseResultStatus::Pass);
+        // Singular noun when exactly one assertion passed.
+        assert_eq!(a_actual, "All 1 assertion passed.");
+
+        let (b_id, b_status, b_actual) = &folded[1];
+        assert_eq!(b_id, "TC-B");
+        assert_eq!(*b_status, TestCaseResultStatus::Fail);
+        assert_eq!(b_actual, "expected 2 to equal 3");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_auto_fills_sidecar_from_tc_named_assertions() {
+        let (pool, path) = open_pool().await;
+        // Seed a test-cases artifact carrying both cases[] and a runnable
+        // files[] workspace so the run can build a valid RunInput.
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO projects (id, user_id, name, root_path, created_at, updated_at) \
+             VALUES ('p1', '00000000-0000-4000-8000-000000000001', 'p', '/tmp/p', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("seed project");
+        let artifact_id = artifact_repo::insert(
+            &pool,
+            ArtifactInsert {
+                project_id: "p1".into(),
+                artifact_type: ArtifactType::TestCases,
+                title: "Cases".into(),
+                content_md: "# Cases\n".into(),
+                structured_data: serde_json::json!({
+                    "cases": [{ "id": "TC-A" }, { "id": "TC-B" }],
+                    "files": [
+                        { "path": "src/add.ts", "contents": "export const add = (a, b) => a + b;", "isTest": false },
+                        { "path": "add.test.ts", "contents": "import { test } from 'vitest';", "isTest": true }
+                    ]
+                }),
+                generation_metadata: GenerationMetadata {
+                    provider: "ollama".into(),
+                    model: "m".into(),
+                    prompt_version: "test_cases_v2".into(),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    started_at: now.clone(),
+                    completed_at: now.clone(),
+                },
+                parent_id: None,
+            },
+        )
+        .await
+        .expect("seed artifact");
+
+        let output = RunnerOutput {
+            status: RunStatus::Failed,
+            tests: vec![
+                tc_test("TC-A returns 3", TestStatus::Passed, None),
+                tc_test("TC-B overflow", TestStatus::Failed, Some("expected 2 to equal 3")),
+                tc_test("untagged assertion", TestStatus::Passed, None),
+            ],
+            coverage: vec![],
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let runner: Arc<dyn TestRunner> =
+            Arc::new(ScriptedRunner::new(Scripted::Succeed(output)));
+        let registry = RunRegistry::new();
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+
+        run(
+            RunRequest {
+                artifact_id: artifact_id.clone(),
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            &deps,
+        )
+        .await
+        .expect("run succeeds");
+
+        let mut rows = test_case_result_repo::list_by_artifact(&pool, &artifact_id)
+            .await
+            .expect("list sidecar");
+        rows.sort_by(|a, b| a.case_id.cmp(&b.case_id));
+        assert_eq!(rows.len(), 2, "only TC-A and TC-B auto-filled");
+        assert_eq!(rows[0].case_id, "TC-A");
+        assert_eq!(rows[0].result, TestCaseResultStatus::Pass);
+        assert_eq!(rows[0].source, TestCaseResultSource::Sandbox);
+        assert_eq!(rows[1].case_id, "TC-B");
+        assert_eq!(rows[1].result, TestCaseResultStatus::Fail);
+        assert_eq!(rows[1].actual_output.as_deref(), Some("expected 2 to equal 3"));
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

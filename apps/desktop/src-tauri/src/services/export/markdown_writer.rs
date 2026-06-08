@@ -168,11 +168,11 @@ fn render_test_case(out: &mut String, case: &TestCase, index: usize) {
     );
     labelled_line(out, "Type", &case.case_type);
     labelled_line(out, "Priority", &case.priority);
-    labelled_numbered_list(out, "Preconditions", &case.preconditions);
-    labelled_line(out, "Test Data", &case.test_data);
+    labelled_numbered_list(out, "Precondition", &case.preconditions);
+    labelled_line(out, "Input Steps", &case.test_data);
 
     if !case.steps.is_empty() {
-        let _ = writeln!(out, "**Steps:**\n");
+        let _ = writeln!(out, "**Steps to Reproduce:**\n");
         for (idx, step) in case.steps.iter().enumerate() {
             let expected = step.expected_result();
             if expected.is_empty() {
@@ -192,7 +192,7 @@ fn render_test_case(out: &mut String, case: &TestCase, index: usize) {
 
     // v1 carries a single case-level expected result instead of
     // per-step ones.
-    labelled_line(out, "Expected Result", &case.expected_result);
+    labelled_line(out, "Expected Output", &case.expected_result);
     labelled_numbered_list(out, "Postconditions", &case.postconditions);
     if !case.traceability.is_empty() {
         labelled_line(out, "Traceability", &case.traceability.join(", "));
@@ -436,7 +436,7 @@ mod tests {
         let md = render_artifact_markdown(ArtifactType::TestCases, &data).expect("render");
 
         assert!(md.contains("1. Call add(1, 2)\n2. Inspect return value"));
-        assert!(md.contains("**Expected Result:** Returns 3"));
+        assert!(md.contains("**Expected Output:** Returns 3"));
     }
 
     #[test]

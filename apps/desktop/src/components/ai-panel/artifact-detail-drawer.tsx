@@ -500,7 +500,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
             />
           ) : detail !== null ? (
             structured !== null ? (
-              <ArtifactStructuredView parsed={structured} />
+              <ArtifactStructuredView parsed={structured} artifactId={current.id} />
             ) : (
               <MarkdownView source={detail.contentMd} />
             )

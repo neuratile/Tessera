@@ -28,6 +28,7 @@ export * from './schemas/llm-provider.schema';
 export * from './schemas/project.schema';
 export * from './schemas/provider.schema';
 export * from './schemas/test-case.schema';
+export * from './schemas/test-case-result.schema';
 export * from './schemas/test-plan.schema';
 export * from './schemas/test-run.schema';
 export * from './schemas/user.schema';
