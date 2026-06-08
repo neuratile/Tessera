@@ -37,3 +37,7 @@ Thumbs.db
 
 # Marketing website — separate project, kept out of the app repo
 website/
+
+# Local git worktree checkouts — never committed; each is its own checkout
+.worktrees/
+.claude/worktrees/
