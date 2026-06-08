@@ -1,4 +1,4 @@
-import type { TrackerConfigView, TrackerUser } from '@testing-ide/shared';
+import type { TrackerConfigView } from '@testing-ide/shared';
 import { Check, Loader2, X, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -20,7 +20,7 @@ export function JiraConfigPanel() {
   const [isCustomIssueType, setIsCustomIssueType] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<TrackerUser | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -95,7 +95,10 @@ export function JiraConfigPanel() {
     setError(null);
     void (async () => {
       try {
-        const view = await trackers.saveTrackerConfig(buildArgs());
+        await trackers.saveTrackerConfig(buildArgs());
+        // The save command returns the row id; re-read the masked view so the
+        // panel reflects the canonical persisted state (incl. hasApiToken).
+        const view = await trackers.getTrackerConfig('jira');
         setSaved(view);
         setApiToken('');
         toast.ok('Jira integration settings saved successfully.', { title: 'Jira Integration' });
@@ -108,11 +111,13 @@ export function JiraConfigPanel() {
   }, [buildArgs]);
 
   const handleDelete = useCallback(() => {
+    if (saved === null) return;
+    const id = saved.id;
     setDeleting(true);
     setError(null);
     void (async () => {
       try {
-        await trackers.deleteTrackerConfig('jira');
+        await trackers.deleteTrackerConfig(id);
         setSaved(null);
         setSiteUrl('');
         setEmail('');
@@ -129,7 +134,7 @@ export function JiraConfigPanel() {
         setDeleting(false);
       }
     })();
-  }, []);
+  }, [saved]);
 
   const hasSavedToken = saved !== null && saved.hasApiToken;
 
@@ -270,7 +275,7 @@ export function JiraConfigPanel() {
           role="status"
         >
           <Check className="mt-0.5 size-3.5 shrink-0" />
-          <span>Connected as {testResult.displayName} ({testResult.email || 'no email exposed'})</span>
+          <span>Connected as {testResult}</span>
         </div>
       ) : null}
 

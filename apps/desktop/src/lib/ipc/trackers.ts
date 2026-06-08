@@ -3,18 +3,14 @@ import {
   TrackerConfigViewSchema,
   type ExternalLink,
   ExternalLinkSchema,
-  type PushPreview,
-  PushPreviewSchema,
-  type CreatedIssue,
-  CreatedIssueSchema,
-  type TrackerUser,
-  TrackerUserSchema,
+  type PushResult,
+  PushResultSchema,
   type BulkPushResultItem,
   BulkPushResultItemSchema,
 } from '@testing-ide/shared';
 import { z } from 'zod';
 
-import { invokeAndParse, invokeVoid } from './invoke';
+import { invokeAndParse, invokeString, invokeVoid } from './invoke';
 
 export type SaveTrackerConfigArgs = {
   tracker: string;
@@ -33,38 +29,55 @@ export type TestTrackerConnectionArgs = {
   apiToken?: string | undefined;
 };
 
-export async function saveTrackerConfig(args: SaveTrackerConfigArgs): Promise<TrackerConfigView> {
-  return invokeAndParse('save_tracker_config', TrackerConfigViewSchema, { args });
+/** Save or update a tracker config. Backend returns the row id. */
+export async function saveTrackerConfig(args: SaveTrackerConfigArgs): Promise<string> {
+  return invokeString('save_tracker_config', { args });
 }
 
-export async function getTrackerConfig(tracker: string = 'jira'): Promise<TrackerConfigView | null> {
-  return invokeAndParse('get_tracker_config', TrackerConfigViewSchema.nullable(), { tracker });
+/** List all tracker configs (tokens masked). */
+export async function listTrackerConfigs(): Promise<TrackerConfigView[]> {
+  return invokeAndParse('list_tracker_configs', z.array(TrackerConfigViewSchema), {});
 }
 
-export async function deleteTrackerConfig(tracker: string = 'jira'): Promise<void> {
-  return invokeVoid('delete_tracker_config', { tracker });
+/**
+ * Fetch the single config for a given tracker, if any. There is no dedicated
+ * Rust `get` command — we list and filter (the list is tiny: one row per
+ * tracker, enforced by the `UNIQUE (user_id, tracker)` constraint).
+ */
+export async function getTrackerConfig(tracker = 'jira'): Promise<TrackerConfigView | null> {
+  const configs = await listTrackerConfigs();
+  return configs.find((c) => c.tracker === tracker) ?? null;
 }
 
-export async function testTrackerConnection(args: TestTrackerConnectionArgs): Promise<TrackerUser> {
-  return invokeAndParse('test_tracker_connection', TrackerUserSchema, { args });
+/** Delete a tracker config by its row id (UUID). */
+export async function deleteTrackerConfig(id: string): Promise<void> {
+  return invokeVoid('delete_tracker_config', { id });
 }
 
-export async function previewJiraPush(artifactId: string): Promise<PushPreview> {
-  return invokeAndParse('preview_jira_push', PushPreviewSchema, { artifactId });
+/** Test a tracker connection. Backend returns the connected user's display name. */
+export async function testTrackerConnection(args: TestTrackerConnectionArgs): Promise<string> {
+  return invokeString('test_tracker_connection', { args });
 }
 
-export async function pushArtifactToJira(artifactId: string): Promise<CreatedIssue> {
-  return invokeAndParse('push_artifact_to_jira', CreatedIssueSchema, { artifactId });
+/** Push a single artifact to Jira. Returns the created issue keys + urls. */
+export async function pushArtifactToJira(artifactId: string): Promise<PushResult> {
+  return invokeAndParse('push_to_tracker', PushResultSchema, { artifactId });
 }
 
+/** Push many artifacts to Jira; failures are reported per-item, not fatal. */
 export async function bulkPushArtifactsToJira(artifactIds: string[]): Promise<BulkPushResultItem[]> {
-  return invokeAndParse('bulk_push_artifacts_to_jira', z.array(BulkPushResultItemSchema), { artifactIds });
+  return invokeAndParse('bulk_push_to_tracker', z.array(BulkPushResultItemSchema), { artifactIds });
 }
 
+/** Refresh a linked issue's status; returns the updated link row. */
 export async function refreshExternalLinkStatus(linkId: string): Promise<ExternalLink> {
-  return invokeAndParse('refresh_external_link_status', ExternalLinkSchema, { linkId });
+  return invokeAndParse('refresh_tracker_link_status', ExternalLinkSchema, { linkId });
 }
 
+/**
+ * List external links. Pass an `artifactId` to scope to one artifact, or omit
+ * it to list every link (used by the AI panel to build its artifact→link map).
+ */
 export async function listExternalLinks(artifactId?: string): Promise<ExternalLink[]> {
   return invokeAndParse('list_external_links', z.array(ExternalLinkSchema), { artifactId });
 }

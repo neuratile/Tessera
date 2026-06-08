@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/**
+ * Mirrors `tracker_config_service::TrackerConfigView` (serde `camelCase`).
+ * The API token is never sent to the client — only a `hasApiToken` flag.
+ */
 export const TrackerConfigViewSchema = z.object({
   id: z.string().uuid(),
   tracker: z.string(),
@@ -8,11 +12,13 @@ export const TrackerConfigViewSchema = z.object({
   hasApiToken: z.boolean(),
   projectKey: z.string(),
   issueType: z.string(),
+  severityMapJson: z.string().nullable().optional(),
   isActive: z.boolean(),
 });
 
 export type TrackerConfigView = z.infer<typeof TrackerConfigViewSchema>;
 
+/** Mirrors `external_link_repo::ExternalLinkRow` (serde `camelCase`). */
 export const ExternalLinkSchema = z.object({
   id: z.string().uuid(),
   artifactId: z.string().uuid(),
@@ -29,39 +35,23 @@ export const ExternalLinkSchema = z.object({
 
 export type ExternalLink = z.infer<typeof ExternalLinkSchema>;
 
-export const PushPreviewSchema = z.object({
-  summary: z.string(),
-  description: z.string(),
-  priority: z.string().nullable().optional(),
-  labels: z.array(z.string()),
-  projectKey: z.string(),
-  issueType: z.string(),
-  alreadyLinked: z.boolean(),
+/**
+ * Mirrors `jira_push_service::PushResult` (serde `camelCase`).
+ * One artifact can produce many issues (e.g. each test case), so keys/urls
+ * are parallel arrays.
+ */
+export const PushResultSchema = z.object({
+  keys: z.array(z.string()),
+  urls: z.array(z.string()),
 });
 
-export type PushPreview = z.infer<typeof PushPreviewSchema>;
+export type PushResult = z.infer<typeof PushResultSchema>;
 
-export const CreatedIssueSchema = z.object({
-  key: z.string(),
-  id: z.string(),
-  url: z.string(),
-});
-
-export type CreatedIssue = z.infer<typeof CreatedIssueSchema>;
-
-export const TrackerUserSchema = z.object({
-  displayName: z.string(),
-  email: z.string().nullable().optional(),
-  accountId: z.string(),
-});
-
-export type TrackerUser = z.infer<typeof TrackerUserSchema>;
-
+/** Mirrors `jira_push_service::BulkPushResultItem` (serde `camelCase`). */
 export const BulkPushResultItemSchema = z.object({
-  artifactId: z.string().uuid(),
+  artifactId: z.string(),
   success: z.boolean(),
-  key: z.string().nullable().optional(),
-  url: z.string().nullable().optional(),
+  keys: z.array(z.string()),
   error: z.string().nullable().optional(),
 });
 

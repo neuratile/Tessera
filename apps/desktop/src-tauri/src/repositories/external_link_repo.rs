@@ -150,6 +150,22 @@ pub async fn list_for_artifact(
     Ok(rows.into_iter().map(decode_row).collect())
 }
 
+/// List every external link, newest first.
+///
+/// Tessera is single-user/local-first, so all rows belong to the one local
+/// user; the AI panel uses this to build an artifact→link map across the whole
+/// review queue in a single query (avoids an N+1 per-artifact lookup).
+pub async fn list_all(pool: &SqlitePool) -> AppResult<Vec<ExternalLinkRow>> {
+    let rows: Vec<RawRow> = sqlx::query_as(
+        "SELECT id, artifact_id, tracker, item_ref, issue_key, issue_url, issue_type, last_status, status_fetched_at, created_at, updated_at \
+         FROM external_links ORDER BY created_at DESC"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(decode_row).collect())
+}
+
 pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> AppResult<()> {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
@@ -318,6 +334,10 @@ mod tests {
         let list = list_for_artifact(&pool, "art1").await.expect("list");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, id);
+
+        let all = list_all(&pool).await.expect("list all");
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, id);
 
         update_status(&pool, &id, "Done").await.expect("update status");
         let fetched3 = fetch(&pool, &id).await.expect("fetch 3");

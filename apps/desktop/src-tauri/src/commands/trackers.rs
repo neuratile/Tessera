@@ -153,18 +153,21 @@ pub async fn refresh_tracker_link_status(
     pool: State<'_, SqlitePool>,
     crypto: State<'_, CryptoKey>,
     link_id: String,
-) -> Result<String, String> {
+) -> Result<ExternalLinkRow, String> {
     jira_push_service::refresh_link_status(&pool, &crypto, &link_id)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub async fn list_external_links(
     pool: State<'_, SqlitePool>,
-    artifact_id: String,
+    artifact_id: Option<String>,
 ) -> Result<Vec<ExternalLinkRow>, String> {
-    external_link_repo::list_for_artifact(&pool, &artifact_id)
-        .await
-        .map_err(|e| e.to_string())
+    match artifact_id {
+        Some(id) => external_link_repo::list_for_artifact(&pool, &id).await,
+        None => external_link_repo::list_all(&pool).await,
+    }
+    .map_err(|e| e.to_string())
 }

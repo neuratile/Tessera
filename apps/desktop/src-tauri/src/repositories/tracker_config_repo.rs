@@ -173,7 +173,6 @@ pub async fn fetch_active(
     )
     .bind(user_id)
     .bind(tracker)
-    .bind(1)
     .fetch_optional(pool)
     .await?;
 

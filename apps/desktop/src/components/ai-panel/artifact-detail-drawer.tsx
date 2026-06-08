@@ -119,8 +119,9 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
         if (config && config.isActive) {
           setJiraConfig(config);
         }
-      } catch (err) {
-        console.error('Failed to load Jira config in detail drawer:', err);
+      } catch {
+        // Non-critical: the Jira push affordance simply stays hidden when the
+        // config can't be loaded. Surfacing an error here would be noise.
       }
     })();
   }, []);

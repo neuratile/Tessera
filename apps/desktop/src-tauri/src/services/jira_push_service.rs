@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use crate::error::AppResult;
 use crate::providers::trackers::NewIssue;
-use crate::repositories::external_link_repo::{self, ExternalLinkUpsert};
+use crate::repositories::external_link_repo::{self, ExternalLinkRow, ExternalLinkUpsert};
 use crate::repositories::tracker_config_repo;
 use crate::services::tracker_config_service::build_tracker_client;
 use crate::utils::crypto::CryptoKey;
@@ -228,12 +228,13 @@ pub async fn bulk_push_artifacts(
     Ok(results)
 }
 
-/// Refresh the status of a linked Jira issue.
+/// Refresh the status of a linked Jira issue and return the updated link row
+/// so the UI can patch its artifact→link map without a second round-trip.
 pub async fn refresh_link_status(
     pool: &SqlitePool,
     crypto: &CryptoKey,
     link_id: &str,
-) -> AppResult<String> {
+) -> AppResult<ExternalLinkRow> {
     let link = external_link_repo::fetch(pool, link_id).await?;
     let tracker_config = tracker_config_repo::fetch_active(pool, DEFAULT_USER_ID, &link.tracker).await?;
     let tracker = build_tracker_client(crypto, &tracker_config)?;
@@ -241,7 +242,7 @@ pub async fn refresh_link_status(
         .get_issue_status(&link.issue_key)
         .await?;
     external_link_repo::update_status(pool, link_id, &status).await?;
-    Ok(status)
+    external_link_repo::fetch(pool, link_id).await
 }
 
 /// Post sandbox run results as a comment on any linked issues for this artifact.
