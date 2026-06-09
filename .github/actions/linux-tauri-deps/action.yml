@@ -9,6 +9,10 @@ runs:
   using: composite
   steps:
     - name: apt-get install Tauri system libraries
+      # Self-protecting: apt-get only exists on the Linux runners. Callers
+      # already gate Linux-only, but guarding here too keeps the action safe
+      # if a future contributor invokes it from a macOS/Windows job.
+      if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo apt-get update
