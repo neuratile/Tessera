@@ -1,0 +1,28 @@
+name: Install Linux Tauri deps
+description: >
+  Install the WebKitGTK / GTK / appindicator system libraries the Tauri
+  desktop crate links against on Ubuntu runners. Extracted from the inline
+  apt-get block that was duplicated across every Rust-compiling CI job and
+  the release bundle so the package list lives in exactly one place.
+
+runs:
+  using: composite
+  steps:
+    - name: apt-get install Tauri system libraries
+      # Self-protecting: apt-get only exists on the Linux runners. Callers
+      # already gate Linux-only, but guarding here too keeps the action safe
+      # if a future contributor invokes it from a macOS/Windows job.
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          libssl-dev \
+          libgtk-3-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          build-essential \
+          curl \
+          wget \
+          file
