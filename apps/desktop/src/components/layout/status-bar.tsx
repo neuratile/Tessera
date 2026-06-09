@@ -181,7 +181,7 @@ function ProviderSwitcher() {
       {open ? (
         <ul
           role="listbox"
-          aria-label="Active provider"
+          aria-label="Active connection"
           className="bg-card border-border absolute bottom-full right-0 mb-1 max-h-72 w-64 overflow-y-auto rounded-md border shadow-lg"
         >
           {providers.length === 0 ? (

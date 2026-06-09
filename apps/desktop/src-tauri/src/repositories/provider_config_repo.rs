@@ -59,11 +59,13 @@ pub async fn upsert(pool: &SqlitePool, row: ProviderConfigUpsert) -> AppResult<S
 
     let mut tx = pool.begin().await?;
 
-    // Singleton invariant: activating one connection deactivates all others.
+    // Singleton invariant: activating one connection deactivates any other.
+    // Scope to `is_active = 1` so `updated_at` is only bumped on the row that
+    // is actually displaced, not every config the user has ever saved.
     if row.is_active {
         sqlx::query(
             "UPDATE user_provider_configs SET is_active = 0, updated_at = ? \
-             WHERE user_id = ?",
+             WHERE user_id = ? AND is_active = 1",
         )
         .bind(&now)
         .bind(DEFAULT_USER_ID)

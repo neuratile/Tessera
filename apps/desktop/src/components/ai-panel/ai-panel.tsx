@@ -77,6 +77,7 @@ export function AiPanel() {
   const setArtifactsError = useAiStore((s) => s.setArtifactsError);
   const appendPartial = useAiStore((s) => s.appendPartial);
 
+  const [providersLoaded, setProvidersLoaded] = useState(false);
   const [openArtifact, setOpenArtifact] = useState<ArtifactSummary | null>(null);
   const [queueFilter, setQueueFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -140,6 +141,8 @@ export function AiPanel() {
           setProviders([]);
           setActiveProvider(null);
         }
+      } finally {
+        if (!cancelled) setProvidersLoaded(true);
       }
     })();
     return () => {
@@ -407,7 +410,9 @@ export function AiPanel() {
             Provider
           </p>
           {activeProvider === null ? (
-            providerList.length === 0 ? (
+            !providersLoaded ? (
+              <p className="text-xs text-muted-foreground">Loading connections…</p>
+            ) : providerList.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 None configured. Open Settings to add a provider.
               </p>
