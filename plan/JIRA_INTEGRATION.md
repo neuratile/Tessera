@@ -1,6 +1,6 @@
 # Plan — JIRA Integration (one-way artifact push, Jira Cloud)
 
-> Status: Draft | Owner: TBD | Created: 2026-06-07
+> Status: v1 shipped (Phases 1–2, #62) — Phase 3 (v2: bulk push, run comments, status refresh) remaining | Owner: TBD | Created: 2026-06-07
 > Bridges Tessera's generated artifacts (Defect Report, Bug Report, Test Plan, Test Cases) into the team's real QA workflow.
 > Replaces the former "Tessera Boards" plan that lived at this path (recoverable at commit `f7c9fc3`).
 

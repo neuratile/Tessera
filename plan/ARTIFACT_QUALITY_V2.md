@@ -1,6 +1,6 @@
 # Artifact Quality v2 — industry-grade generated artifacts
 
-> Status: Planned | Owner: TBD | Created: 2026-06-06
+> Status: Phases 1–2 shipped (#48, #49, #51) — Phase 3 (prompt quality + verification) remaining | Owner: TBD | Created: 2026-06-06
 
 Upgrade the four generated artifact schemas (Test Cases, Bug Report, Test Plan,
 Defect Report) from basic to industry-grade, aligned with IEEE 829,

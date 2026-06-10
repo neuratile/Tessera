@@ -13,12 +13,12 @@ the [README](../README.md).
 |---|---|---|
 | **Single-user only** — no team collaboration, sharing, or multi-user workspace | Limits enterprise adoption | Workspace sync via CRDTs (Yjs/Automerge) + optional cloud relay, keeping the local-first core |
 | ~~**No test execution**~~ — **shipped for JS/TS:** opt-in Docker sandbox runs generated cases and reports pass/fail + coverage | Closed the generate→run→measure loop | Python (`docker_py`) + cloud runners next, behind the same `TestRunner` trait |
-| **Embedding provider lock-in** — Ollama embeddings only, no cloud fallback | RAG quality bottleneck without a local GPU | OpenAI / Voyage AI / Cohere embedding providers behind the existing `EmbeddingProvider` trait |
+| ~~**Embedding provider lock-in**~~ — **shipped:** selectable embedding provider — local Ollama (default) or OpenAI / Gemini / Hugging Face cloud | RAG no longer gated on a local GPU | Done — see [`EMBEDDING_PROVIDER_SELECT.md`](./EMBEDDING_PROVIDER_SELECT.md). Possible future additions: Voyage AI / Cohere |
 | **Minimal E2E coverage** — one Playwright spec, no error-path tests | UI-flow regressions go undetected | Expand to 10–15 specs: generation flow, provider switching, error states, export |
-| **No export integrations** — artifacts live only in local SQLite | Can't push to JIRA / Linear / GitHub Issues | Excel/CSV/TSV export first, then Jira API adapter — plan in [`ARTIFACT_EXPORT.md`](./ARTIFACT_EXPORT.md) |
+| ~~**No export integrations**~~ — **shipped:** Excel/CSV/TSV + copy-as-TSV, Markdown + JSON export, and Jira Cloud push v1 (idempotent, per-artifact) | Artifacts flow to spreadsheets and Jira | Remaining: Jira v2 — epic/child bulk push, sandbox-run comments, status refresh, severity-map editor — Phase 3 in [`JIRA_INTEGRATION.md`](./JIRA_INTEGRATION.md). Linear / GitHub Issues adapters behind the same `IssueTracker` trait |
 | **No observability** — no coverage reports, perf metrics, or usage analytics | Hard to track quality over time | LCOV in CI, opt-in telemetry (PostHog/Plausible), bundle-size tracking |
 | **Static prompts** — v1 prompts are hardcoded | Power users can't tune generation | User-editable prompt templates with variable substitution + prompt A/B testing |
-| **Basic artifact schemas** — happy-path test cases, bug reports without repro steps | Artifacts below professional QA bar | **Artifact Quality v2** — IEEE 829 / ISO 29119-3 / ISTQB-aligned schemas; 3-phase plan in [`ARTIFACT_QUALITY_V2.md`](./ARTIFACT_QUALITY_V2.md) |
+| **Basic artifact schemas** — *mostly closed:* v2 IEEE 829 / ISO 29119-3 schemas shipped for all four artifacts (Phases 1–2 of [`ARTIFACT_QUALITY_V2.md`](./ARTIFACT_QUALITY_V2.md)) | Artifacts now carry repro steps, severity/priority split, scope + entry/exit criteria | Remaining: Phase 3 — few-shot exemplars in prompts, technique mandates (BVA / equivalence partitioning), golden integration tests vs live Ollama, token-budget re-check |
 
 ---
 

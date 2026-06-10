@@ -1,7 +1,6 @@
 # Artifact Export — Excel / CSV / Google Sheets first, Jira next
 
-> Status: **planned** · Owner: core · Created: 2026-06-06
-> Phase 1–2 ship file-based export (xlsx/csv/tsv). Phase 3 (Jira) is **committed scope**, design deferred.
+> Status: **shipped** — Phases 1–2 merged (xlsx/csv/tsv #56, Markdown/JSON #59); Phase 3 (Jira) shipped via [`JIRA_INTEGRATION.md`](./JIRA_INTEGRATION.md) (#62) · Owner: core · Created: 2026-06-06
 
 ## 1. Why
 
