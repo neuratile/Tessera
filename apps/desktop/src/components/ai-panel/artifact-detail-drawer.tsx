@@ -336,6 +336,17 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     [detail, summary.id, runExport],
   );
 
+  const handleCopyMarkdown = useCallback(() => {
+    if (detail === null) {
+      return;
+    }
+    const markdown = detail.contentMd;
+    runExport(async () => {
+      await navigator.clipboard.writeText(markdown);
+      return 'Copied Markdown to clipboard.';
+    });
+  }, [detail, runExport]);
+
   const handleCopyTsv = useCallback(() => {
     runExport(async () => {
       const tsv = await exportsIpc.getArtifactTsv(summary.id);
@@ -630,6 +641,14 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                       onSelect={() => {
                         closeExportMenu();
                         handleExportFile('csv');
+                      }}
+                    />
+                    <ExportMenuItem
+                      icon={<ClipboardCopy className="size-3" />}
+                      label="Copy as Markdown"
+                      onSelect={() => {
+                        closeExportMenu();
+                        handleCopyMarkdown();
                       }}
                     />
                     <ExportMenuItem
