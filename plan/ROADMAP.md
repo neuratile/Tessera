@@ -12,7 +12,7 @@ the [README](../README.md).
 | Limitation | Impact | Planned solution |
 |---|---|---|
 | **Single-user only** — no team collaboration, sharing, or multi-user workspace | Limits enterprise adoption | Workspace sync via CRDTs (Yjs/Automerge) + optional cloud relay, keeping the local-first core |
-| ~~**No test execution**~~ — **shipped for JS/TS:** opt-in Docker sandbox runs generated cases and reports pass/fail + coverage | Closed the generate→run→measure loop | Python (`docker_py`) + cloud runners next, behind the same `TestRunner` trait |
+| ~~**No test execution**~~ — **shipped for JS/TS + Python:** opt-in Docker sandbox runs generated cases and reports pass/fail + coverage | Closed the generate→run→measure loop | Python shipped (`docker_py`, [`SANDBOX_PYTHON_RUNNER.md`](./SANDBOX_PYTHON_RUNNER.md)); Java/Go + cloud runners next, behind the same `TestRunner` trait + shared Docker harness |
 | ~~**Embedding provider lock-in**~~ — **shipped:** selectable embedding provider — local Ollama (default) or OpenAI / Gemini / Hugging Face cloud | RAG no longer gated on a local GPU | Done — see [`EMBEDDING_PROVIDER_SELECT.md`](./EMBEDDING_PROVIDER_SELECT.md). Possible future additions: Voyage AI / Cohere |
 | **Minimal E2E coverage** — one Playwright spec, no error-path tests | UI-flow regressions go undetected | Expand to 10–15 specs: generation flow, provider switching, error states, export |
 | ~~**No export integrations**~~ — **shipped:** Excel/CSV/TSV + copy-as-TSV, Markdown + JSON export, and Jira Cloud push v1 (idempotent, per-artifact) | Artifacts flow to spreadsheets and Jira | Remaining: Jira v2 — epic/child bulk push, sandbox-run comments, status refresh, severity-map editor — Phase 3 in [`JIRA_INTEGRATION.md`](./JIRA_INTEGRATION.md). Linear / GitHub Issues adapters behind the same `IssueTracker` trait |
@@ -24,15 +24,18 @@ the [README](../README.md).
 
 ## Planned standout features
 
-### 1. Live test runner with coverage overlay — **shipped (JS/TS)**
+### 1. Live test runner with coverage overlay — **shipped (JS/TS + Python)**
 Generate test cases → execute them in a sandboxed Docker container → show pass/fail +
 line coverage directly on the Monaco editor.
 **Edge:** closes the full generate → run → measure loop in one tool — no other AI
 testing tool does.
-**Status:** JS/TS vertical slice shipped (opt-in, off by default) — see
+**Status:** JS/TS slice shipped (opt-in, off by default) — see
 [`SANDBOX_TEST_RUNNER.md`](./SANDBOX_TEST_RUNNER.md) and
 [ADR-0004](../apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md). Python
-(`docker_py`) + cloud runners reuse the same `TestRunner` trait next.
+slice shipped (`docker_py`: pytest + coverage.py) with the Docker hardening
+extracted into a shared harness — see
+[`SANDBOX_PYTHON_RUNNER.md`](./SANDBOX_PYTHON_RUNNER.md). Java/Go + cloud
+runners reuse the same `TestRunner` trait next.
 
 ### 2. Mutation testing integration
 After generating tests, mutate the source (flip operators, drop conditions) and check

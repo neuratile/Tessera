@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+#
+# Sandbox runner image for the Python closed-loop test runner
+# (plan/SANDBOX_PYTHON_RUNNER.md §5). Built locally on first enable — no
+# registry dependency, preserving the local-first guarantee:
+#
+#   docker build -t tessera-runner-py \
+#     -f apps/desktop/src-tauri/docker/Dockerfile.runner-py \
+#     apps/desktop/src-tauri/docker
+#
+# The image ships pytest + pytest-json-report + coverage pre-installed so a
+# run needs no `pip install` (fast, deterministic, fully offline — and
+# `--network none` forbids installs at run time anyway). Only the Python
+# standard library + pytest are available to generated tests (plan §2): a
+# test importing `requests` etc. fails with a readable ModuleNotFoundError.
+# The host (`providers/runners/docker_py.rs`) materialises a throwaway
+# workspace, bind mounts it at /work, and runs the suite with the shared
+# hardening flags from `docker_harness::hardened_run_args` (`--network none`,
+# `--cap-drop ALL`, `--read-only`, `--pids-limit`, `--ulimit fsize`,
+# `--security-opt no-new-privileges`, cpu/memory caps).
+#
+# SECURITY: the base image is pinned by digest (multi-arch manifest list) so
+# rebuilds are reproducible and a registry push can't silently change the
+# Python version or layers. To bump, resolve the new digest with:
+#   docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+# and update the line below deliberately.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+
+# Pinned to exact versions for reproducible image builds: a floating range
+# could pull a pytest/plugin release that changes the JSON report shape that
+# `parse_pytest_results` / `parse_coverage_py` depend on, silently breaking
+# the parsers. Bump these deliberately alongside the parsers when upgrading.
+RUN pip install --no-cache-dir \
+      pytest==8.4.2 \
+      pytest-json-report==1.5.0 \
+      coverage==7.14.1
+
+# Keep Python from writing .pyc files into the read-only rootfs / the bind
+# mount, and flush output immediately so truncated logs stay ordered.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Defence in depth: never execute the suite as root. Combined with the
+# `docker run` flags, a container escape would land as an unprivileged user
+# with no capabilities, no network, and a read-only root filesystem.
+# python:slim ships no non-root user, so create one (uid 1000, mirroring
+# the `node` user in Dockerfile.runner-js).
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin runner
+USER runner
+
+WORKDIR /work

@@ -4,7 +4,11 @@
 //! Mirrors `generation_service`'s role for the LLM path: commands depend
 //! on this service, the service depends on the [`TestRunner`] trait, and
 //! all SQL is delegated to `test_run_repo`. Docker specifics live only in
-//! [`docker_js`](crate::providers::runners::docker_js).
+//! the runner implementations ([`docker_js`](crate::providers::runners::docker_js),
+//! [`docker_py`](crate::providers::runners::docker_py)) and their shared
+//! [`docker_harness`](crate::providers::runners::docker_harness); the
+//! concrete runner is selected per detected language via the
+//! [`RunnerFactory`] in [`SandboxDeps`].
 //!
 //! Flow (plan §4):
 //!
@@ -97,13 +101,22 @@ impl Drop for RegistryGuard<'_> {
     }
 }
 
+/// Selects the concrete [`TestRunner`] for the language detected from the
+/// artifact's `files[]` (`plan/SANDBOX_PYTHON_RUNNER.md` §4.2). Production
+/// wires `providers::runners::factory::runner_for`; tests pass a closure
+/// returning a scripted runner.
+pub type RunnerFactory = dyn Fn(RunnerLanguage) -> Arc<dyn TestRunner> + Send + Sync;
+
 /// References [`run`] needs, bundled so the public signature stays short
 /// and the runner is trivially swappable in tests (mirrors
 /// `GenerationDeps`).
 pub struct SandboxDeps<'a> {
     pub pool: &'a sqlx::SqlitePool,
     pub crypto: Option<&'a crate::utils::crypto::CryptoKey>,
-    pub runner: Arc<dyn TestRunner>,
+    /// Per-language runner selection — the runner is only constructed once
+    /// the artifact's language is known (Python → `docker-py`, JS/TS →
+    /// `docker-js`).
+    pub runner_factory: &'a RunnerFactory,
     /// Live-run registry so a concurrent `cancel_test_sandbox` can stop this
     /// run mid-flight. Tests pass a throwaway [`RunRegistry::new`].
     pub registry: &'a RunRegistry,
@@ -142,10 +155,13 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
         )));
     }
 
-    // 3. Build the workspace contract from the artifact. The case ids
-    //    are collected up front so the post-run name→id bridge (plan
-    //    §4.2) can fold executed assertions back onto their cases.
+    // 3. Build the workspace contract from the artifact (detecting the
+    //    language and rejecting mixed-language workspaces), then select
+    //    the matching runner. The case ids are collected up front so the
+    //    post-run name→id bridge (plan §4.2) can fold executed assertions
+    //    back onto their cases.
     let input = build_run_input(&artifact.structured_data)?;
+    let runner = (deps.runner_factory)(input.language);
     let case_ids = collect_case_ids(&artifact.structured_data);
 
     // 4. Open the run row.
@@ -154,7 +170,7 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
         TestRunInsert {
             artifact_id: artifact.id.clone(),
             project_id: artifact.project_id.clone(),
-            runner: deps.runner.name().to_string(),
+            runner: runner.name().to_string(),
         },
     )
     .await?;
@@ -162,7 +178,7 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     let span = tracing::info_span!(
         "sandbox_run",
         run_id = %run_id,
-        runner = deps.runner.name(),
+        runner = runner.name(),
         files = input.files.len(),
     );
     let _enter = span.enter();
@@ -184,7 +200,7 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
 
     tracing::debug!("driving runner");
     let started = Instant::now();
-    let outcome = deps.runner.run(input, cancel).await;
+    let outcome = runner.run(input, cancel).await;
     let duration_ms = elapsed_ms(started);
 
     match &outcome {
@@ -321,12 +337,15 @@ async fn persist_failure(
 ///
 /// The test-cases artifact carries the runnable workspace under a `files`
 /// array — `[{ "path": "...", "contents": "...", "isTest": bool }]`. The
-/// language is inferred from the test-file extensions.
+/// language is inferred from the file extensions; a workspace that mixes
+/// Python and JS/TS sources is rejected — no runner can execute both
+/// (`plan/SANDBOX_PYTHON_RUNNER.md` §4.2).
 ///
 /// # Errors
 ///
 /// [`AppError::InvalidInput`] when the `files` array is absent, empty,
-/// malformed, or fails workspace validation (no test file / unsafe path).
+/// malformed, mixes languages, or fails workspace validation (no test
+/// file / unsafe path).
 fn build_run_input(structured_data: &JsonValue) -> AppResult<RunInput> {
     let raw_files = structured_data
         .get("files")
@@ -364,12 +383,7 @@ fn build_run_input(structured_data: &JsonValue) -> AppResult<RunInput> {
         });
     }
 
-    let language = files
-        .iter()
-        .filter(|f| f.is_test)
-        .map(|f| RunnerLanguage::from_path(&f.relative_path))
-        .find(|lang| *lang == RunnerLanguage::TypeScript)
-        .unwrap_or(RunnerLanguage::JavaScript);
+    let language = detect_language(&files)?;
 
     let input = RunInput {
         language,
@@ -380,6 +394,56 @@ fn build_run_input(structured_data: &JsonValue) -> AppResult<RunInput> {
         .validate()
         .map_err(|e| AppError::InvalidInput(e.to_string()))?;
     Ok(input)
+}
+
+/// Infer the workspace's [`RunnerLanguage`] from its file extensions
+/// (`plan/SANDBOX_PYTHON_RUNNER.md` §4.2).
+///
+/// Only recognised *code* extensions vote — auxiliary files (`.json`,
+/// `.md`, `conftest` data, …) must not flip the detection or trigger a
+/// false mixed-language rejection. Any `.py` alongside any JS/TS source
+/// is rejected: no runner can execute both halves of such a workspace.
+/// Pure JS/TS keeps the original rule — TypeScript when any test file is
+/// TS-flavoured, JavaScript otherwise.
+///
+/// # Errors
+///
+/// [`AppError::InvalidInput`] when the workspace mixes Python and JS/TS
+/// sources.
+fn detect_language(files: &[WorkspaceFile]) -> AppResult<RunnerLanguage> {
+    const JS_TS_EXTENSIONS: [&str; 8] = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+    let extension = |path: &str| {
+        std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default()
+    };
+
+    let has_python = files
+        .iter()
+        .any(|f| extension(&f.relative_path) == "py");
+    let has_js_ts = files
+        .iter()
+        .any(|f| JS_TS_EXTENSIONS.contains(&extension(&f.relative_path).as_str()));
+
+    if has_python && has_js_ts {
+        return Err(AppError::InvalidInput(
+            "test cases mix Python and JS/TS sources; a runnable workspace must be \
+             single-language"
+                .into(),
+        ));
+    }
+    if has_python {
+        return Ok(RunnerLanguage::Python);
+    }
+
+    Ok(files
+        .iter()
+        .filter(|f| f.is_test)
+        .map(|f| RunnerLanguage::from_path(&f.relative_path))
+        .find(|lang| *lang == RunnerLanguage::TypeScript)
+        .unwrap_or(RunnerLanguage::JavaScript))
 }
 
 fn count_status(tests: &[crate::providers::runners::TestResult], status: TestStatus) -> u32 {
@@ -576,6 +640,14 @@ mod tests {
         std::env::temp_dir().join(format!("testing-ide-sandbox-{}.db", Uuid::new_v4()))
     }
 
+    /// Factory that ignores the detected language and always yields the
+    /// supplied scripted runner — the test analogue of `factory::runner_for`.
+    fn fixed_factory(
+        runner: Arc<dyn TestRunner>,
+    ) -> impl Fn(RunnerLanguage) -> Arc<dyn TestRunner> + Send + Sync {
+        move |_| runner.clone()
+    }
+
     /// Seed a project + a test-cases artifact whose `structured_data`
     /// carries a runnable `files` array. Returns the artifact id.
     async fn seed_artifact(pool: &SqlitePool, artifact_type: ArtifactType) -> String {
@@ -661,7 +733,8 @@ mod tests {
         let runner: Arc<dyn TestRunner> =
             Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let result = run(
             RunRequest {
@@ -694,7 +767,8 @@ mod tests {
         let runner: Arc<dyn TestRunner> =
             Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let err = run(
             RunRequest {
@@ -720,7 +794,8 @@ mod tests {
         let runner: Arc<dyn TestRunner> =
             Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let err = run(
             RunRequest {
@@ -747,7 +822,8 @@ mod tests {
             RunnerError::DockerUnavailable("daemon down".into()),
         )));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let result = run(
             RunRequest {
@@ -779,7 +855,8 @@ mod tests {
             RunnerError::ImageMissing("runner image `tessera-runner-js` is not built".into()),
         )));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let result = run(
             RunRequest {
@@ -842,7 +919,8 @@ mod tests {
         let runner: Arc<dyn TestRunner> =
             Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         let err = run(
             RunRequest {
@@ -912,7 +990,8 @@ mod tests {
         let pool_for_run = pool.clone();
         let aid = artifact_id.clone();
         let handle = tokio::spawn(async move {
-            let deps = SandboxDeps { pool: &pool_for_run, crypto: None, runner, registry: &reg };
+            let factory = fixed_factory(runner);
+            let deps = SandboxDeps { pool: &pool_for_run, crypto: None, runner_factory: &factory, registry: &reg };
             run(
                 RunRequest {
                     artifact_id: aid,
@@ -1006,10 +1085,11 @@ mod tests {
         // 4. Drive run
         let runner: Arc<dyn TestRunner> = Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
         let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
         let deps = SandboxDeps {
             pool: &pool,
             crypto: Some(&crypto),
-            runner,
+            runner_factory: &factory,
             registry: &registry,
         };
 
@@ -1142,7 +1222,8 @@ mod tests {
         let runner: Arc<dyn TestRunner> =
             Arc::new(ScriptedRunner::new(Scripted::Succeed(output)));
         let registry = RunRegistry::new();
-        let deps = SandboxDeps { pool: &pool, crypto: None, runner, registry: &registry };
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
 
         run(
             RunRequest {
@@ -1166,6 +1247,191 @@ mod tests {
         assert_eq!(rows[1].case_id, "TC-B");
         assert_eq!(rows[1].result, TestCaseResultStatus::Fail);
         assert_eq!(rows[1].actual_output.as_deref(), Some("expected 2 to equal 3"));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn ws_file(path: &str, is_test: bool) -> WorkspaceFile {
+        WorkspaceFile {
+            relative_path: path.into(),
+            contents: "x".into(),
+            is_test,
+        }
+    }
+
+    #[test]
+    fn detect_language_maps_extensions_and_rejects_mixed() {
+        // Pure JS / TS keeps the original rule.
+        assert_eq!(
+            detect_language(&[ws_file("src/add.js", false), ws_file("add.test.js", true)])
+                .expect("js"),
+            RunnerLanguage::JavaScript
+        );
+        assert_eq!(
+            detect_language(&[ws_file("src/add.ts", false), ws_file("add.test.ts", true)])
+                .expect("ts"),
+            RunnerLanguage::TypeScript
+        );
+        // Python workspace routes to the Python runner.
+        assert_eq!(
+            detect_language(&[ws_file("src/add.py", false), ws_file("test_add.py", true)])
+                .expect("py"),
+            RunnerLanguage::Python
+        );
+        // Auxiliary non-code files do not flip detection.
+        assert_eq!(
+            detect_language(&[
+                ws_file("src/add.py", false),
+                ws_file("test_add.py", true),
+                ws_file("README.md", false),
+            ])
+            .expect("py with aux"),
+            RunnerLanguage::Python
+        );
+        // Mixed Python + JS/TS is rejected with a clear message.
+        let err = detect_language(&[ws_file("src/add.py", false), ws_file("add.test.ts", true)])
+            .expect_err("mixed must be rejected");
+        assert_eq!(err.code(), "INVALID_INPUT");
+        assert!(err.to_string().contains("mix Python and JS/TS"), "got: {err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_routes_python_artifacts_to_the_python_runner() {
+        let (pool, path) = open_pool().await;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO projects (id, user_id, name, root_path, created_at, updated_at) \
+             VALUES ('p1', '00000000-0000-4000-8000-000000000001', 'p', '/tmp/p', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("seed project");
+        let artifact_id = artifact_repo::insert(
+            &pool,
+            ArtifactInsert {
+                project_id: "p1".into(),
+                artifact_type: ArtifactType::TestCases,
+                title: "Py cases".into(),
+                content_md: "# Cases\n".into(),
+                structured_data: serde_json::json!({
+                    "files": [
+                        { "path": "src/add.py", "contents": "def add(a, b):\n    return a + b\n", "isTest": false },
+                        { "path": "test_add.py", "contents": "from src.add import add\n", "isTest": true }
+                    ]
+                }),
+                generation_metadata: GenerationMetadata {
+                    provider: "ollama".into(),
+                    model: "m".into(),
+                    prompt_version: "test_cases_v2".into(),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    started_at: now.clone(),
+                    completed_at: now.clone(),
+                },
+                parent_id: None,
+            },
+        )
+        .await
+        .expect("seed artifact");
+
+        // Factory that records the language it was asked for.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<RunnerLanguage>::new()));
+        let scripted: Arc<dyn TestRunner> =
+            Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
+        let seen_in_factory = seen.clone();
+        let factory = move |language: RunnerLanguage| {
+            seen_in_factory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(language);
+            scripted.clone()
+        };
+        let registry = RunRegistry::new();
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        run(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            &deps,
+        )
+        .await
+        .expect("run succeeds");
+
+        let languages = seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(languages, vec![RunnerLanguage::Python]);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_rejects_mixed_language_artifacts() {
+        let (pool, path) = open_pool().await;
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO projects (id, user_id, name, root_path, created_at, updated_at) \
+             VALUES ('p1', '00000000-0000-4000-8000-000000000001', 'p', '/tmp/p', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("seed project");
+        let artifact_id = artifact_repo::insert(
+            &pool,
+            ArtifactInsert {
+                project_id: "p1".into(),
+                artifact_type: ArtifactType::TestCases,
+                title: "Mixed".into(),
+                content_md: "# Cases\n".into(),
+                structured_data: serde_json::json!({
+                    "files": [
+                        { "path": "src/add.py", "contents": "def add(a, b):\n    return a + b\n", "isTest": false },
+                        { "path": "add.test.ts", "contents": "import { test } from 'vitest';", "isTest": true }
+                    ]
+                }),
+                generation_metadata: GenerationMetadata {
+                    provider: "ollama".into(),
+                    model: "m".into(),
+                    prompt_version: "test_cases_v2".into(),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    started_at: now.clone(),
+                    completed_at: now.clone(),
+                },
+                parent_id: None,
+            },
+        )
+        .await
+        .expect("seed artifact");
+
+        let runner: Arc<dyn TestRunner> =
+            Arc::new(ScriptedRunner::new(Scripted::Succeed(sample_output())));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let err = run(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            &deps,
+        )
+        .await
+        .expect_err("mixed-language artifact must be rejected before any run row opens");
+        assert_eq!(err.code(), "INVALID_INPUT");
+        assert!(err.to_string().contains("mix Python and JS/TS"), "got: {err}");
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

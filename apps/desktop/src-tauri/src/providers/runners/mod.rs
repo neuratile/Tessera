@@ -10,13 +10,19 @@
 //! Phase 2 adds the [`TestRunner`] async trait + the Docker implementation
 //! ([`docker_js`]). The trait keeps `sandbox_service` ignorant of Docker
 //! specifics so a cloud impl (plan §11) can drop in later.
+//! `plan/SANDBOX_PYTHON_RUNNER.md` adds the second slice: [`docker_py`]
+//! behind the same trait, with the shared Docker hardening extracted into
+//! [`docker_harness`] and per-language selection in [`factory`].
 //!
 //! Wire convention mirrors the rest of the IPC layer: structs serialize
 //! `camelCase`; the status enums serialize `snake_case` (which, for these
 //! single-word variants, is plain lowercase — matching the Zod literals
 //! and the TEXT stored in the `status` columns).
 
+pub mod docker_harness;
 pub mod docker_js;
+pub mod docker_py;
+pub mod factory;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -179,25 +185,29 @@ pub struct RunResult {
 // are serialized to the renderer.
 // ---------------------------------------------------------------------------
 
-/// Source language a runner executes. Phase 2 ships JS/TS; `docker_py`
-/// (plan §11, Phase 6) adds Python behind the same trait.
+/// Source language a runner executes. JS/TS run in [`docker_js`]; Python
+/// runs in [`docker_py`] (`plan/SANDBOX_PYTHON_RUNNER.md`). Selection
+/// happens in [`factory::runner_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunnerLanguage {
     JavaScript,
     TypeScript,
+    Python,
 }
 
 impl RunnerLanguage {
-    /// Detect from a file extension. Defaults to [`Self::TypeScript`] for
-    /// `.ts`/`.tsx`/`.mts`/`.cts` (case-insensitive), otherwise
-    /// [`Self::JavaScript`].
+    /// Detect from a file extension (case-insensitive): `.py` →
+    /// [`Self::Python`]; `.ts`/`.tsx`/`.mts`/`.cts` →
+    /// [`Self::TypeScript`]; otherwise [`Self::JavaScript`].
     #[must_use]
     pub fn from_path(path: &str) -> Self {
         let ext = std::path::Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or_default();
-        if ["ts", "tsx", "mts", "cts"]
+        if ext.eq_ignore_ascii_case("py") {
+            Self::Python
+        } else if ["ts", "tsx", "mts", "cts"]
             .iter()
             .any(|candidate| ext.eq_ignore_ascii_case(candidate))
         {
@@ -679,6 +689,15 @@ mod tests {
         assert_eq!(RunnerLanguage::from_path("a.mts"), RunnerLanguage::TypeScript);
         assert_eq!(RunnerLanguage::from_path("a.js"), RunnerLanguage::JavaScript);
         assert_eq!(RunnerLanguage::from_path("a.jsx"), RunnerLanguage::JavaScript);
+    }
+
+    #[test]
+    fn runner_language_detects_python_extension() {
+        assert_eq!(RunnerLanguage::from_path("a.py"), RunnerLanguage::Python);
+        assert_eq!(RunnerLanguage::from_path("test_add.PY"), RunnerLanguage::Python);
+        assert_eq!(RunnerLanguage::from_path("src/pkg/mod.py"), RunnerLanguage::Python);
+        // `.pyc`/other extensions are not Python sources.
+        assert_eq!(RunnerLanguage::from_path("a.pyc"), RunnerLanguage::JavaScript);
     }
 
     #[test]

@@ -73,7 +73,8 @@ Opt-in, off by default. With the sandbox enabled in settings and Docker present,
 │            ├─▶ Ollama embeddings (nomic-embed-text)            │
 │            ├─▶ LLM provider trait (Ollama / OpenAI /           │
 │            │             OpenRouter / Anthropic / Gemini)      │
-│            └─▶ TestRunner trait (opt-in Docker sandbox, JS/TS) │
+│            └─▶ TestRunner trait (opt-in Docker sandbox,        │
+│                                  JS/TS + Python)               │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,7 +91,7 @@ Layered backend (see [`rules/rules.md`](./rules/rules.md) §4.2): **commands** a
 | AST | `tree-sitter` — JS / TS / Python (more on the roadmap) |
 | Frontend | React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui + Monaco |
 | Observability | `tracing` logs · Sentry (opt-in, both sides) |
-| Test sandbox | Docker (opt-in, off by default) — `vitest` + istanbul in a hardened container, JS/TS |
+| Test sandbox | Docker (opt-in, off by default) — `vitest` + istanbul (JS/TS) and `pytest` + coverage.py (Python) in a hardened container |
 
 | LLM provider | Auth | Local | Notes |
 |----------|------|:-----:|-------|
@@ -192,7 +193,7 @@ Stay up to date with what's happening in the project:
 
 **v0.1 (shipped)** — feature-complete: 5 artifact types, 5 LLM providers, RAG pipeline, streaming generation, first-run wizard, cross-platform signed releases.
 
-**Sandbox test runner (shipped, JS/TS)** — opt-in Docker sandbox runs generated test cases and overlays pass/fail + line coverage on the editor, closing the generate → run → measure loop ([ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md)). Python (`docker_py`) + cloud runners reuse the same `TestRunner` trait next.
+**Sandbox test runner (shipped, JS/TS + Python)** — opt-in Docker sandbox runs generated test cases and overlays pass/fail + line coverage on the editor, closing the generate → run → measure loop ([ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md)). The Python slice (`docker_py`: pytest + coverage.py, stdlib-only image) landed on the same `TestRunner` trait with the Docker hardening extracted into a shared harness — adding Java/Go is one `docker_<lang>.rs` + one Dockerfile ([plan](./plan/SANDBOX_PYTHON_RUNNER.md)). Cloud runners are next.
 
 **Next** — more AST languages (Go, Java, C#, Ruby, Rust) · `sqlite-vec` virtual-table search for projects > 50K chunks ([ADR-0002](./apps/desktop/src-tauri/docs/adr/0002-vec0-migration-trigger.md)) · cloud embedding providers · export to JIRA / Linear / GitHub Issues · team-mode collaboration.
 
