@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "format": 3,
+    "version": "7.14.1",
+    "timestamp": "2026-06-10T09:30:00.000000",
+    "branch_coverage": false,
+    "show_contexts": false
+  },
+  "files": {
+    "src/add.py": {
+      "executed_lines": [1, 2, 4, 5],
+      "summary": {
+        "covered_lines": 4,
+        "num_statements": 5,
+        "percent_covered": 80.0,
+        "percent_covered_display": "80",
+        "missing_lines": 1,
+        "excluded_lines": 0
+      },
+      "missing_lines": [7],
+      "excluded_lines": []
+    },
+    "test_add.py": {
+      "executed_lines": [1, 3, 5, 6, 9, 10, 13, 14, 19],
+      "summary": {
+        "covered_lines": 9,
+        "num_statements": 10,
+        "percent_covered": 90.0,
+        "percent_covered_display": "90",
+        "missing_lines": 1,
+        "excluded_lines": 0
+      },
+      "missing_lines": [20],
+      "excluded_lines": []
+    }
+  },
+  "totals": {
+    "covered_lines": 13,
+    "num_statements": 15,
+    "percent_covered": 86.66666666666667,
+    "percent_covered_display": "87",
+    "missing_lines": 2,
+    "excluded_lines": 0
+  }
+}

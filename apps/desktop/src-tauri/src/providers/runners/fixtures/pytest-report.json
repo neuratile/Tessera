@@ -1,0 +1,121 @@
+{
+  "created": 1749542400.123456,
+  "duration": 0.087654,
+  "exitcode": 1,
+  "root": "/work",
+  "environment": {
+    "Python": "3.12.8",
+    "Platform": "Linux-6.8.0-x86_64-with-glibc2.36",
+    "Packages": {
+      "pytest": "8.4.2",
+      "pluggy": "1.5.0"
+    },
+    "Plugins": {
+      "json-report": "1.5.0",
+      "metadata": "3.1.1"
+    }
+  },
+  "summary": {
+    "passed": 2,
+    "failed": 1,
+    "skipped": 1,
+    "total": 4,
+    "collected": 4
+  },
+  "collectors": [
+    {
+      "nodeid": "",
+      "outcome": "passed",
+      "result": [
+        {
+          "nodeid": "test_add.py",
+          "type": "Module"
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "nodeid": "test_add.py::test_tc_add_01__adds_two_positive_numbers",
+      "lineno": 4,
+      "outcome": "passed",
+      "keywords": ["test_tc_add_01__adds_two_positive_numbers", "test_add.py"],
+      "setup": {
+        "duration": 0.000312,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.003151,
+        "outcome": "passed"
+      },
+      "teardown": {
+        "duration": 0.000104,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "test_add.py::test_tc_add_02__adds_negatives",
+      "lineno": 9,
+      "outcome": "passed",
+      "keywords": ["test_tc_add_02__adds_negatives", "test_add.py"],
+      "setup": {
+        "duration": 0.000198,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.000871,
+        "outcome": "passed"
+      },
+      "teardown": {
+        "duration": 0.000092,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "test_add.py::test_tc_add_03__rejects_non_numeric_input",
+      "lineno": 13,
+      "outcome": "failed",
+      "keywords": ["test_tc_add_03__rejects_non_numeric_input", "test_add.py"],
+      "setup": {
+        "duration": 0.000201,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration": 0.001942,
+        "outcome": "failed",
+        "crash": {
+          "path": "/work/test_add.py",
+          "lineno": 16,
+          "message": "TypeError: can only concatenate str (not \"int\") to str"
+        },
+        "traceback": [
+          {
+            "path": "test_add.py",
+            "lineno": 16,
+            "message": "TypeError"
+          }
+        ],
+        "longrepr": "def test_tc_add_03__rejects_non_numeric_input():\n>       add('a', 1)\nE       TypeError: can only concatenate str (not \"int\") to str"
+      },
+      "teardown": {
+        "duration": 0.000088,
+        "outcome": "passed"
+      }
+    },
+    {
+      "nodeid": "test_add.py::test_tc_add_04__overflow_behaviour_todo",
+      "lineno": 19,
+      "outcome": "skipped",
+      "keywords": ["test_tc_add_04__overflow_behaviour_todo", "test_add.py"],
+      "setup": {
+        "duration": 0.000154,
+        "outcome": "skipped",
+        "longrepr": "('/work/test_add.py', 19, 'Skipped: not implemented yet')"
+      },
+      "teardown": {
+        "duration": 0.000061,
+        "outcome": "passed"
+      }
+    }
+  ]
+}

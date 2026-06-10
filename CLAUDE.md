@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Tessera — local-first AI testing IDE. Generates test artifacts (Context, Test Plan, Test Cases, Defect Report, Bug Report) by running static analysis (tree-sitter AST) + RAG over local code, then calling an LLM (Ollama default; also OpenAI, Anthropic, Google Gemini, OpenRouter). Embeddings are selected independently of the LLM (local Ollama default; OpenAI / Gemini / Hugging Face cloud optional — see `plan/EMBEDDING_PROVIDER_SELECT.md`; `embedding_config_service::resolve_provider` is the only production path that constructs an `EmbeddingProvider`). Static analysis only on the default path — no remote code upload (cloud embeddings, when explicitly selected, send code snippets to that provider). An **opt-in** local Docker sandbox (off by default) executes generated JS/TS test cases to report pass/fail + line coverage; it runs with no network and the backend rejects runs unless opt-in is confirmed. See `plan/SANDBOX_TEST_RUNNER.md` + `apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md`.
+Tessera — local-first AI testing IDE. Generates test artifacts (Context, Test Plan, Test Cases, Defect Report, Bug Report) by running static analysis (tree-sitter AST) + RAG over local code, then calling an LLM (Ollama default; also OpenAI, Anthropic, Google Gemini, OpenRouter). Embeddings are selected independently of the LLM (local Ollama default; OpenAI / Gemini / Hugging Face cloud optional — see `plan/EMBEDDING_PROVIDER_SELECT.md`; `embedding_config_service::resolve_provider` is the only production path that constructs an `EmbeddingProvider`). Static analysis only on the default path — no remote code upload (cloud embeddings, when explicitly selected, send code snippets to that provider). An **opt-in** local Docker sandbox (off by default) executes generated JS/TS and Python test cases to report pass/fail + line coverage; it runs with no network and the backend rejects runs unless opt-in is confirmed. See `plan/SANDBOX_TEST_RUNNER.md` (JS/TS), `plan/SANDBOX_PYTHON_RUNNER.md` (Python) + `apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md`.
 
 Stack: React 19 + TypeScript + Tailwind v4 (Vite) inside a Tauri 2.0 shell, Rust backend with SQLite + sqlite-vec, tree-sitter for JS/TS/Python.
 
@@ -84,7 +84,9 @@ services/   Business logic — no SQL, no Tauri types
 repositories/  SQL only — no business logic
 db/         Schema init, migrations
 providers/  LLM + embedding trait impls (pluggable at runtime via factory.rs);
-            providers/runners/ holds the TestRunner trait + Docker JS/TS sandbox impl
+            providers/runners/ holds the TestRunner trait, the shared Docker
+            hardening harness (docker_harness.rs), the docker_js + docker_py
+            sandbox impls, and per-language selection (runners/factory.rs)
 prompts/    Versioned prompt templates with JSON-Schema tool definitions
 auth/       JWT + Argon2 password + AES-256-GCM API key encryption
 utils/      Pure functions (crypto, telemetry, path helpers)
@@ -92,7 +94,7 @@ utils/      Pure functions (crypto, telemetry, path helpers)
 
 `generation_service.rs` is the sole entry point for LLM calls (per §4.2 + §12.1). Flow: embed scope hint → RAG via `chunk_repo::search_similar` → `build_prompt` → token budget check → `LlmProvider::stream` → JSON-Schema validate tool output → `artifact_repo::insert`.
 
-`sandbox_service.rs` is the sole entry point for test execution (mirrors the generation-service pattern; commands in `commands/sandbox.rs`). Flow: load source + generated test `files[]` off the test-cases artifact → `RunInput::validate` (path-traversal + file-count/byte guards) → `TestRunner::run` inside a hardened, network-less Docker container (`--network none`, `--cap-drop ALL`, non-root, read-only rootfs, cpu/mem/pids/fsize caps, wall-clock timeout + cancel → `docker kill`) → parse vitest + istanbul JSON → `test_run_repo` batch insert → return `RunResult`. Opt-in, off by default — backend rejects a run when `optInConfirmed` is false. Data model: migration `0004_test_runs.sql`. Threat model + security gate: ADR-0004.
+`sandbox_service.rs` is the sole entry point for test execution (mirrors the generation-service pattern; commands in `commands/sandbox.rs`). Flow: load source + generated test `files[]` off the test-cases artifact → detect language from file extensions (mixed Python + JS/TS workspaces rejected) → `RunInput::validate` (path-traversal + file-count/byte guards) → select the runner via `runners::factory::runner_for` (JS/TS → `docker-js`, Python → `docker-py`) → `TestRunner::run` inside a hardened, network-less Docker container (flags emitted only by `docker_harness::hardened_run_args`, asserted by a drift-tripwire unit test: `--network none`, `--cap-drop ALL`, non-root, read-only rootfs, cpu/mem/pids/fsize caps, wall-clock timeout + cancel → `docker kill`) → parse vitest + istanbul JSON (JS) or pytest-json-report + coverage.py JSON (Python) → `test_run_repo` batch insert → return `RunResult`. Opt-in, off by default — backend rejects a run when `optInConfirmed` is false. Data model: migration `0004_test_runs.sql` (`runner` column is open TEXT — `docker-py` needed no migration). Threat model + security gate: ADR-0004.
 
 ### Tauri IPC gotchas (rules.md §4.2.1)
 

@@ -4,63 +4,38 @@
 //! a hardened, network-isolated container, then parses the vitest results
 //! and istanbul coverage the container writes back into the workspace.
 //!
-//! # Phase boundaries
-//!
-//! - **Phase 2 (this file):** workspace build, container invocation with
-//!   the §7 hardening flags, result/coverage parsing, guaranteed workspace
-//!   cleanup. Unit-tested via the pure parser + helper functions only — no
-//!   Docker is required to build or test the crate.
-//! - **Phase 3 (security gate):** verify `--network none`, wire a real
-//!   cancellation token through to `docker kill`, and add a Docker-gated
-//!   integration test that actually starts a container.
-//! - **Phase 4 (done):** source-line mapping from the vitest reporter
-//!   `location`, per-line coverage de-duplication (max hits across the
-//!   statements on a line), and fixture-backed parser tests
-//!   (`fixtures/*.json`). Branch coverage stays out — `CoverageLine` models
-//!   line hits only; adding branches is a separate contract change.
-//!
-//! The container is deliberately given a non-routable workspace mount and
-//! `--network none`: code under test can neither phone home nor reach the
-//! host filesystem outside `/work`.
+//! All Docker plumbing — the canonical hardening flag set, the
+//! timeout / cancel → `docker kill` orchestration, the RAII workspace
+//! cleanup, and the output truncation caps — lives in
+//! [`docker_harness`](super::docker_harness) and is shared with every
+//! other Docker runner (`docker_py`), so the sandbox cannot drift weaker
+//! for one language. This file owns only what is JS-specific: the image
+//! name, the vitest invocation + config, and the vitest/istanbul parsers.
 
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
+use std::path::Path;
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::process::Command;
-use uuid::Uuid;
 
+use super::docker_harness::{
+    self, derive_status, f64_to_u32, truncate, truncate_to, ContainerOutput, WorkspaceGuard,
+    MAX_FAILURE_MSG_BYTES, MAX_TEST_NAME_BYTES,
+};
 use super::{
-    CancelToken, CoverageLine, RunInput, RunStatus, RunnerError, RunnerLanguage, RunnerOutput,
-    TestResult, TestRunner, TestStatus,
+    CancelToken, CoverageLine, RunInput, RunnerError, RunnerLanguage, RunnerOutput, TestResult,
+    TestRunner, TestStatus,
 };
 
 /// Pre-built runner image (plan §7). Built locally from
 /// `docker/Dockerfile.runner-js`, never pulled from a registry (local-first
-/// guarantee — see ADR-0004 and `ensure_runner_image`). Ships `vitest` +
-/// the istanbul coverage provider pre-installed so a run needs no
-/// `npm install` (fast, deterministic, offline).
+/// guarantee — see ADR-0004 and `docker_harness::ensure_runner_image`).
+/// Ships `vitest` + the istanbul coverage provider pre-installed so a run
+/// needs no `npm install` (fast, deterministic, offline).
 pub const RUNNER_IMAGE: &str = "tessera-runner-js";
 
-/// Workspace mount point inside the container.
-const WORK_MOUNT: &str = "/work";
-
-/// Cap on captured stdout / stderr stored or surfaced (§10 — no unbounded
-/// blobs). Bytes beyond this are dropped with a truncation marker.
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
-
-/// Per-field caps on parsed result strings. The container writes
-/// `results.json`, so test names + failure messages are attacker-controlled
-/// (§10 — no unbounded blobs into the DB / UI). Truncated on a char boundary.
-const MAX_TEST_NAME_BYTES: usize = 512;
-const MAX_FAILURE_MSG_BYTES: usize = 8 * 1024;
-
-/// `--ulimit fsize` cap (bytes): the largest single file the suite may write
-/// into the bind-mounted workspace. Bounds a disk-fill `DoS` through `/work`
-/// while leaving ample room for `results.json` + coverage on real projects.
-const MAX_WRITE_BYTES: u64 = 64 * 1024 * 1024;
+/// Dockerfile (under `apps/desktop/src-tauri/docker/`) the image is built
+/// from; surfaced in the `ImageMissing` build hint.
+const RUNNER_DOCKERFILE: &str = "Dockerfile.runner-js";
 
 /// Filenames the in-container command writes back into the workspace.
 const RESULTS_FILE: &str = "results.json";
@@ -71,7 +46,7 @@ const COVERAGE_FILE: &str = "coverage/coverage-final.json";
 pub struct DockerJsRunner {
     /// Root for throwaway workspaces. Defaults to the OS temp dir; tests
     /// can point it elsewhere.
-    workspace_root: Option<PathBuf>,
+    workspace_root: Option<std::path::PathBuf>,
 }
 
 impl DockerJsRunner {
@@ -80,7 +55,7 @@ impl DockerJsRunner {
         Self::default()
     }
 
-    fn workspace_root(&self) -> PathBuf {
+    fn workspace_root(&self) -> std::path::PathBuf {
         self.workspace_root
             .clone()
             .unwrap_or_else(std::env::temp_dir)
@@ -99,8 +74,8 @@ impl TestRunner for DockerJsRunner {
         cancel: CancelToken,
     ) -> Result<RunnerOutput, RunnerError> {
         input.validate()?;
-        ensure_docker_available().await?;
-        ensure_runner_image().await?;
+        docker_harness::ensure_docker_available().await?;
+        docker_harness::ensure_runner_image(RUNNER_IMAGE, RUNNER_DOCKERFILE).await?;
 
         // Workspace is removed when `guard` drops — covers the happy path,
         // every `?` early-return, and a panic (§10: always cleaned up).
@@ -109,7 +84,9 @@ impl TestRunner for DockerJsRunner {
         materialize_workspace(guard.path(), &input)?;
 
         tracing::debug!(language = ?input.language, "starting container");
-        let output = run_container(guard.path(), &input, &cancel).await?;
+        let output: ContainerOutput =
+            docker_harness::run_container(guard.path(), RUNNER_IMAGE, IN_CONTAINER_CMD, &input, &cancel)
+                .await?;
         let stdout = truncate(&output.stdout);
         let stderr = truncate(&output.stderr);
 
@@ -151,237 +128,33 @@ impl TestRunner for DockerJsRunner {
     }
 }
 
-/// Probe for a reachable Docker daemon. Maps a missing binary or a
-/// down daemon to [`RunnerError::DockerUnavailable`] so the service can
-/// drive the "execution unavailable" UX (plan §3) instead of a hard
-/// error.
-async fn ensure_docker_available() -> Result<(), RunnerError> {
-    let output = Command::new("docker")
-        .arg("version")
-        .arg("--format")
-        .arg("{{.Server.Version}}")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| RunnerError::DockerUnavailable(format!("docker binary not found: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RunnerError::DockerUnavailable(format!(
-            "docker daemon unreachable: {}",
-            stderr.trim()
-        )));
-    }
-    Ok(())
-}
-
-/// Preflight: verify the locally-built runner image exists on the daemon.
-///
-/// The image is built locally and never published to a registry (local-first
-/// guarantee, see `docker/Dockerfile.runner-js`), so `docker run` against a
-/// missing image fails with a cryptic registry-pull error (`pull access
-/// denied`, exit 125) instead of anything actionable. The returned error
-/// carries the exact build command. A non-zero exit whose stderr does not
-/// say "No such image" (e.g. the daemon dropped between the two preflight
-/// probes) is routed to [`RunnerError::DockerUnavailable`] instead, so the
-/// user is never told to rebuild an image they already have.
-async fn ensure_runner_image() -> Result<(), RunnerError> {
-    let output = Command::new("docker")
-        .args(["image", "inspect", RUNNER_IMAGE])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| RunnerError::DockerUnavailable(format!("docker binary not found: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !is_no_such_image(&stderr) {
-            return Err(RunnerError::DockerUnavailable(format!(
-                "docker image inspect failed: {}",
-                stderr.trim()
-            )));
-        }
-        return Err(RunnerError::ImageMissing(format!(
-            "runner image `{RUNNER_IMAGE}` is not built; build it from the repo root with: \
-             docker build -t {RUNNER_IMAGE} \
-             -f apps/desktop/src-tauri/docker/Dockerfile.runner-js \
-             apps/desktop/src-tauri/docker"
-        )));
-    }
-    Ok(())
-}
-
-/// Whether `docker image inspect` stderr reports a missing image, as opposed
-/// to some other failure (daemon gone, permission error). Docker has phrased
-/// this as `Error: No such image: …` and `Error response from daemon: No such
-/// image: …` across versions, so match case-insensitively on the stable part.
-fn is_no_such_image(stderr: &str) -> bool {
-    stderr.to_ascii_lowercase().contains("no such image")
-}
-
-/// Write the source/test files plus a minimal `package.json` and vitest
-/// config into the workspace.
 /// Paths the runner writes and then reads back after the container exits
 /// (`RESULTS_FILE`, the `coverage/` report dir). A crafted artifact must not
-/// be allowed to pre-seed these: a container that exits without writing its
-/// own output (e.g. a test that hard-kills the process) would otherwise leave
-/// the forged file in place and the host would read it as authentic.
+/// be allowed to pre-seed these — see `docker_harness::materialize_files`.
 fn is_reserved_output_path(relative_path: &str) -> bool {
     let normalized = relative_path.replace('\\', "/");
     let normalized = normalized.trim_start_matches("./");
     normalized == RESULTS_FILE || normalized == "coverage" || normalized.starts_with("coverage/")
 }
 
+/// Write the source/test files plus a minimal `package.json` and vitest
+/// config into the workspace.
 fn materialize_workspace(root: &Path, input: &RunInput) -> Result<(), RunnerError> {
-    for file in &input.files {
-        if is_reserved_output_path(&file.relative_path) {
-            return Err(RunnerError::InvalidInput(format!(
-                "workspace file `{}` collides with a runner output path",
-                file.relative_path
-            )));
-        }
-        let dest = root.join(&file.relative_path);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| RunnerError::Workspace(format!("create dir {}: {e}", parent.display())))?;
-        }
-        std::fs::write(&dest, &file.contents)
-            .map_err(|e| RunnerError::Workspace(format!("write {}: {e}", dest.display())))?;
-    }
+    docker_harness::materialize_files(root, input, is_reserved_output_path)?;
 
     std::fs::write(root.join("package.json"), PACKAGE_JSON)
         .map_err(|e| RunnerError::Workspace(format!("write package.json: {e}")))?;
 
     let config_name = match input.language {
         RunnerLanguage::TypeScript => "vitest.config.ts",
-        RunnerLanguage::JavaScript => "vitest.config.js",
+        // Python never reaches this runner (factory routes it to
+        // `docker_py`), but the match must stay exhaustive.
+        RunnerLanguage::JavaScript | RunnerLanguage::Python => "vitest.config.js",
     };
     std::fs::write(root.join(config_name), VITEST_CONFIG)
         .map_err(|e| RunnerError::Workspace(format!("write {config_name}: {e}")))?;
 
     Ok(())
-}
-
-/// Raw result of the container process.
-struct ContainerOutput {
-    stdout: String,
-    stderr: String,
-    exit_code: i32,
-}
-
-/// Run the suite in a hardened container (plan §7) and capture its output.
-///
-/// Hardening flags (security gate, §7/§10): `--network none`, CPU / memory /
-/// pids caps, `--ulimit fsize` write cap, read-only rootfs + tmpfs,
-/// `--cap-drop ALL`, `no-new-privileges`, and a non-root user supplied by the
-/// image (`USER` in the runner Dockerfile).
-///
-/// Termination is the critical part. Dropping the `docker run` child only
-/// kills the *CLI*, not the daemon-side container, so on either the
-/// wall-clock timeout **or** a user cancellation we issue an explicit
-/// `docker kill` against the container's name. `--rm` then reaps it and
-/// `kill_on_drop` cleans up the leaked CLI handle.
-async fn run_container(
-    workspace: &Path,
-    input: &RunInput,
-    cancel: &CancelToken,
-) -> Result<ContainerOutput, RunnerError> {
-    let limits = &input.limits;
-    let mount = format!("{}:{WORK_MOUNT}", workspace.display());
-    let memory = format!("{}m", limits.memory_mb);
-    let cpus = format!("{:.2}", f64::from(limits.cpus));
-    let pids = limits.pids.to_string();
-    let fsize = format!("fsize={MAX_WRITE_BYTES}");
-    // Stable handle so the timeout / cancellation paths can target the
-    // container directly with `docker kill`.
-    let name = format!("tessera-run-{}", Uuid::new_v4());
-
-    let mut cmd = Command::new("docker");
-    cmd.arg("run")
-        .arg("--rm")
-        .args(["--name", &name])
-        .args(["--network", "none"])
-        .args(["--cpus", &cpus])
-        .args(["--memory", &memory])
-        .args(["--pids-limit", &pids])
-        .args(["--ulimit", &fsize])
-        .arg("--read-only")
-        .args(["--tmpfs", "/tmp"])
-        .args(["--cap-drop", "ALL"])
-        .args(["--security-opt", "no-new-privileges"])
-        .args(["-v", &mount])
-        .args(["-w", WORK_MOUNT]);
-
-    // The workspace is 0o700 host-user-only (see `WorkspaceGuard::create`),
-    // so the container must run as the host uid:gid to write `results.json`
-    // + coverage into the bind mount — and every file it creates stays owned
-    // by the host user, keeping the `Drop` cleanup working. The uid has no
-    // passwd entry in the image, so HOME points at the writable tmpfs.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let meta = std::fs::metadata(workspace).map_err(|e| {
-            RunnerError::Workspace(format!("stat workspace {}: {e}", workspace.display()))
-        })?;
-        let user = format!("{}:{}", meta.uid(), meta.gid());
-        cmd.args(["--user", &user]).args(["-e", "HOME=/tmp"]);
-    }
-
-    cmd.arg(RUNNER_IMAGE)
-        .args(["sh", "-c", IN_CONTAINER_CMD])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Backstop: if this future is dropped, SIGKILL the CLI handle too.
-        .kill_on_drop(true);
-
-    let child = cmd
-        .spawn()
-        .map_err(|e| RunnerError::Process(format!("failed to spawn docker run: {e}")))?;
-
-    let timeout = Duration::from_secs(u64::from(limits.timeout_secs));
-
-    tokio::select! {
-        // Completion is checked first so a container that finishes at exactly
-        // the wall-clock deadline reports its real results instead of a
-        // spurious timeout; cancellation still preempts the timeout below.
-        biased;
-        result = child.wait_with_output() => {
-            let output = result
-                .map_err(|e| RunnerError::Process(format!("docker run failed: {e}")))?;
-            Ok(ContainerOutput {
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-                exit_code: output.status.code().unwrap_or(-1),
-            })
-        }
-        () = cancel.cancelled() => {
-            docker_kill(&name).await;
-            Err(RunnerError::Cancelled)
-        }
-        () = tokio::time::sleep(timeout) => {
-            docker_kill(&name).await;
-            Err(RunnerError::Timeout(limits.timeout_secs))
-        }
-    }
-}
-
-/// Best-effort `docker kill` against a named container. Used on timeout and
-/// user cancellation: terminating the local `docker run` process does **not**
-/// stop the container running on the daemon, so the daemon must be signalled
-/// explicitly. A failure here (e.g. the container already exited) is logged,
-/// never propagated — the caller is already returning a terminal error.
-async fn docker_kill(name: &str) {
-    let result = Command::new("docker")
-        .args(["kill", name])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
-    if let Err(e) = result {
-        tracing::warn!(container = name, error = %e, "failed to docker kill sandbox container");
-    }
 }
 
 /// Command run inside the container. Emits a vitest JSON report and an
@@ -417,8 +190,7 @@ export default defineConfig({
 ";
 
 // ---------------------------------------------------------------------------
-// Parsers — pure functions, unit-tested below without Docker. Phase 4
-// expands the mapping (source lines, branch coverage) against fixtures.
+// Parsers — pure functions, unit-tested below without Docker.
 // ---------------------------------------------------------------------------
 
 /// Subset of the vitest `--reporter=json` shape we consume.
@@ -570,98 +342,10 @@ struct IstanbulLoc {
     line: u32,
 }
 
-/// Saturating `f64 -> u32` for a millisecond duration the caller has
-/// already filtered to finite + non-negative.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn f64_to_u32(value: f64) -> u32 {
-    if value >= f64::from(u32::MAX) {
-        u32::MAX
-    } else {
-        value as u32
-    }
-}
-
-/// Map parsed assertions to a run-level [`RunStatus`]: any failure →
-/// `Failed`; at least one passing test and no failures → `Passed`; nothing
-/// executed → `Error`.
-fn derive_status(tests: &[TestResult]) -> RunStatus {
-    if tests.iter().any(|t| t.status == TestStatus::Failed) {
-        return RunStatus::Failed;
-    }
-    if tests.iter().any(|t| t.status == TestStatus::Passed) {
-        return RunStatus::Passed;
-    }
-    RunStatus::Error
-}
-
-/// Truncate captured stdout/stderr to [`MAX_OUTPUT_BYTES`].
-fn truncate(s: &str) -> String {
-    truncate_to(s, MAX_OUTPUT_BYTES)
-}
-
-/// Truncate `s` to at most `max` bytes on a char boundary, appending a
-/// marker when bytes were dropped. Shared by the output cap and the
-/// per-field result-string caps.
-fn truncate_to(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}…[truncated]", &s[..end])
-}
-
-/// RAII guard for the throwaway workspace. Removing on `Drop` guarantees
-/// cleanup on the happy path, on any `?` early-return, and on panic (§10).
-struct WorkspaceGuard {
-    path: PathBuf,
-}
-
-impl WorkspaceGuard {
-    fn create(root: &Path) -> Result<Self, RunnerError> {
-        let path = root.join(format!("tessera-run-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&path)
-            .map_err(|e| RunnerError::Workspace(format!("create workspace {}: {e}", path.display())))?;
-        // Owner-only: a world-writable workspace would let another local uid
-        // inject a hostile `results.json` or swap a source file in the window
-        // between creation and `docker run`. The container is started as the
-        // host uid:gid (see `run_container`), so it can still write results
-        // into the bind mount and host-side `Drop` cleanup keeps working.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).map_err(
-                |e| RunnerError::Workspace(format!("chmod workspace {}: {e}", path.display())),
-            )?;
-        }
-        Ok(Self { path })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for WorkspaceGuard {
-    fn drop(&mut self) {
-        if let Err(e) = std::fs::remove_dir_all(&self.path) {
-            // Best-effort: a failed cleanup must not mask the run result,
-            // but it is worth a warning for disk-leak diagnosis.
-            tracing::warn!(
-                workspace = %self.path.display(),
-                error = %e,
-                "failed to remove sandbox workspace"
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::runners::{ResourceLimits, WorkspaceFile};
+    use crate::providers::runners::{ResourceLimits, RunStatus, WorkspaceFile};
 
     #[test]
     fn parse_vitest_results_maps_pass_fail_skip() {
@@ -774,46 +458,6 @@ mod tests {
     }
 
     #[test]
-    fn derive_status_prioritizes_failure() {
-        let failed = vec![
-            TestResult { name: "a".into(), status: TestStatus::Passed, duration_ms: 1, failure_message: None, source_line: None },
-            TestResult { name: "b".into(), status: TestStatus::Failed, duration_ms: 1, failure_message: None, source_line: None },
-        ];
-        assert_eq!(derive_status(&failed), RunStatus::Failed);
-
-        let all_pass = vec![TestResult { name: "a".into(), status: TestStatus::Passed, duration_ms: 1, failure_message: None, source_line: None }];
-        assert_eq!(derive_status(&all_pass), RunStatus::Passed);
-
-        assert_eq!(derive_status(&[]), RunStatus::Error);
-    }
-
-    #[test]
-    fn is_no_such_image_discriminates_missing_image_from_daemon_failures() {
-        // Both stderr phrasings Docker has used for a missing image.
-        assert!(is_no_such_image("Error: No such image: tessera-runner-js:latest"));
-        assert!(is_no_such_image(
-            "Error response from daemon: No such image: tessera-runner-js:latest"
-        ));
-        // Daemon / transport failures must not be reported as a missing image.
-        assert!(!is_no_such_image(
-            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
-        ));
-        assert!(!is_no_such_image("permission denied while trying to connect"));
-        assert!(!is_no_such_image(""));
-    }
-
-    #[test]
-    fn truncate_caps_long_output() {
-        let big = "a".repeat(MAX_OUTPUT_BYTES + 100);
-        let out = truncate(&big);
-        assert!(out.len() < big.len());
-        assert!(out.ends_with("…[truncated]"));
-
-        let small = "short";
-        assert_eq!(truncate(small), "short");
-    }
-
-    #[test]
     fn parse_vitest_results_caps_attacker_controlled_strings() {
         // A run executes untrusted code that writes results.json, so test
         // names + failure messages must be capped before they reach the DB/UI.
@@ -831,6 +475,17 @@ mod tests {
         let failure = tests[0].failure_message.as_deref().expect("message");
         assert!(failure.len() <= MAX_FAILURE_MSG_BYTES + "…[truncated]".len());
         assert!(failure.ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn reserved_output_paths_are_detected() {
+        assert!(is_reserved_output_path("results.json"));
+        assert!(is_reserved_output_path("./results.json"));
+        assert!(is_reserved_output_path("coverage"));
+        assert!(is_reserved_output_path("coverage/coverage-final.json"));
+        assert!(is_reserved_output_path("coverage\\coverage-final.json"));
+        assert!(!is_reserved_output_path("src/results.json.ts"));
+        assert!(!is_reserved_output_path("add.test.ts"));
     }
 
     /// End-to-end container run. Gated: requires a Docker daemon and the

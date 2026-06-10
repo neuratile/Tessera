@@ -1,20 +1,19 @@
 //! Sandbox IPC command — wraps Phase 2 `sandbox_service`.
 //!
-//! Per `rules.md` §4.2.1: thin handler. It builds the concrete
-//! [`DockerJsRunner`], delegates to the service (the sole orchestration
-//! entry point), and maps the typed `AppError` to a string at the IPC
-//! boundary. No business logic lives here.
+//! Per `rules.md` §4.2.1: thin handler. It hands the service the
+//! per-language runner factory (`runners::factory::runner_for` — Python →
+//! `docker-py`, JS/TS → `docker-js`), delegates to the service (the sole
+//! orchestration entry point), and maps the typed `AppError` to a string
+//! at the IPC boundary. No business logic lives here.
 //!
 //! The opt-in gate (plan §3) is enforced in the service, not here, so the
 //! backend rejects an opted-out run regardless of how it is invoked.
 
-use std::sync::Arc;
-
 use sqlx::SqlitePool;
 use tauri::State;
 
-use crate::providers::runners::docker_js::DockerJsRunner;
-use crate::providers::runners::{RunRequest, RunResult, TestRunner};
+use crate::providers::runners::factory;
+use crate::providers::runners::{RunRequest, RunResult};
 use crate::services::sandbox_service::{self, RunRegistry, SandboxDeps};
 use crate::utils::crypto::CryptoKey;
 
@@ -37,11 +36,10 @@ pub async fn run_test_sandbox(
     crypto: State<'_, CryptoKey>,
     request: RunRequest,
 ) -> Result<RunResult, String> {
-    let runner: Arc<dyn TestRunner> = Arc::new(DockerJsRunner::new());
     let deps = SandboxDeps {
         pool: &pool,
         crypto: Some(&crypto),
-        runner,
+        runner_factory: &factory::runner_for,
         registry: &registry,
     };
     sandbox_service::run(request, &deps)

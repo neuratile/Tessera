@@ -193,9 +193,10 @@ jobs:
   sandbox-runner-test:
     name: sandbox-runner-test
     # End-to-end gate for the opt-in Docker sandbox (plan §7, ADR-0004):
-    # builds the local-first `tessera-runner-js` image from its Dockerfile
-    # and runs the Docker-gated `#[ignore]`d test that executes a real
-    # vitest suite inside the hardened container (`--network none`,
+    # builds the local-first runner images (`tessera-runner-js`,
+    # `tessera-runner-py`) from their Dockerfiles and runs the Docker-gated
+    # `#[ignore]`d tests that execute a real vitest suite and a real pytest
+    # suite inside the hardened container (`--network none`,
     # `--cap-drop ALL`, read-only rootfs). Deterministic — no LLM, no
     # external service — so unlike integration-test this is a blocking
     # gate. Catches image regressions (e.g. the NODE_PATH/ESM resolution
@@ -220,7 +221,7 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
-      - name: Restore cached runner image
+      - name: Restore cached JS runner image
         # The base image is digest-pinned, so the Dockerfile hash fully
         # determines the build output. A cache hit skips Docker Hub entirely
         # — the registry is only touched when the Dockerfile changes or the
@@ -232,20 +233,34 @@ jobs:
           path: /tmp/tessera-runner-js.tar
           key: tessera-runner-js-${{ hashFiles('apps/desktop/src-tauri/docker/Dockerfile.runner-js') }}
 
-      - name: Load cached runner image
+      - name: Restore cached Python runner image
+        id: runner-py-image-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/tessera-runner-py.tar
+          key: tessera-runner-py-${{ hashFiles('apps/desktop/src-tauri/docker/Dockerfile.runner-py') }}
+
+      - name: Load cached JS runner image
         if: steps.runner-image-cache.outputs.cache-hit == 'true'
         run: docker load -i /tmp/tessera-runner-js.tar
+
+      - name: Load cached Python runner image
+        if: steps.runner-py-image-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/tessera-runner-py.tar
 
       - name: Log in to Docker Hub
         # Only on a cache miss, and only when the optional secrets exist —
         # forks and secretless runs still work, just anonymously.
-        if: steps.runner-image-cache.outputs.cache-hit != 'true' && env.DOCKERHUB_USERNAME != ''
+        if: >-
+          (steps.runner-image-cache.outputs.cache-hit != 'true' ||
+           steps.runner-py-image-cache.outputs.cache-hit != 'true') &&
+          env.DOCKERHUB_USERNAME != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build sandbox runner image
+      - name: Build JS sandbox runner image
         if: steps.runner-image-cache.outputs.cache-hit != 'true'
         # Retry with backoff so a transient registry failure (429 from the
         # shared anonymous quota, network blip) does not hard-fail the gate.
@@ -263,10 +278,29 @@ jobs:
           echo "::error::docker build failed after 3 attempts"
           exit 1
 
-      - name: Run Docker-gated sandbox runner test
+      - name: Build Python sandbox runner image
+        if: steps.runner-py-image-cache.outputs.cache-hit != 'true'
+        run: |
+          for attempt in 1 2 3; do
+            if docker build -t tessera-runner-py \
+                -f apps/desktop/src-tauri/docker/Dockerfile.runner-py \
+                apps/desktop/src-tauri/docker; then
+              docker save tessera-runner-py -o /tmp/tessera-runner-py.tar
+              exit 0
+            fi
+            echo "::warning::docker build failed (attempt ${attempt}/3); retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::docker build failed after 3 attempts"
+          exit 1
+
+      - name: Run Docker-gated sandbox runner tests
+        # `runner_executes` matches both gated tests:
+        # `docker_runner_executes_a_real_suite` (JS) and
+        # `docker_py_runner_executes_a_real_suite` (Python).
         run: |
           cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --lib \
-            -- --ignored docker_runner_executes
+            -- --ignored runner_executes
 
   coverage:
     name: coverage

@@ -189,6 +189,33 @@ fn snapshot_test_cases_v2_tool() {
     );
 }
 
+/// Python-scope variant of the test-cases prompt
+/// (`plan/SANDBOX_PYTHON_RUNNER.md` §7): a `.py` scope hint swaps the
+/// runnable-files instruction to pytest. The JS/TS wording stays locked by
+/// `test_cases_v2_messages` above — unchanged there proves the JS path is
+/// byte-identical.
+#[test]
+fn snapshot_test_cases_v2_messages_python() {
+    let chunks = vec![Chunk {
+        kind: ChunkKind::Function,
+        name: "login".to_string(),
+        start_line: 10,
+        end_line: 25,
+        content: "def login(creds):\n    return verify(creds)\n".to_string(),
+        token_count: 12,
+        oversize: false,
+    }];
+    let ctx = PromptContext {
+        project_name: "fixture-project",
+        project_summary: "Fixture summary used for snapshot tests.",
+        chunks: &chunks,
+        scope_hint: "auth/login.py",
+        reviewer_feedback: "",
+    };
+    let msgs = test_cases_v2::build_messages(&ctx);
+    insta::assert_yaml_snapshot!("test_cases_v2_messages_python", dump_messages(&msgs));
+}
+
 #[test]
 fn snapshot_bug_report_v2_messages() {
     let chunks = fixture_chunks();
