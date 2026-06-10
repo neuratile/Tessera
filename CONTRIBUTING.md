@@ -28,6 +28,20 @@ workspace `pnpm test`, so Rust stays required on GitHub even when it is skipped 
 Run it early with `pnpm guard:pre-push`. Don't bypass with `--no-verify` — branch
 protection rejects the PR anyway.
 
+## Coverage
+
+Coverage is **informational**, not a merge gate. Run it locally to see what the
+rulebook's 80% services/utilities target (rules.md §6) actually covers:
+
+```bash
+pnpm --filter @testing-ide/desktop run test:coverage   # frontend LCOV → apps/desktop/coverage/
+cargo llvm-cov --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --lcov --output-path apps/desktop/src-tauri/lcov.info
+```
+
+CI's non-blocking `coverage` job emits the same two LCOV reports and uploads them
+as the `coverage-lcov` artifact. `cargo llvm-cov` needs the `llvm-tools-preview`
+component (`rustup component add llvm-tools-preview`) and the `cargo-llvm-cov` binary.
+
 ## Merge conflicts
 
 Rebase, don't merge (`git pull --rebase origin master`). Resolve **every**

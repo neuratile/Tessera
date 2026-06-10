@@ -268,6 +268,64 @@ jobs:
           cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --lib \
             -- --ignored docker_runner_executes
 
+  coverage:
+    name: coverage
+    # Informational coverage report — LCOV for the frontend (vitest v8)
+    # and the desktop Rust crate (cargo-llvm-cov). Non-blocking by design
+    # (`continue-on-error`) so a coverage-tooling hiccup never red-bars a
+    # PR; it exists to give contributors visibility into the rulebook's
+    # 80% services/utilities target (rules.md §6), not to gate merges.
+    # Both LCOV reports are uploaded as artifacts for external tooling.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux Tauri deps
+        uses: ./.github/actions/linux-tauri-deps
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend coverage (LCOV)
+        run: pnpm --filter @testing-ide/desktop run test:coverage
+
+      - name: Backend coverage (LCOV)
+        run: |
+          cargo llvm-cov --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --locked --lib --lcov --output-path apps/desktop/src-tauri/lcov.info
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: |
+            apps/desktop/coverage/lcov.info
+            apps/desktop/src-tauri/lcov.info
+          if-no-files-found: warn
+
   integration-test:
     name: integration-test (ubuntu)
     runs-on: ubuntu-latest
