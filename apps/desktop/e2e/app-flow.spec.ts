@@ -101,8 +101,10 @@ test.describe('desktop app flow', () => {
     const drawer = page.getByRole('dialog', { name: 'Test Cases - express-api' });
     await expect(drawer).toBeVisible();
 
-    // Opt-in is on, so the Run button is enabled.
-    const runButton = drawer.getByRole('button', { name: 'Run' });
+    // Opt-in is on, so the Run button is enabled. Match exactly: the flaky-check
+    // stepper adds sibling buttons ("Fewer runs"/"More runs") whose accessible
+    // names contain the substring "Run", so a non-exact match is ambiguous.
+    const runButton = drawer.getByRole('button', { name: 'Run', exact: true });
     await expect(runButton).toBeEnabled();
     await runButton.click();
 

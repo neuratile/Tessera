@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::providers::runners::factory;
-use crate::providers::runners::{RunRequest, RunResult};
+use crate::providers::runners::{FlakyRunResult, RunRequest, RunResult};
 use crate::services::sandbox_service::{self, RunRegistry, SandboxDeps};
 use crate::utils::crypto::CryptoKey;
 
@@ -43,6 +43,39 @@ pub async fn run_test_sandbox(
         registry: &registry,
     };
     sandbox_service::run(request, &deps)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Run a generated test-case artifact `runs` times in the local Docker
+/// sandbox and classify each test as stable-pass / stable-fail / flaky
+/// (`plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md`). Thin handler
+/// mirroring [`run_test_sandbox`]; `runs` is re-clamped to `[2, 20]` in the
+/// service, so the UI value is only a hint.
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) for the same
+/// pre-flight failures as [`run_test_sandbox`] (opt-out, missing / wrong-type
+/// artifact, no runnable files, DB error). A runner-level failure or a
+/// cancellation mid-check is **not** an error here — it comes back as a
+/// [`FlakyRunResult`] carrying an `errorMessage` and no verdicts.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn run_test_sandbox_flaky(
+    pool: State<'_, SqlitePool>,
+    registry: State<'_, RunRegistry>,
+    crypto: State<'_, CryptoKey>,
+    request: RunRequest,
+    runs: u32,
+) -> Result<FlakyRunResult, String> {
+    let deps = SandboxDeps {
+        pool: &pool,
+        crypto: Some(&crypto),
+        runner_factory: &factory::runner_for,
+        registry: &registry,
+    };
+    sandbox_service::run_flaky(request, runs, &deps)
         .await
         .map_err(|e| e.to_string())
 }

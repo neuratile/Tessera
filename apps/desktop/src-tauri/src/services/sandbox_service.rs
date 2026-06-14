@@ -35,8 +35,9 @@ use serde_json::Value as JsonValue;
 
 use crate::error::{AppError, AppResult};
 use crate::providers::runners::{
-    CancelToken, RunInput, RunRequest, RunResult, RunStatus, RunnerError, RunnerLanguage,
-    RunnerOutput, ResourceLimits, TestResult, TestRunner, TestStatus, WorkspaceFile,
+    aggregate_flaky, CancelToken, FlakyRunResult, RunInput, RunRequest, RunResult, RunStatus,
+    RunnerError, RunnerLanguage, RunnerOutput, ResourceLimits, TestResult, TestRunner, TestStatus,
+    TestVerdict, WorkspaceFile,
 };
 use crate::repositories::artifact_repo::{self, ArtifactType};
 use crate::repositories::test_case_result_repo::{
@@ -89,15 +90,16 @@ impl RunRegistry {
 }
 
 /// Unregisters a run's token on scope exit so a token never outlives its
-/// run, on the happy path or any early `?` return.
+/// run, on the happy path or any early `?` return. Owns its key so it can be
+/// handed back from [`register_cancel`] and live in the caller's scope.
 struct RegistryGuard<'a> {
     registry: &'a RunRegistry,
-    run_id: &'a str,
+    cancel_key: String,
 }
 
 impl Drop for RegistryGuard<'_> {
     fn drop(&mut self) {
-        self.registry.unregister(self.run_id);
+        self.registry.unregister(&self.cancel_key);
     }
 }
 
@@ -135,6 +137,67 @@ pub struct SandboxDeps<'a> {
 /// Runner-level failures do not error here — they are persisted as an
 /// [`RunStatus::Error`] run and returned in the [`RunResult`].
 pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunResult> {
+    // 1–3. Shared preamble: opt-in gate, artifact load + type-check, workspace
+    //       + runner selection (also used by `run_flaky`).
+    let Prepared { input, runner, artifact, case_ids } = prepare_run(&request, deps).await?;
+
+    // 4. Open the run row.
+    let run_id = open_run_row(deps, &artifact, runner.name()).await?;
+
+    let span = tracing::info_span!(
+        "sandbox_run",
+        run_id = %run_id,
+        runner = runner.name(),
+        files = input.files.len(),
+    );
+    let _enter = span.enter();
+
+    // 5. Drive the runner. The cancellation token is registered under the
+    //    caller's `client_run_id` so a concurrent `cancel_test_sandbox` can
+    //    fire it; the guard deregisters it on every exit path. The runner's
+    //    own wall-clock timeout is independent of this user-Stop token.
+    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
+
+    tracing::debug!("driving runner");
+    let started = Instant::now();
+    let outcome = runner.run(input, cancel).await;
+    let duration_ms = elapsed_ms(started);
+
+    match &outcome {
+        Ok(output) => tracing::debug!(status = output.status.as_str(), duration_ms, "runner finished"),
+        Err(err) => tracing::debug!(code = err.code(), duration_ms, "runner errored"),
+    }
+
+    match outcome {
+        Ok(output) => {
+            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids, true).await?;
+        }
+        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms).await?,
+    }
+
+    // 6. Read back the canonical result.
+    test_run_repo::fetch_run(deps.pool, &run_id).await
+}
+
+/// The product of the shared run preamble (steps 1–3), consumed by both
+/// [`run`] and [`run_flaky`].
+struct Prepared {
+    input: RunInput,
+    runner: Arc<dyn TestRunner>,
+    artifact: artifact_repo::Artifact,
+    case_ids: HashSet<String>,
+}
+
+/// Steps 1–3 common to [`run`] and [`run_flaky`]: enforce the opt-in gate,
+/// load + type-check the artifact, build the workspace [`RunInput`], select
+/// the matching runner, and collect the case ids for the name→id bridge.
+///
+/// # Errors
+///
+/// [`AppError::InvalidInput`] when opt-in is off, the id is empty, the
+/// artifact is not a test-cases artifact, or it carries no runnable files;
+/// [`AppError::NotFound`] when the artifact does not exist.
+async fn prepare_run(request: &RunRequest, deps: &SandboxDeps<'_>) -> AppResult<Prepared> {
     // 1. Opt-in gate (plan §3 — backend rejects when the flag is off).
     if !request.opt_in_confirmed {
         return Err(AppError::InvalidInput(
@@ -164,59 +227,157 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     let runner = (deps.runner_factory)(input.language);
     let case_ids = collect_case_ids(&artifact.structured_data);
 
-    // 4. Open the run row.
+    Ok(Prepared { input, runner, artifact, case_ids })
+}
+
+/// Open a fresh `test_runs` row for `artifact` and mark it `running`, returning
+/// its id. Shared by [`run`] (one row per run) and [`run_flaky`] (one row for
+/// iteration #1, so the check shows up in run history).
+async fn open_run_row(
+    deps: &SandboxDeps<'_>,
+    artifact: &artifact_repo::Artifact,
+    runner_name: &str,
+) -> AppResult<String> {
     let run_id = test_run_repo::insert_run(
         deps.pool,
         TestRunInsert {
             artifact_id: artifact.id.clone(),
             project_id: artifact.project_id.clone(),
-            runner: runner.name().to_string(),
+            runner: runner_name.to_string(),
         },
     )
     .await?;
-
-    let span = tracing::info_span!(
-        "sandbox_run",
-        run_id = %run_id,
-        runner = runner.name(),
-        files = input.files.len(),
-    );
-    let _enter = span.enter();
-
     test_run_repo::mark_running(deps.pool, &run_id).await?;
+    Ok(run_id)
+}
 
-    // 5. Drive the runner. The cancellation token is registered under the
-    //    caller's `client_run_id` (known to the UI before this IPC returns)
-    //    so a concurrent `cancel_test_sandbox` can fire it; the
-    //    `RegistryGuard` removes it on every exit path. A run with no
-    //    client id is simply not cancellable. The runner's own wall-clock
-    //    timeout is independent of this user-Stop token.
+/// Mint a [`CancelToken`] and register it under the caller's `client_run_id`
+/// so a concurrent `cancel_test_sandbox` can fire it (the run/check IPC only
+/// returns once finished). A blank id is simply not cancellable. The returned
+/// [`RegistryGuard`] must be held for the duration of the run — it deregisters
+/// the token on every exit path, so a token never outlives its run.
+fn register_cancel<'a>(
+    deps: &SandboxDeps<'a>,
+    client_run_id: &str,
+) -> (CancelToken, RegistryGuard<'a>) {
     let cancel = CancelToken::new();
-    let cancel_key = request.client_run_id.trim().to_string();
+    let cancel_key = client_run_id.trim().to_string();
     if !cancel_key.is_empty() {
         deps.registry.register(&cancel_key, cancel.clone());
     }
-    let _guard = RegistryGuard { registry: deps.registry, run_id: &cancel_key };
+    (cancel, RegistryGuard { registry: deps.registry, cancel_key })
+}
 
-    tracing::debug!("driving runner");
-    let started = Instant::now();
-    let outcome = runner.run(input, cancel).await;
-    let duration_ms = elapsed_ms(started);
+/// Lower / upper bounds on the number of iterations a flaky check runs
+/// (`FLAKY_TEST_DETECTION.md` §4). The UI value is only a hint — the backend
+/// re-clamps so a tampered IPC payload cannot force a 1000-run loop.
+pub const FLAKY_MIN_RUNS: u32 = 2;
+pub const FLAKY_MAX_RUNS: u32 = 20;
 
-    match &outcome {
-        Ok(output) => tracing::debug!(status = output.status.as_str(), duration_ms, "runner finished"),
-        Err(err) => tracing::debug!(code = err.code(), duration_ms, "runner errored"),
-    }
+/// Run the suite `runs` times back-to-back in the same hardened sandbox and
+/// classify each test as stable-pass / stable-fail / flaky
+/// (`plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md`).
+///
+/// `runs` is re-clamped to `[FLAKY_MIN_RUNS, FLAKY_MAX_RUNS]`. Iteration #1 is
+/// persisted via the normal [`persist_success`] path so the check shows up in
+/// run history and yields a real `run_id`; the flaky verdict is computed in
+/// memory across all iterations. One shared [`CancelToken`] spans every
+/// iteration, so a Stop kills the whole check.
+///
+/// # Errors
+///
+/// Pre-flight failures (opt-out, missing / wrong-type artifact, no runnable
+/// files) short-circuit with an `Err`, exactly as [`run`] does. A runner-level
+/// failure (Docker down, timeout) or a cancellation *during* the loop is **not**
+/// propagated — the check returns a [`FlakyRunResult`] carrying an
+/// `error_message` and no verdicts.
+pub async fn run_flaky(
+    request: RunRequest,
+    runs: u32,
+    deps: &SandboxDeps<'_>,
+) -> AppResult<FlakyRunResult> {
+    let Prepared { input, runner, artifact, case_ids } = prepare_run(&request, deps).await?;
+    let total_runs = runs.clamp(FLAKY_MIN_RUNS, FLAKY_MAX_RUNS);
 
-    match outcome {
-        Ok(output) => {
-            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids).await?;
+    let span = tracing::info_span!(
+        "sandbox_flaky_check",
+        runner = runner.name(),
+        files = input.files.len(),
+        runs = total_runs,
+    );
+    let _enter = span.enter();
+
+    // 2. One token shared across all iterations — a Stop kills the whole check.
+    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
+
+    // 3. Loop: collect one RunnerOutput per iteration. The first Err aborts the
+    //    loop early and is surfaced as a verdict-less result (design §4). The
+    //    wall-clock time of iteration #1 is captured here so the persisted run
+    //    row (step 4) records its real execution time, not the DB-write cost.
+    let mut outputs: Vec<RunnerOutput> = Vec::with_capacity(total_runs as usize);
+    let mut first_duration_ms = 0u32;
+    for iteration in 1..=total_runs {
+        tracing::debug!(iteration, total_runs, "flaky check iteration");
+        let iter_started = Instant::now();
+        match runner.run(input.clone(), cancel.clone()).await {
+            Ok(output) => {
+                if outputs.is_empty() {
+                    first_duration_ms = elapsed_ms(iter_started);
+                }
+                outputs.push(output);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    iteration,
+                    code = err.code(),
+                    error = %err,
+                    "flaky check aborted on iteration error"
+                );
+                let message = match err {
+                    RunnerError::Cancelled => {
+                        format!("Flaky check cancelled after {} of {total_runs} runs.", iteration - 1)
+                    }
+                    other => format!(
+                        "Flaky check failed on run {iteration} of {total_runs}: [{}] {other}",
+                        other.code()
+                    ),
+                };
+                return Ok(FlakyRunResult {
+                    run_id: String::new(),
+                    total_runs,
+                    flaky_count: 0,
+                    non_flaky_count: 0,
+                    tests: vec![],
+                    error_message: Some(message),
+                });
+            }
         }
-        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms).await?,
     }
 
-    // 6. Read back the canonical result.
-    test_run_repo::fetch_run(deps.pool, &run_id).await
+    // 4. Persist iteration #1 via the normal success path so the check appears
+    //    in run history with a real run_id (design §4 — no new migration). Its
+    //    duration is iteration #1's execution time, captured in the loop above.
+    let first = outputs[0].clone();
+    let run_id = open_run_row(deps, &artifact, runner.name()).await?;
+    // `post_jira_comment = false`: iteration #1 is one of N runs; posting its
+    // lone pass/fail to Jira would misrepresent the overall flaky verdict.
+    persist_success(deps, &run_id, &artifact.id, first, first_duration_ms, &case_ids, false).await?;
+
+    // 5. Classify every test across all N iterations and tally the summary.
+    let tests = aggregate_flaky(&outputs, total_runs);
+    let flaky_count = count_verdict(&tests, TestVerdict::Flaky);
+    let non_flaky_count = u32::try_from(tests.len()).unwrap_or(u32::MAX).saturating_sub(flaky_count);
+
+    tracing::info!(run_id = %run_id, total_runs, flaky_count, non_flaky_count, "flaky check complete");
+
+    Ok(FlakyRunResult {
+        run_id,
+        total_runs,
+        flaky_count,
+        non_flaky_count,
+        tests,
+        error_message: None,
+    })
 }
 
 /// Request cancellation of an in-flight run. Returns `true` when a live run
@@ -230,6 +391,12 @@ pub fn request_cancel(registry: &RunRegistry, run_id: &str) -> bool {
 }
 
 /// Persist a completed run's cases, coverage, and terminal status.
+///
+/// `post_jira_comment` gates the per-run Jira comment: a single [`run`] posts
+/// its result, but a flaky check passes `false` — its persisted iteration #1 is
+/// only one of N runs, so posting that single run's pass/fail to Jira would
+/// misrepresent the overall flaky verdict (a test can pass on run #1 yet be
+/// flaky). Surfacing the flaky verdict to trackers is deferred to §7 hardening.
 async fn persist_success(
     deps: &SandboxDeps<'_>,
     run_id: &str,
@@ -237,6 +404,7 @@ async fn persist_success(
     output: RunnerOutput,
     duration_ms: u32,
     case_ids: &HashSet<String>,
+    post_jira_comment: bool,
 ) -> AppResult<()> {
     // Capture insert errors instead of `?`-returning, so `finalize_run` is
     // always reached. Otherwise a failure between the two inserts (e.g.
@@ -276,16 +444,18 @@ async fn persist_success(
     // run, whose canonical state is already persisted above.
     bridge_sandbox_results(deps, run_id, artifact_id, &output.tests, case_ids).await;
 
-    if let Some(crypto) = deps.crypto {
-        let _ = crate::services::jira_push_service::post_run_comment(
-            deps.pool,
-            crypto,
-            artifact_id,
-            status.as_str(),
-            passed_count,
-            failed_count,
-        )
-        .await;
+    if post_jira_comment {
+        if let Some(crypto) = deps.crypto {
+            let _ = crate::services::jira_push_service::post_run_comment(
+                deps.pool,
+                crypto,
+                artifact_id,
+                status.as_str(),
+                passed_count,
+                failed_count,
+            )
+            .await;
+        }
     }
 
     write_err.map_or(Ok(()), Err)
@@ -448,6 +618,14 @@ fn detect_language(files: &[WorkspaceFile]) -> AppResult<RunnerLanguage> {
 
 fn count_status(tests: &[crate::providers::runners::TestResult], status: TestStatus) -> u32 {
     let n = tests.iter().filter(|t| t.status == status).count();
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+fn count_verdict(
+    tests: &[crate::providers::runners::FlakyTestResult],
+    verdict: TestVerdict,
+) -> u32 {
+    let n = tests.iter().filter(|t| t.verdict == verdict).count();
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
@@ -1432,6 +1610,316 @@ mod tests {
         .expect_err("mixed-language artifact must be rejected before any run row opens");
         assert_eq!(err.code(), "INVALID_INPUT");
         assert!(err.to_string().contains("mix Python and JS/TS"), "got: {err}");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // -----------------------------------------------------------------------
+    // Flaky-test detection (FLAKY_TEST_DETECTION.md §5.2).
+    // -----------------------------------------------------------------------
+
+    /// Runner that yields one queued outcome per `run()` call. A flaky check
+    /// runs the suite N times, but `ScriptedRunner` panics on a 2nd call, so
+    /// the multi-run path needs a queue (design §5.2).
+    struct MultiScriptedRunner {
+        outcomes: std::sync::Mutex<std::collections::VecDeque<Scripted>>,
+    }
+
+    impl MultiScriptedRunner {
+        fn new(outcomes: Vec<Scripted>) -> Self {
+            Self {
+                outcomes: std::sync::Mutex::new(outcomes.into_iter().collect()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TestRunner for MultiScriptedRunner {
+        fn name(&self) -> &'static str {
+            "multi-scripted-runner"
+        }
+        async fn run(
+            &self,
+            input: RunInput,
+            _cancel: CancelToken,
+        ) -> Result<RunnerOutput, RunnerError> {
+            input.validate().expect("service must pass a valid RunInput");
+            match self
+                .outcomes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pop_front()
+                .expect("MultiScriptedRunner run called more times than scripted")
+            {
+                Scripted::Succeed(output) => Ok(output),
+                Scripted::Fail(err) => Err(err),
+            }
+        }
+    }
+
+    /// One run's worth of results wrapped in a `RunnerOutput`.
+    fn out(tests: Vec<TestResult>) -> RunnerOutput {
+        RunnerOutput {
+            status: RunStatus::Passed,
+            tests,
+            coverage: vec![],
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_detects_a_flaky_test_across_runs() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        // "stable" passes every run; "wobbly" fails only on run 2.
+        let scripted = vec![
+            Scripted::Succeed(out(vec![
+                tc_test("stable", TestStatus::Passed, None),
+                tc_test("wobbly", TestStatus::Passed, None),
+            ])),
+            Scripted::Succeed(out(vec![
+                tc_test("stable", TestStatus::Passed, None),
+                tc_test("wobbly", TestStatus::Failed, Some("nondeterministic")),
+            ])),
+            Scripted::Succeed(out(vec![
+                tc_test("stable", TestStatus::Passed, None),
+                tc_test("wobbly", TestStatus::Passed, None),
+            ])),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run_flaky(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            3,
+            &deps,
+        )
+        .await
+        .expect("flaky check runs");
+
+        assert_eq!(result.total_runs, 3);
+        assert_eq!(result.flaky_count, 1);
+        assert_eq!(result.non_flaky_count, 1);
+        assert!(!result.run_id.is_empty(), "iteration #1 persisted with a real run id");
+        assert!(result.error_message.is_none());
+
+        let wobbly = result.tests.iter().find(|t| t.name == "wobbly").expect("wobbly present");
+        assert_eq!(wobbly.verdict, TestVerdict::Flaky);
+        assert_eq!((wobbly.pass_count, wobbly.executed_count), (2, 3));
+        assert_eq!(wobbly.sample_failure.as_deref(), Some("nondeterministic"));
+
+        // Iteration #1 is a real, queryable run.
+        let persisted = test_run_repo::fetch_run(&pool, &result.run_id).await.expect("fetch run");
+        assert_eq!(persisted.run_id, result.run_id);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_reports_all_stable_and_clamps_runs_below_floor() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        // runs = 1 is below FLAKY_MIN_RUNS; the backend re-clamps to 2, so the
+        // runner is driven exactly twice (two scripted outputs supplied).
+        let scripted = vec![
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run_flaky(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            1,
+            &deps,
+        )
+        .await
+        .expect("flaky check runs");
+
+        assert_eq!(result.total_runs, FLAKY_MIN_RUNS);
+        assert_eq!(result.flaky_count, 0);
+        assert_eq!(result.non_flaky_count, 1);
+        assert_eq!(result.tests[0].verdict, TestVerdict::StablePass);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_aborts_with_error_message_on_iteration_error() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        // Run 1 succeeds; run 2 errors (Docker down) → the loop aborts and the
+        // failure is surfaced as a verdict-less result, not an `Err`.
+        let scripted = vec![
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+            Scripted::Fail(RunnerError::DockerUnavailable("daemon down".into())),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run_flaky(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            3,
+            &deps,
+        )
+        .await
+        .expect("iteration error surfaced as a result, not propagated");
+
+        assert!(result.tests.is_empty());
+        assert_eq!(result.flaky_count, 0);
+        assert_eq!(result.non_flaky_count, 0);
+        assert!(result.run_id.is_empty(), "no run persisted when the loop aborts");
+        let message = result.error_message.expect("error message present");
+        assert!(message.contains("DOCKER_UNAVAILABLE"), "got: {message}");
+        assert!(message.contains("run 2 of 3"), "got: {message}");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_rejects_when_opt_in_not_confirmed() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(vec![]));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let err = run_flaky(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: false,
+                client_run_id: String::new(),
+            },
+            5,
+            &deps,
+        )
+        .await
+        .expect_err("must reject opt-out before any run");
+        assert_eq!(err.code(), "INVALID_INPUT");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_does_not_post_jira_comment_for_iteration_one() {
+        // A flaky check persists iteration #1 like a normal run, but must NOT
+        // post that single run's pass/fail to Jira — it would misrepresent the
+        // overall flaky verdict. Mirror the positive `run` Jira test, asserting
+        // the comment endpoint is hit zero times.
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/rest/api/2/issue/PROJ-123/comment")
+            .with_status(201)
+            .with_body(r#"{"id":"comment-123"}"#)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let crypto = crate::utils::crypto::CryptoKey::from_bytes([99u8; 32]);
+        let (ciphertext, nonce) = crypto.encrypt(b"token-xyz").expect("encrypt");
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO tracker_configs \
+             (id, user_id, tracker, site_url, email, api_token_encrypted, api_token_nonce, \
+              project_key, issue_type, severity_map_json, is_active, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind("00000000-0000-4000-8000-000000000001")
+        .bind("jira")
+        .bind(server.url())
+        .bind("email@acme.com")
+        .bind(&ciphertext)
+        .bind(&nonce)
+        .bind("PROJ")
+        .bind("Task")
+        .bind(None::<String>)
+        .bind(1)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("config insert");
+        sqlx::query(
+            "INSERT INTO external_links \
+             (id, artifact_id, tracker, item_ref, issue_key, issue_url, issue_type, last_status, status_fetched_at, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&artifact_id)
+        .bind("jira")
+        .bind("")
+        .bind("PROJ-123")
+        .bind("https://acme.atlassian.net/browse/PROJ-123")
+        .bind("Task")
+        .bind("To Do")
+        .bind(None::<String>)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("link insert");
+
+        let scripted = vec![
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps {
+            pool: &pool,
+            crypto: Some(&crypto),
+            runner_factory: &factory,
+            registry: &registry,
+        };
+
+        run_flaky(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            2,
+            &deps,
+        )
+        .await
+        .expect("flaky check runs");
+
+        // Asserts the comment endpoint was hit exactly zero times.
+        mock.assert_async().await;
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

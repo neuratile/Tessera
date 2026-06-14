@@ -24,6 +24,7 @@ pub mod docker_js;
 pub mod docker_py;
 pub mod factory;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -176,6 +177,164 @@ pub struct RunResult {
     pub coverage: Vec<CoverageLine>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Flaky-test detection (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md).
+// A flaky check runs the same suite N times and classifies each test by
+// comparing its outcome across the N runs. These types cross the IPC boundary
+// (mirrored by the Zod schemas in `test-run.schema.ts`); the per-test
+// classification is computed by the pure [`aggregate_flaky`] below.
+// ---------------------------------------------------------------------------
+
+/// Verdict for one test across the N runs of a flaky check (design §5.1).
+/// `snake_case` wire form (`stable_pass` / `stable_fail` / `flaky`) mirrors
+/// the sibling status enums and the Zod literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestVerdict {
+    /// Passed (or was skipped) in every run — trustworthy.
+    StablePass,
+    /// Failed in every executed run — a real, reproducible failure.
+    StableFail,
+    /// Mixed pass/fail across runs — unreliable.
+    Flaky,
+}
+
+impl TestVerdict {
+    /// Stable string used in IPC payloads. Matches the serde `snake_case`
+    /// wire form.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StablePass => "stable_pass",
+            Self::StableFail => "stable_fail",
+            Self::Flaky => "flaky",
+        }
+    }
+
+    /// Inverse of [`as_str`](Self::as_str). Returns `None` for any
+    /// unrecognised string.
+    #[must_use]
+    pub fn from_str_value(s: &str) -> Option<Self> {
+        match s {
+            "stable_pass" => Some(Self::StablePass),
+            "stable_fail" => Some(Self::StableFail),
+            "flaky" => Some(Self::Flaky),
+            _ => None,
+        }
+    }
+}
+
+/// Per-test outcome of a flaky check. Mirrors `FlakyTestResultSchema`.
+/// `pass_count / executed_count` is the "passed X/N" ratio shown in the UI;
+/// `executed_count` excludes runs where the test was skipped (design §4).
+/// `sample_failure` carries the first observed failure message (omitted when
+/// the test never failed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlakyTestResult {
+    pub name: String,
+    pub verdict: TestVerdict,
+    pub pass_count: u32,
+    pub executed_count: u32,
+    pub total_runs: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_failure: Option<String>,
+}
+
+/// Aggregate result of a flaky check across N runs. Mirrors
+/// `FlakyRunResultSchema`. `run_id` is the real id of iteration #1, persisted
+/// via the normal run path so the check appears in run history (design §4).
+/// `error_message` is set (and `tests` left empty) when an iteration errored
+/// or the check was cancelled before completing.
+///
+/// `non_flaky_count` is every test that was *not* flaky — i.e. both
+/// `stable_pass` and `stable_fail`. It is deliberately not named `stable_count`
+/// so a consumer cannot misread it as "reliably passing"; a deterministically
+/// failing test is non-flaky but is certainly not passing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlakyRunResult {
+    pub run_id: String,
+    pub total_runs: u32,
+    pub flaky_count: u32,
+    pub non_flaky_count: u32,
+    pub tests: Vec<FlakyTestResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+/// Classify each test by comparing its outcome across the `total_runs` runs
+/// of a flaky check (design §5.1). **Pure** — the unit-testable core of the
+/// feature.
+///
+/// Tests are grouped by name in first-seen order (so the result is
+/// deterministic for a stable suite). For each test, passes and failures are
+/// tallied across every run; skipped outcomes count toward neither
+/// (`executed_count = pass + fail`). The verdict is:
+///
+/// - `executed_count == 0` (skipped in every run) → [`TestVerdict::StablePass`]
+/// - all executed runs passed → [`TestVerdict::StablePass`]
+/// - all executed runs failed → [`TestVerdict::StableFail`]
+/// - otherwise (mixed) → [`TestVerdict::Flaky`]
+///
+/// `sample_failure` is the first failure message observed for the test (left
+/// `None` for a test that never failed).
+#[must_use]
+pub fn aggregate_flaky(outputs: &[RunnerOutput], total_runs: u32) -> Vec<FlakyTestResult> {
+    struct Tally {
+        pass: u32,
+        fail: u32,
+        sample_failure: Option<String>,
+    }
+
+    let mut order: Vec<String> = Vec::new();
+    let mut tallies: HashMap<String, Tally> = HashMap::new();
+
+    for output in outputs {
+        for test in &output.tests {
+            let tally = tallies.entry(test.name.clone()).or_insert_with(|| {
+                order.push(test.name.clone());
+                Tally { pass: 0, fail: 0, sample_failure: None }
+            });
+            match test.status {
+                TestStatus::Passed => tally.pass = tally.pass.saturating_add(1),
+                TestStatus::Failed => {
+                    tally.fail = tally.fail.saturating_add(1);
+                    if tally.sample_failure.is_none() {
+                        tally.sample_failure.clone_from(&test.failure_message);
+                    }
+                }
+                TestStatus::Skipped => {}
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .map(|name| {
+            let tally = &tallies[&name];
+            let executed = tally.pass + tally.fail;
+            let verdict = if executed == 0 || tally.pass == executed {
+                TestVerdict::StablePass
+            } else if tally.pass == 0 {
+                TestVerdict::StableFail
+            } else {
+                TestVerdict::Flaky
+            };
+            FlakyTestResult {
+                name,
+                verdict,
+                pass_count: tally.pass,
+                executed_count: executed,
+                total_runs,
+                // Only a test that actually failed carries a sample; a
+                // stable-pass test has none by construction.
+                sample_failure: tally.sample_failure.clone(),
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -774,5 +933,174 @@ mod tests {
         )
         .await;
         assert!(pending.is_err(), "an un-cancelled token must keep pending");
+    }
+
+    #[test]
+    fn test_verdict_round_trips_through_serde() {
+        let cases = [
+            (TestVerdict::StablePass, "stable_pass"),
+            (TestVerdict::StableFail, "stable_fail"),
+            (TestVerdict::Flaky, "flaky"),
+        ];
+        for (variant, expected) in cases {
+            assert_eq!(variant.as_str(), expected);
+            assert_eq!(TestVerdict::from_str_value(expected), Some(variant));
+            let json = serde_json::to_string(&variant).expect("serialize verdict");
+            assert_eq!(json, format!("\"{expected}\""));
+        }
+        assert_eq!(TestVerdict::from_str_value("unstable"), None);
+    }
+
+    /// One run's worth of results: each `(name, status, failure)` becomes a
+    /// `TestResult` in a single-run [`RunnerOutput`].
+    fn run_output(tests: &[(&str, TestStatus, Option<&str>)]) -> RunnerOutput {
+        RunnerOutput {
+            status: RunStatus::Passed,
+            tests: tests
+                .iter()
+                .map(|(name, status, failure)| TestResult {
+                    name: (*name).to_string(),
+                    status: *status,
+                    duration_ms: 1,
+                    failure_message: failure.map(str::to_string),
+                    source_line: None,
+                })
+                .collect(),
+            coverage: vec![],
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+
+    #[test]
+    fn aggregate_flaky_classifies_verdict_boundaries() {
+        // 5 runs: "stable" passes every time, "broken" fails every time,
+        // "wobbly" passes 3/5, fails 2/5 (first failure message captured).
+        let pass = (("stable"), TestStatus::Passed, None);
+        let outputs = vec![
+            run_output(&[pass, ("broken", TestStatus::Failed, Some("boom")), ("wobbly", TestStatus::Passed, None)]),
+            run_output(&[pass, ("broken", TestStatus::Failed, Some("boom2")), ("wobbly", TestStatus::Failed, Some("expected 19.99 to equal 20.00"))]),
+            run_output(&[pass, ("broken", TestStatus::Failed, Some("boom3")), ("wobbly", TestStatus::Passed, None)]),
+            run_output(&[pass, ("broken", TestStatus::Failed, Some("boom4")), ("wobbly", TestStatus::Failed, Some("late"))]),
+            run_output(&[pass, ("broken", TestStatus::Failed, Some("boom5")), ("wobbly", TestStatus::Passed, None)]),
+        ];
+
+        let results = aggregate_flaky(&outputs, 5);
+        // First-seen order preserved.
+        assert_eq!(results.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["stable", "broken", "wobbly"]);
+
+        let stable = &results[0];
+        assert_eq!(stable.verdict, TestVerdict::StablePass);
+        assert_eq!((stable.pass_count, stable.executed_count, stable.total_runs), (5, 5, 5));
+        assert!(stable.sample_failure.is_none());
+
+        let broken = &results[1];
+        assert_eq!(broken.verdict, TestVerdict::StableFail);
+        assert_eq!((broken.pass_count, broken.executed_count), (0, 5));
+        assert_eq!(broken.sample_failure.as_deref(), Some("boom"));
+
+        let wobbly = &results[2];
+        assert_eq!(wobbly.verdict, TestVerdict::Flaky);
+        assert_eq!((wobbly.pass_count, wobbly.executed_count), (3, 5));
+        // First failure message observed, not a later one.
+        assert_eq!(wobbly.sample_failure.as_deref(), Some("expected 19.99 to equal 20.00"));
+    }
+
+    #[test]
+    fn aggregate_flaky_treats_a_single_flip_as_flaky() {
+        // N-1 passes, one fail → flaky (the cheapest detection the loop buys).
+        let mut outputs: Vec<RunnerOutput> = (0..4)
+            .map(|_| run_output(&[("t", TestStatus::Passed, None)]))
+            .collect();
+        outputs.push(run_output(&[("t", TestStatus::Failed, Some("rare"))]));
+
+        let results = aggregate_flaky(&outputs, 5);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, TestVerdict::Flaky);
+        assert_eq!((results[0].pass_count, results[0].executed_count), (4, 5));
+    }
+
+    #[test]
+    fn aggregate_flaky_skipped_in_every_run_is_stable_pass_not_flaky() {
+        // A test skipped in all runs has executed_count == 0 → stable_pass
+        // (design §4: skipped counts toward neither pass nor fail).
+        let outputs: Vec<RunnerOutput> = (0..3)
+            .map(|_| run_output(&[("always_skipped", TestStatus::Skipped, None)]))
+            .collect();
+
+        let results = aggregate_flaky(&outputs, 3);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, TestVerdict::StablePass);
+        assert_eq!((results[0].pass_count, results[0].executed_count), (0, 0));
+        assert!(results[0].sample_failure.is_none());
+    }
+
+    #[test]
+    fn aggregate_flaky_excludes_skips_from_the_ratio() {
+        // 3 passes + 2 skips → executed_count counts only the 3 executed runs.
+        let outputs = vec![
+            run_output(&[("t", TestStatus::Passed, None)]),
+            run_output(&[("t", TestStatus::Skipped, None)]),
+            run_output(&[("t", TestStatus::Passed, None)]),
+            run_output(&[("t", TestStatus::Skipped, None)]),
+            run_output(&[("t", TestStatus::Passed, None)]),
+        ];
+
+        let results = aggregate_flaky(&outputs, 5);
+        assert_eq!(results[0].verdict, TestVerdict::StablePass);
+        assert_eq!((results[0].pass_count, results[0].executed_count, results[0].total_runs), (3, 3, 5));
+    }
+
+    #[test]
+    fn flaky_run_result_serializes_camel_case_and_omits_none_options() {
+        let result = FlakyRunResult {
+            run_id: "r1".into(),
+            total_runs: 5,
+            flaky_count: 1,
+            non_flaky_count: 1,
+            tests: vec![FlakyTestResult {
+                name: "wobbly".into(),
+                verdict: TestVerdict::Flaky,
+                pass_count: 3,
+                executed_count: 5,
+                total_runs: 5,
+                sample_failure: Some("expected 19.99 to equal 20.00".into()),
+            }],
+            error_message: None,
+        };
+
+        let value = serde_json::to_value(&result).expect("serialize flaky result");
+        assert!(value.get("runId").is_some());
+        assert_eq!(value["totalRuns"], 5);
+        assert_eq!(value["flakyCount"], 1);
+        assert_eq!(value["nonFlakyCount"], 1);
+        // None top-level Option omitted.
+        assert!(value.get("errorMessage").is_none());
+
+        let test = &value["tests"][0];
+        assert_eq!(test["verdict"], "flaky");
+        assert_eq!(test["passCount"], 3);
+        assert_eq!(test["executedCount"], 5);
+        assert_eq!(test["sampleFailure"], "expected 19.99 to equal 20.00");
+
+        // Round-trips back to an equal struct.
+        let back: FlakyRunResult = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(back.run_id, "r1");
+        assert_eq!(back.tests.len(), 1);
+        assert_eq!(back.tests[0].verdict, TestVerdict::Flaky);
+    }
+
+    #[test]
+    fn flaky_test_result_omits_sample_failure_when_none() {
+        let result = FlakyTestResult {
+            name: "stable".into(),
+            verdict: TestVerdict::StablePass,
+            pass_count: 5,
+            executed_count: 5,
+            total_runs: 5,
+            sample_failure: None,
+        };
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert!(value.get("sampleFailure").is_none());
     }
 }

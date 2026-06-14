@@ -1,4 +1,6 @@
 import {
+  type FlakyRunResult,
+  FlakyRunResultSchema,
   type RunRequest,
   RunRequestSchema,
   type RunResult,
@@ -25,6 +27,31 @@ export async function runTestSandbox(args: RunRequest): Promise<RunResult> {
     throw new IpcError('run_test_sandbox', `invalid arguments: ${parsed.error.message}`);
   }
   return invokeAndParse('run_test_sandbox', RunResultSchema, { request: parsed.data });
+}
+
+/**
+ * Run a generated test-case artifact `runs` times in the local Docker sandbox
+ * and classify each test as stable-pass / stable-fail / flaky
+ * (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md). `runs` is a hint
+ * — the backend re-clamps it to [2, 20].
+ *
+ * A runner-level failure or a cancellation mid-check is **not** an exception —
+ * it comes back as a `FlakyRunResult` with an `errorMessage` and no verdicts.
+ * Only pre-flight rejections (opt-out, missing/wrong-type artifact, no runnable
+ * files) throw an `IpcError`.
+ */
+export async function runTestSandboxFlaky(
+  args: RunRequest,
+  runs: number,
+): Promise<FlakyRunResult> {
+  const parsed = RunRequestSchema.safeParse(args);
+  if (!parsed.success) {
+    throw new IpcError('run_test_sandbox_flaky', `invalid arguments: ${parsed.error.message}`);
+  }
+  return invokeAndParse('run_test_sandbox_flaky', FlakyRunResultSchema, {
+    request: parsed.data,
+    runs,
+  });
 }
 
 /**

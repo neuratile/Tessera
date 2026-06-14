@@ -138,6 +138,7 @@ pub fn run() {
             commands::ollama::start_ollama_server,
             // Sandbox test-runner commands (sandbox runner Phase 2 + Phase 5 Stop)
             commands::sandbox::run_test_sandbox,
+            commands::sandbox::run_test_sandbox_flaky,
             commands::sandbox::cancel_test_sandbox,
             // Test-case result sidecar commands (Test Case table cols 8–9)
             commands::test_case_results::list_test_case_results,

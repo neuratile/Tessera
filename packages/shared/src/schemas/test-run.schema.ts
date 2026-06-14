@@ -103,3 +103,57 @@ export const RunResultSchema = z.object({
 });
 
 export type RunResult = z.infer<typeof RunResultSchema>;
+
+/**
+ * Verdict for one test across the N runs of a flaky check — mirrors the Rust
+ * `TestVerdict` enum (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md
+ * §5.1). `stable_pass` = passed (or skipped) every run; `stable_fail` = a
+ * real reproducible failure; `flaky` = mixed pass/fail.
+ */
+export const TestVerdictSchema = z.union([
+  z.literal('stable_pass'),
+  z.literal('stable_fail'),
+  z.literal('flaky'),
+]);
+
+export type TestVerdict = z.infer<typeof TestVerdictSchema>;
+
+/**
+ * Per-test outcome of a flaky check — mirrors the Rust `FlakyTestResult`.
+ * `passCount / executedCount` is the "passed X/N" ratio; `executedCount`
+ * excludes runs where the test was skipped. `sampleFailure` is present only
+ * when the test failed at least once (the backend omits it otherwise).
+ */
+export const FlakyTestResultSchema = z.object({
+  name: z.string().min(1),
+  verdict: TestVerdictSchema,
+  passCount: z.number().int().nonnegative(),
+  executedCount: z.number().int().nonnegative(),
+  totalRuns: z.number().int().positive(),
+  sampleFailure: z.string().optional(),
+});
+
+export type FlakyTestResult = z.infer<typeof FlakyTestResultSchema>;
+
+/**
+ * Aggregate result of a flaky check — mirrors the Rust `FlakyRunResult`.
+ * `runId` is iteration #1, persisted via the normal run path so the check
+ * appears in run history. `errorMessage` is present (and `tests` empty) when
+ * an iteration errored or the check was cancelled before completing.
+ */
+export const FlakyRunResultSchema = z.object({
+  runId: z.string(),
+  totalRuns: z.number().int().positive(),
+  flakyCount: z.number().int().nonnegative(),
+  /**
+   * Every test that was *not* flaky — both `stable_pass` and `stable_fail`.
+   * Named `nonFlakyCount` (not `stableCount`) so it cannot be misread as
+   * "reliably passing": a deterministically failing test is non-flaky but is
+   * certainly not passing.
+   */
+  nonFlakyCount: z.number().int().nonnegative(),
+  tests: z.array(FlakyTestResultSchema),
+  errorMessage: z.string().optional(),
+});
+
+export type FlakyRunResult = z.infer<typeof FlakyRunResultSchema>;
