@@ -311,12 +311,21 @@ pub async fn run_flaky(
     let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
 
     // 3. Loop: collect one RunnerOutput per iteration. The first Err aborts the
-    //    loop early and is surfaced as a verdict-less result (design §4).
+    //    loop early and is surfaced as a verdict-less result (design §4). The
+    //    wall-clock time of iteration #1 is captured here so the persisted run
+    //    row (step 4) records its real execution time, not the DB-write cost.
     let mut outputs: Vec<RunnerOutput> = Vec::with_capacity(total_runs as usize);
+    let mut first_duration_ms = 0u32;
     for iteration in 1..=total_runs {
         tracing::debug!(iteration, total_runs, "flaky check iteration");
+        let iter_started = Instant::now();
         match runner.run(input.clone(), cancel.clone()).await {
-            Ok(output) => outputs.push(output),
+            Ok(output) => {
+                if outputs.is_empty() {
+                    first_duration_ms = elapsed_ms(iter_started);
+                }
+                outputs.push(output);
+            }
             Err(err) => {
                 tracing::warn!(
                     iteration,
@@ -337,7 +346,7 @@ pub async fn run_flaky(
                     run_id: String::new(),
                     total_runs,
                     flaky_count: 0,
-                    stable_count: 0,
+                    non_flaky_count: 0,
                     tests: vec![],
                     error_message: Some(message),
                 });
@@ -346,24 +355,24 @@ pub async fn run_flaky(
     }
 
     // 4. Persist iteration #1 via the normal success path so the check appears
-    //    in run history with a real run_id (design §4 — no new migration).
+    //    in run history with a real run_id (design §4 — no new migration). Its
+    //    duration is iteration #1's execution time, captured in the loop above.
     let first = outputs[0].clone();
-    let started = Instant::now();
     let run_id = open_run_row(deps, &artifact, runner.name()).await?;
-    persist_success(deps, &run_id, &artifact.id, first, elapsed_ms(started), &case_ids).await?;
+    persist_success(deps, &run_id, &artifact.id, first, first_duration_ms, &case_ids).await?;
 
     // 5. Classify every test across all N iterations and tally the summary.
     let tests = aggregate_flaky(&outputs, total_runs);
     let flaky_count = count_verdict(&tests, TestVerdict::Flaky);
-    let stable_count = u32::try_from(tests.len()).unwrap_or(u32::MAX).saturating_sub(flaky_count);
+    let non_flaky_count = u32::try_from(tests.len()).unwrap_or(u32::MAX).saturating_sub(flaky_count);
 
-    tracing::info!(run_id = %run_id, total_runs, flaky_count, stable_count, "flaky check complete");
+    tracing::info!(run_id = %run_id, total_runs, flaky_count, non_flaky_count, "flaky check complete");
 
     Ok(FlakyRunResult {
         run_id,
         total_runs,
         flaky_count,
-        stable_count,
+        non_flaky_count,
         tests,
         error_message: None,
     })
@@ -1688,7 +1697,7 @@ mod tests {
 
         assert_eq!(result.total_runs, 3);
         assert_eq!(result.flaky_count, 1);
-        assert_eq!(result.stable_count, 1);
+        assert_eq!(result.non_flaky_count, 1);
         assert!(!result.run_id.is_empty(), "iteration #1 persisted with a real run id");
         assert!(result.error_message.is_none());
 
@@ -1735,7 +1744,7 @@ mod tests {
 
         assert_eq!(result.total_runs, FLAKY_MIN_RUNS);
         assert_eq!(result.flaky_count, 0);
-        assert_eq!(result.stable_count, 1);
+        assert_eq!(result.non_flaky_count, 1);
         assert_eq!(result.tests[0].verdict, TestVerdict::StablePass);
 
         pool.close().await;
@@ -1772,7 +1781,7 @@ mod tests {
 
         assert!(result.tests.is_empty());
         assert_eq!(result.flaky_count, 0);
-        assert_eq!(result.stable_count, 0);
+        assert_eq!(result.non_flaky_count, 0);
         assert!(result.run_id.is_empty(), "no run persisted when the loop aborts");
         let message = result.error_message.expect("error message present");
         assert!(message.contains("DOCKER_UNAVAILABLE"), "got: {message}");

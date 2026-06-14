@@ -63,6 +63,7 @@ export type SandboxState = {
   startFlaky: (artifactId: string, clientRunId: string) => void;
   finishFlaky: (artifactId: string, result: FlakyRunResult) => void;
   failFlaky: (artifactId: string, message: string) => void;
+  resetFlaky: (artifactId: string) => void;
 };
 
 export const useSandboxStore = create<SandboxState>()((set) => ({
@@ -126,4 +127,12 @@ export const useSandboxStore = create<SandboxState>()((set) => ({
         [artifactId]: { phase: 'done', clientRunId: null, result: null, error: message },
       },
     })),
+
+  resetFlaky: (artifactId) =>
+    set((s) => {
+      if (!(artifactId in s.flakyByArtifact)) return s;
+      const { [artifactId]: _dropped, ...rest } = s.flakyByArtifact;
+      void _dropped;
+      return { flakyByArtifact: rest };
+    }),
 }));

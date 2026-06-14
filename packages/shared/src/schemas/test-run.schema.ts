@@ -145,7 +145,13 @@ export const FlakyRunResultSchema = z.object({
   runId: z.string(),
   totalRuns: z.number().int().positive(),
   flakyCount: z.number().int().nonnegative(),
-  stableCount: z.number().int().nonnegative(),
+  /**
+   * Every test that was *not* flaky — both `stable_pass` and `stable_fail`.
+   * Named `nonFlakyCount` (not `stableCount`) so it cannot be misread as
+   * "reliably passing": a deterministically failing test is non-flaky but is
+   * certainly not passing.
+   */
+  nonFlakyCount: z.number().int().nonnegative(),
   tests: z.array(FlakyTestResultSchema),
   errorMessage: z.string().optional(),
 });

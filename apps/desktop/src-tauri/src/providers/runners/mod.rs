@@ -248,13 +248,18 @@ pub struct FlakyTestResult {
 /// via the normal run path so the check appears in run history (design §4).
 /// `error_message` is set (and `tests` left empty) when an iteration errored
 /// or the check was cancelled before completing.
+///
+/// `non_flaky_count` is every test that was *not* flaky — i.e. both
+/// `stable_pass` and `stable_fail`. It is deliberately not named `stable_count`
+/// so a consumer cannot misread it as "reliably passing"; a deterministically
+/// failing test is non-flaky but is certainly not passing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlakyRunResult {
     pub run_id: String,
     pub total_runs: u32,
     pub flaky_count: u32,
-    pub stable_count: u32,
+    pub non_flaky_count: u32,
     pub tests: Vec<FlakyTestResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -1052,7 +1057,7 @@ mod tests {
             run_id: "r1".into(),
             total_runs: 5,
             flaky_count: 1,
-            stable_count: 1,
+            non_flaky_count: 1,
             tests: vec![FlakyTestResult {
                 name: "wobbly".into(),
                 verdict: TestVerdict::Flaky,
@@ -1068,7 +1073,7 @@ mod tests {
         assert!(value.get("runId").is_some());
         assert_eq!(value["totalRuns"], 5);
         assert_eq!(value["flakyCount"], 1);
-        assert_eq!(value["stableCount"], 1);
+        assert_eq!(value["nonFlakyCount"], 1);
         // None top-level Option omitted.
         assert!(value.get("errorMessage").is_none());
 

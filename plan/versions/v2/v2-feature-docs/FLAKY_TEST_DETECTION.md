@@ -123,8 +123,10 @@ aggregation across runs, parallel runs, auto-quarantine of flaky tests.
 - `struct FlakyTestResult { name, verdict, pass_count: u32, executed_count: u32,
   total_runs: u32, sample_failure: Option<String> }` (`camelCase` wire form;
   `sample_failure` omitted when `None`).
-- `struct FlakyRunResult { run_id, total_runs: u32, flaky_count: u32, stable_count: u32,
-  tests: Vec<FlakyTestResult>, error_message: Option<String> }`.
+- `struct FlakyRunResult { run_id, total_runs: u32, flaky_count: u32, non_flaky_count: u32,
+  tests: Vec<FlakyTestResult>, error_message: Option<String> }`. `non_flaky_count`
+  (not `stable_count`) is every non-flaky test — both `stable_pass` and
+  `stable_fail` — so it cannot be misread as "reliably passing".
 - `fn aggregate_flaky(outputs: &[RunnerOutput], total_runs: u32) -> Vec<FlakyTestResult>`
   — **pure**, the unit-testable core. Group `TestResult` by `name`, tally
   pass/fail/skip, derive verdict + first failure message.

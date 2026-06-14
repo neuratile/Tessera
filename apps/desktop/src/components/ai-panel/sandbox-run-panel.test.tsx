@@ -78,7 +78,7 @@ describe('SandboxRunPanel — flaky check', () => {
       runId: ARTIFACT_ID,
       totalRuns: 5,
       flakyCount: 1,
-      stableCount: 1,
+      nonFlakyCount: 1,
       tests: [
         {
           name: 'TC-LOGIN-01 accepts valid credentials',
@@ -113,7 +113,7 @@ describe('SandboxRunPanel — flaky check', () => {
       runId: '',
       totalRuns: 5,
       flakyCount: 0,
-      stableCount: 0,
+      nonFlakyCount: 0,
       tests: [],
       errorMessage: 'Flaky check failed on run 2 of 5: [DOCKER_UNAVAILABLE] docker unavailable',
     };
