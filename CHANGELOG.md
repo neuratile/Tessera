@@ -10,6 +10,19 @@ commit messages and [Semantic Versioning](https://semver.org/) for releases.
 
 ## [Unreleased]
 
+### 🚀 Added
+
+- **Persisted flaky history** — a completed flaky check is now saved so a suite's
+  flakiness can be trended over repeated checks, instead of the verdict being
+  thrown away when the panel closes. New additive migration `0008_flaky_checks.sql`
+  (`flaky_checks` + `flaky_check_tests`; `run_id` FK is `ON DELETE SET NULL` so
+  history outlives a purged run), `flaky_check_repo` (transactional insert, list,
+  fetch), best-effort persistence in `sandbox_service::run_flaky`, the
+  `list_flaky_checks` / `get_flaky_check` commands + IPC wrappers, and a
+  collapsible **"Flaky history"** trend in the sandbox panel that expands to each
+  past check's per-test verdicts. See
+  [`plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md`](plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) §8.
+
 ### 🚀 Added (merged to master 2026-06-09)
 
 - **Explicit connection selection** (#66) — the active LLM connection is now a
