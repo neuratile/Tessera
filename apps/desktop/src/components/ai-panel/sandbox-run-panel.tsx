@@ -83,19 +83,32 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
   const [history, setHistory] = useState<FlakyCheckSummary[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // Always-current artifact id, read by in-flight history fetches to detect a
+  // switch. If the panel is reused with a new `artifactId` before a previous
+  // `listFlakyChecks` settles, its resolution must not write the old artifact's
+  // history into the new one (same race the per-row detail guards against).
+  const artifactIdRef = useRef(artifactId);
+  artifactIdRef.current = artifactId;
+
   const refreshHistory = useCallback(() => {
     void (async () => {
       try {
         const checks = await sandbox.listFlakyChecks(artifactId);
+        if (artifactIdRef.current !== artifactId) return; // artifact switched mid-fetch
         setHistory(checks);
         setHistoryError(null);
       } catch (err) {
+        if (artifactIdRef.current !== artifactId) return;
         setHistoryError(getErrorMessage(err));
       }
     })();
   }, [artifactId]);
 
+  // Clear stale history immediately on an artifact switch so the previous
+  // artifact's trend never lingers while the new fetch is in flight.
   useEffect(() => {
+    setHistory([]);
+    setHistoryError(null);
     refreshHistory();
   }, [refreshHistory]);
 
