@@ -386,10 +386,17 @@ mod tests {
         let (project_id, artifact_id, run_id) = seed(&pool).await;
 
         // Three checks; created_at strings sort lexicographically, so vary them
-        // explicitly via direct inserts to make ordering deterministic.
-        for (i, stamp) in ["2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", "2026-03-01T00:00:00Z"]
-            .iter()
-            .enumerate()
+        // explicitly via direct inserts to make ordering deterministic. Use the
+        // `+00:00` offset form chrono's `to_rfc3339()` writes in production (not
+        // a `Z` suffix) so the test sorts against the real stored format — the
+        // two are semantically equal but order differently as plain strings.
+        for (i, stamp) in [
+            "2026-01-01T00:00:00+00:00",
+            "2026-02-01T00:00:00+00:00",
+            "2026-03-01T00:00:00+00:00",
+        ]
+        .iter()
+        .enumerate()
         {
             sqlx::query(
                 "INSERT INTO flaky_checks \
@@ -414,13 +421,13 @@ mod tests {
             .await
             .expect("list");
         assert_eq!(all.len(), 3);
-        assert_eq!(all[0].created_at, "2026-03-01T00:00:00Z", "newest first");
-        assert_eq!(all[2].created_at, "2026-01-01T00:00:00Z");
+        assert_eq!(all[0].created_at, "2026-03-01T00:00:00+00:00", "newest first");
+        assert_eq!(all[2].created_at, "2026-01-01T00:00:00+00:00");
 
         // A limit caps the result; the most recent rows survive.
         let limited = list_checks(&pool, &artifact_id, 1).await.expect("list limited");
         assert_eq!(limited.len(), 1);
-        assert_eq!(limited[0].created_at, "2026-03-01T00:00:00Z");
+        assert_eq!(limited[0].created_at, "2026-03-01T00:00:00+00:00");
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
