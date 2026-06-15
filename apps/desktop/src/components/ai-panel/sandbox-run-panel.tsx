@@ -294,9 +294,14 @@ export function FlakyHistorySection({
   history: FlakyCheckSummary[];
   error: string | null;
 }) {
+  // Detail / error are tagged with the check id they belong to. Expanding row
+  // A then row B fires two `getFlakyCheck` calls; if A resolves *after* B is
+  // expanded, its `setDetail` would otherwise populate B's row with A's data.
+  // Keying the payload by check id lets the render gate on a match, so a
+  // late-arriving fetch for a no-longer-expanded row is simply ignored.
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<FlakyCheckRecord | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ checkId: string; record: FlakyCheckRecord } | null>(null);
+  const [detailError, setDetailError] = useState<{ checkId: string; message: string } | null>(null);
 
   // Collapse any open row when the artifact changes — a stale detail from a
   // different artifact must never render.
@@ -318,9 +323,9 @@ export function FlakyHistorySection({
       void (async () => {
         try {
           const record = await sandbox.getFlakyCheck(checkId);
-          setDetail(record);
+          setDetail({ checkId, record });
         } catch (err) {
-          setDetailError(getErrorMessage(err));
+          setDetailError({ checkId, message: getErrorMessage(err) });
         }
       })();
     },
@@ -347,8 +352,8 @@ export function FlakyHistorySection({
             key={check.id}
             check={check}
             expanded={expandedId === check.id}
-            detail={expandedId === check.id ? detail : null}
-            detailError={expandedId === check.id ? detailError : null}
+            detail={detail?.checkId === check.id ? detail.record : null}
+            detailError={detailError?.checkId === check.id ? detailError.message : null}
             onToggle={handleToggle}
           />
         ))}
