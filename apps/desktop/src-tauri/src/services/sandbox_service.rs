@@ -35,11 +35,12 @@ use serde_json::Value as JsonValue;
 
 use crate::error::{AppError, AppResult};
 use crate::providers::runners::{
-    aggregate_flaky, CancelToken, FlakyRunResult, RunInput, RunRequest, RunResult, RunStatus,
-    RunnerError, RunnerLanguage, RunnerOutput, ResourceLimits, TestResult, TestRunner, TestStatus,
-    TestVerdict, WorkspaceFile,
+    aggregate_flaky, CancelToken, FlakyCheckRecord, FlakyCheckSummary, FlakyRunResult, RunInput,
+    RunRequest, RunResult, RunStatus, RunnerError, RunnerLanguage, RunnerOutput, ResourceLimits,
+    TestResult, TestRunner, TestStatus, TestVerdict, WorkspaceFile,
 };
 use crate::repositories::artifact_repo::{self, ArtifactType};
+use crate::repositories::flaky_check_repo::{self, FlakyCheckInsert};
 use crate::repositories::test_case_result_repo::{
     self, TestCaseResultSource, TestCaseResultStatus, TestCaseResultUpsert,
 };
@@ -368,6 +369,30 @@ pub async fn run_flaky(
     let flaky_count = count_verdict(&tests, TestVerdict::Flaky);
     let non_flaky_count = u32::try_from(tests.len()).unwrap_or(u32::MAX).saturating_sub(flaky_count);
 
+    // 6. Persist the aggregate as flaky-check history (design §7) so the suite's
+    //    flakiness can be trended across repeated checks. Best-effort: a
+    //    history-write failure is logged and swallowed, never discarding the
+    //    in-memory verdict the user is about to see (the same philosophy as the
+    //    name→id bridge — the user-facing result is the contract, history is
+    //    additive). Only persisted on the success path; an errored / cancelled
+    //    check returns early above with no verdicts to record.
+    if let Err(e) = flaky_check_repo::insert_check(
+        deps.pool,
+        FlakyCheckInsert {
+            artifact_id: artifact.id.clone(),
+            project_id: artifact.project_id.clone(),
+            run_id: Some(run_id.clone()),
+            total_runs,
+            flaky_count,
+            non_flaky_count,
+        },
+        &tests,
+    )
+    .await
+    {
+        tracing::warn!(run_id = %run_id, error = %e, "persisting flaky-check history failed");
+    }
+
     tracing::info!(run_id = %run_id, total_runs, flaky_count, non_flaky_count, "flaky check complete");
 
     Ok(FlakyRunResult {
@@ -378,6 +403,35 @@ pub async fn run_flaky(
         tests,
         error_message: None,
     })
+}
+
+/// List an artifact's persisted flaky-check history, newest first (design §7).
+/// Thin pass-through to [`flaky_check_repo::list_checks`] so commands depend on
+/// the service, not the repository (rules §4.2). `limit` is re-clamped by the
+/// repository, so a tampered IPC value cannot force an unbounded scan.
+///
+/// # Errors
+///
+/// [`AppError::Database`] for any SQLx-level failure.
+pub async fn list_flaky_history(
+    pool: &sqlx::SqlitePool,
+    artifact_id: &str,
+    limit: u32,
+) -> AppResult<Vec<FlakyCheckSummary>> {
+    flaky_check_repo::list_checks(pool, artifact_id, limit).await
+}
+
+/// Fetch one persisted flaky check with its per-test verdicts (design §7).
+///
+/// # Errors
+///
+/// - [`AppError::NotFound`] when no check matches `check_id`.
+/// - [`AppError::Database`] for a corrupt verdict string or any `SQLx` failure.
+pub async fn get_flaky_check(
+    pool: &sqlx::SqlitePool,
+    check_id: &str,
+) -> AppResult<FlakyCheckRecord> {
+    flaky_check_repo::fetch_check(pool, check_id).await
 }
 
 /// Request cancellation of an in-flight run. Returns `true` when a live run
@@ -1921,6 +1975,100 @@ mod tests {
         // Asserts the comment endpoint was hit exactly zero times.
         mock.assert_async().await;
 
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_persists_history_queryable_via_list_and_get() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        // No history before the first check.
+        let before = list_flaky_history(&pool, &artifact_id, 20).await.expect("list empty");
+        assert!(before.is_empty(), "no history before any check runs");
+
+        // "wobbly" flips on run 2 → flaky; "stable" passes every run.
+        let scripted = vec![
+            Scripted::Succeed(out(vec![
+                tc_test("stable", TestStatus::Passed, None),
+                tc_test("wobbly", TestStatus::Passed, None),
+            ])),
+            Scripted::Succeed(out(vec![
+                tc_test("stable", TestStatus::Passed, None),
+                tc_test("wobbly", TestStatus::Failed, Some("nondeterministic")),
+            ])),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run_flaky(
+            RunRequest { artifact_id: artifact_id.clone(), opt_in_confirmed: true, client_run_id: String::new() },
+            2,
+            &deps,
+        )
+        .await
+        .expect("flaky check runs");
+
+        // The check now appears in history, with counts matching the result and
+        // run_id linked to the persisted iteration #1.
+        let history = list_flaky_history(&pool, &artifact_id, 20).await.expect("list one");
+        assert_eq!(history.len(), 1, "the completed check is persisted");
+        assert_eq!(history[0].total_runs, 2);
+        assert_eq!(history[0].flaky_count, 1);
+        assert_eq!(history[0].non_flaky_count, 1);
+        assert_eq!(history[0].run_id.as_deref(), Some(result.run_id.as_str()));
+
+        // The detail re-hydrates the per-test verdicts.
+        let record = get_flaky_check(&pool, &history[0].id).await.expect("get detail");
+        let wobbly = record.tests.iter().find(|t| t.name == "wobbly").expect("wobbly present");
+        assert_eq!(wobbly.verdict, TestVerdict::Flaky);
+        assert_eq!((wobbly.pass_count, wobbly.executed_count), (1, 2));
+        assert_eq!(wobbly.sample_failure.as_deref(), Some("nondeterministic"));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_flaky_writes_no_history_when_an_iteration_errors() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        // Run 1 succeeds, run 2 errors → the loop aborts before any aggregate is
+        // computed, so nothing is recorded to history.
+        let scripted = vec![
+            Scripted::Succeed(out(vec![tc_test("a", TestStatus::Passed, None)])),
+            Scripted::Fail(RunnerError::DockerUnavailable("daemon down".into())),
+        ];
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(scripted));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run_flaky(
+            RunRequest { artifact_id: artifact_id.clone(), opt_in_confirmed: true, client_run_id: String::new() },
+            3,
+            &deps,
+        )
+        .await
+        .expect("error surfaced as a result");
+        assert!(result.error_message.is_some());
+
+        let history = list_flaky_history(&pool, &artifact_id, 20).await.expect("list");
+        assert!(history.is_empty(), "an aborted check leaves no history row");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_flaky_check_missing_returns_not_found() {
+        let (pool, path) = open_pool().await;
+        let err = get_flaky_check(&pool, "no-such-check").await.expect_err("must error");
+        assert_eq!(err.code(), "NOT_FOUND");
         pool.close().await;
         let _ = std::fs::remove_file(&path);
     }

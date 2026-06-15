@@ -18,12 +18,15 @@
 //!   (`plan/versions/v1/EMBEDDING_PROVIDER_SELECT.md`).
 //! - [`test_run_repo`] (sandbox runner Phase 1) — sandboxed test-run,
 //!   per-case, and coverage persistence.
+//! - [`flaky_check_repo`] — persisted flaky-check history (header + per-test
+//!   verdicts) for the flaky-test trend UI.
 //! - [`test_case_result_repo`] (Test Case table) — per-case
 //!   execution-outcome sidecar (Actual output / Result + remarks).
 //!
 pub mod artifact_repo;
 pub mod chunk_repo;
 pub mod embedding_config_repo;
+pub mod flaky_check_repo;
 pub mod external_link_repo;
 pub mod project_file_repo;
 pub mod project_repo;

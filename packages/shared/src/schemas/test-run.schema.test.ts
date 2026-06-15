@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  FlakyCheckRecordSchema,
+  FlakyCheckSummarySchema,
   FlakyRunResultSchema,
   FlakyTestResultSchema,
   TestVerdictSchema,
@@ -104,5 +106,66 @@ describe('FlakyRunResultSchema', () => {
     expect(parsed.runId).toBe('');
     expect(parsed.tests).toHaveLength(0);
     expect(parsed.errorMessage).toContain('DOCKER_UNAVAILABLE');
+  });
+});
+
+const UUID_B = '00000000-0000-4000-8000-000000000abc';
+
+describe('FlakyCheckSummarySchema', () => {
+  it('round-trips a persisted history header', () => {
+    const parsed = FlakyCheckSummarySchema.parse({
+      id: UUID_B,
+      runId: UUID_A,
+      totalRuns: 5,
+      flakyCount: 2,
+      nonFlakyCount: 12,
+      createdAt: '2026-06-15T10:30:00+00:00',
+    });
+    expect(parsed.id).toBe(UUID_B);
+    expect(parsed.runId).toBe(UUID_A);
+    expect(parsed.flakyCount).toBe(2);
+  });
+
+  it('accepts a header whose runId was purged (serde None → omitted)', () => {
+    const parsed = FlakyCheckSummarySchema.parse({
+      id: UUID_B,
+      totalRuns: 5,
+      flakyCount: 0,
+      nonFlakyCount: 3,
+      createdAt: '2026-06-15T10:30:00+00:00',
+    });
+    expect(parsed.runId).toBeUndefined();
+  });
+});
+
+describe('FlakyCheckRecordSchema', () => {
+  it('round-trips a persisted check with its per-test verdicts', () => {
+    const parsed = FlakyCheckRecordSchema.parse({
+      id: UUID_B,
+      runId: UUID_A,
+      totalRuns: 5,
+      flakyCount: 1,
+      nonFlakyCount: 1,
+      createdAt: '2026-06-15T10:30:00+00:00',
+      tests: [
+        {
+          name: 'TC-LOGIN-01 accepts valid credentials',
+          verdict: 'stable_pass',
+          passCount: 5,
+          executedCount: 5,
+          totalRuns: 5,
+        },
+        {
+          name: 'TC-CART-09 computes tax',
+          verdict: 'flaky',
+          passCount: 4,
+          executedCount: 5,
+          totalRuns: 5,
+          sampleFailure: 'expected 19.99 to equal 20.00',
+        },
+      ],
+    });
+    expect(parsed.tests).toHaveLength(2);
+    expect(parsed.tests[1]?.verdict).toBe('flaky');
   });
 });

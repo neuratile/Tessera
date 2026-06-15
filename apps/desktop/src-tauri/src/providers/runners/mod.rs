@@ -265,6 +265,40 @@ pub struct FlakyRunResult {
     pub error_message: Option<String>,
 }
 
+/// One entry in an artifact's persisted flaky-check history (design §7).
+/// A lightweight header for the trend list — the per-test verdicts are
+/// fetched on demand as a [`FlakyCheckRecord`]. Mirrors
+/// `FlakyCheckSummarySchema`. `created_at` is RFC-3339; `run_id` is the
+/// iteration-#1 run this check persisted, omitted only if that run row was
+/// later purged (the FK is `ON DELETE SET NULL`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlakyCheckSummary {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    pub total_runs: u32,
+    pub flaky_count: u32,
+    pub non_flaky_count: u32,
+    pub created_at: String,
+}
+
+/// A persisted flaky check with its full per-test verdict list (design §7).
+/// The detail behind a [`FlakyCheckSummary`], re-rendered with the same
+/// per-test UI as a live check. Mirrors `FlakyCheckRecordSchema`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlakyCheckRecord {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    pub total_runs: u32,
+    pub flaky_count: u32,
+    pub non_flaky_count: u32,
+    pub created_at: String,
+    pub tests: Vec<FlakyTestResult>,
+}
+
 /// Classify each test by comparing its outcome across the `total_runs` runs
 /// of a flaky check (design §5.1). **Pure** — the unit-testable core of the
 /// feature.

@@ -9,9 +9,18 @@
 > `sandbox_service::run_flaky` (shared preamble extracted from `run`), the
 > `run_test_sandbox_flaky` command, the Zod mirror + round-trip contract test,
 > the `runTestSandboxFlaky` IPC wrapper, and the "Check flaky" UI (runs stepper
-> + `FlakyResultView`). The **hardening / Future items (§7)** — persisted
-> history, CLI/Action surfacing, auto-quarantine, cross-run coverage — remain
-> deferred.
+> + `FlakyResultView`).
+>
+> **Persisted flaky history** (§7, first hardening item) shipped on branch
+> `feat/flaky-history`: migration `0008_flaky_checks.sql` (`flaky_checks` +
+> `flaky_check_tests`, additive — no existing table touched), `flaky_check_repo`
+> (transactional `insert_check`, `list_checks`, `fetch_check`), best-effort
+> persistence inside `run_flaky`, the `list_flaky_checks` / `get_flaky_check`
+> commands + service pass-throughs + `FlakyCheckSummary` / `FlakyCheckRecord`
+> types, their Zod mirrors + contract tests, the `listFlakyChecks` /
+> `getFlakyCheck` IPC wrappers, and the collapsible "Flaky history" trend in the
+> sandbox panel. The remaining **Future items (§7)** — CLI/Action surfacing,
+> auto-quarantine, cross-run coverage — stay deferred.
 
 ## 0. Where this sits in v2
 
@@ -196,7 +205,56 @@ aggregation across runs, parallel runs, auto-quarantine of flaky tests.
 
 ## 7. Future (separate docs / migrations)
 
-- Persisted flaky history + trend over time (needs a `test_runs` migration / new table).
+- ~~Persisted flaky history + trend over time (needs a migration / new table).~~
+  **Shipped** — see §8.
 - Auto-quarantine: tag flaky cases in the sidecar so CI / the CLI can skip or warn.
 - Surface the flaky verdict through the headless CLI + GitHub Action (P0 #3) as a
   machine-readable check.
+
+## 8. Persisted flaky history (shipped)
+
+### End state — what the user gets
+
+After running a flaky check, the sandbox panel grows a collapsible **"Flaky
+history"** section listing every past check for that artifact, newest first:
+
+```
+Flaky history
+▸ 2 of 12 flaky    5 runs    Jun 15, 2026, 10:30 AM
+▸ 0 of 12 flaky    5 runs    Jun 14, 2026,  4:02 PM
+▾ 1 of 12 flaky    8 runs    Jun 13, 2026,  9:10 AM
+    ⚠ TC-CART-09 computes tax    flaky    passed 7/8
+      └ expected 19.99 to equal 20.00
+```
+
+So the engineer can see at a glance whether a suite is *getting* flakier or
+settling down, and expand any past check to see exactly which tests were
+unreliable then — the verdict is no longer thrown away when the panel closes.
+Still 100% local: nothing leaves the machine.
+
+### Design
+
+- **Additive migration `0008_flaky_checks.sql`** — `flaky_checks` (one header
+  row per completed check) + `flaky_check_tests` (one row per test verdict). No
+  existing table is altered, so it is fully backward compatible with the v1 run
+  tables (0004). `flaky_checks.run_id` references the iteration-#1 run with
+  `ON DELETE SET NULL`, so purging a run never deletes the historical check —
+  history outlives any one run; artifact/project FKs cascade.
+- **`flaky_check_repo`** owns all SQL: `insert_check` writes the header + all
+  per-test rows in one transaction (batch idiom, no N+1); `list_checks`
+  (newest-first, limit re-clamped to [1, 200]) and `fetch_check` read it back.
+- **Best-effort persistence in `run_flaky`** — the aggregate is recorded after
+  the verdict is computed; a history-write failure is logged and swallowed so it
+  can never discard the in-memory result the user sees (same philosophy as the
+  name→id bridge). Only the success path persists; an errored/cancelled check
+  writes no history row.
+- **`list_flaky_checks` / `get_flaky_check`** commands → thin
+  `sandbox_service::{list_flaky_history, get_flaky_check}` pass-throughs → repo.
+  Mirrored by `FlakyCheckSummary` / `FlakyCheckRecord` (Rust + Zod with
+  round-trip contract tests) and the `listFlakyChecks` / `getFlakyCheck` IPC
+  wrappers.
+- **UI** — the panel fetches history on mount and after each completed check;
+  `FlakyHistorySection` renders the trend and lazily fetches a check's per-test
+  detail on expand, re-using the live-check `FlakyRow`.
+
+Still out: CLI/Action surfacing, auto-quarantine, cross-run coverage (§7).

@@ -1,7 +1,17 @@
-import type { FlakyRunResult, FlakyTestResult, RunResult, TestResult } from '@testing-ide/shared';
+import type {
+  FlakyCheckRecord,
+  FlakyCheckSummary,
+  FlakyRunResult,
+  FlakyTestResult,
+  RunResult,
+  TestResult,
+} from '@testing-ide/shared';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  History,
   Loader2,
   Minus,
   Play,
@@ -66,6 +76,29 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
 
   const [runs, setRuns] = useState(FLAKY_DEFAULT_RUNS);
 
+  // Persisted flaky-check history (design §7). Kept in local state — it is
+  // read-only fetched data scoped to this panel, so it does not belong in the
+  // shared run store. Re-fetched on mount, on artifact change, and after each
+  // completed check so a fresh run shows up at the top of the trend.
+  const [history, setHistory] = useState<FlakyCheckSummary[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const refreshHistory = useCallback(() => {
+    void (async () => {
+      try {
+        const checks = await sandbox.listFlakyChecks(artifactId);
+        setHistory(checks);
+        setHistoryError(null);
+      } catch (err) {
+        setHistoryError(getErrorMessage(err));
+      }
+    })();
+  }, [artifactId]);
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
   const running = runState.phase === 'running';
   const flakyRunning = flakyState.phase === 'running';
   const busy = running || flakyRunning;
@@ -122,11 +155,17 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
           runs,
         );
         finishFlaky(artifactId, result);
+        // A completed check (no pre-flight error) is persisted to history —
+        // refresh so it appears at the top of the trend. An errored / cancelled
+        // check writes no history row, so this is a harmless no-op there.
+        if (typeof result.errorMessage !== 'string') {
+          refreshHistory();
+        }
       } catch (err) {
         failFlaky(artifactId, getErrorMessage(err));
       }
     })();
-  }, [gated, busy, artifactId, runs, startFlaky, finishFlaky, failFlaky]);
+  }, [gated, busy, artifactId, runs, startFlaky, finishFlaky, failFlaky, refreshHistory]);
 
   // Stop targets whichever op is in flight; both share the cancel-by-id path.
   const handleStop = useCallback(() => {
@@ -233,7 +272,156 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
       ) : null}
 
       {flakyState.result !== null ? <FlakyResultView result={flakyState.result} /> : null}
+
+      <FlakyHistorySection artifactId={artifactId} history={history} error={historyError} />
     </div>
+  );
+}
+
+/**
+ * Collapsible "Flaky history" trend for an artifact (design §7). Lists past
+ * checks newest-first; expanding a row lazily fetches that check's per-test
+ * verdicts and renders them with the same {@link FlakyRow} used for a live
+ * check. Hidden entirely when there is no history yet, so the panel stays
+ * quiet until a check has actually been run.
+ */
+export function FlakyHistorySection({
+  artifactId,
+  history,
+  error,
+}: {
+  artifactId: string;
+  history: FlakyCheckSummary[];
+  error: string | null;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<FlakyCheckRecord | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Collapse any open row when the artifact changes — a stale detail from a
+  // different artifact must never render.
+  useEffect(() => {
+    setExpandedId(null);
+    setDetail(null);
+    setDetailError(null);
+  }, [artifactId]);
+
+  const handleToggle = useCallback(
+    (checkId: string) => {
+      if (expandedId === checkId) {
+        setExpandedId(null);
+        return;
+      }
+      setExpandedId(checkId);
+      setDetail(null);
+      setDetailError(null);
+      void (async () => {
+        try {
+          const record = await sandbox.getFlakyCheck(checkId);
+          setDetail(record);
+        } catch (err) {
+          setDetailError(getErrorMessage(err));
+        }
+      })();
+    },
+    [expandedId],
+  );
+
+  if (error !== null) {
+    return (
+      <p className="text-muted-foreground text-[10px]" role="alert">
+        Could not load flaky history: {error}
+      </p>
+    );
+  }
+  if (history.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 border-t border-border pt-2" data-testid="flaky-history">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <History className="size-3" /> Flaky history
+      </div>
+      <ul className="space-y-1">
+        {history.map((check) => (
+          <FlakyHistoryRow
+            key={check.id}
+            check={check}
+            expanded={expandedId === check.id}
+            detail={expandedId === check.id ? detail : null}
+            detailError={expandedId === check.id ? detailError : null}
+            onToggle={handleToggle}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Format a flaky-check timestamp; falls back to the raw string if unparseable. */
+function formatCheckTime(createdAt: string): string {
+  const ms = Date.parse(createdAt);
+  if (Number.isNaN(ms)) return createdAt;
+  return new Date(ms).toLocaleString();
+}
+
+function FlakyHistoryRow({
+  check,
+  expanded,
+  detail,
+  detailError,
+  onToggle,
+}: {
+  check: FlakyCheckSummary;
+  expanded: boolean;
+  detail: FlakyCheckRecord | null;
+  detailError: string | null;
+  onToggle: (checkId: string) => void;
+}) {
+  const total = check.flakyCount + check.nonFlakyCount;
+  return (
+    <li className="rounded border border-border bg-surface-3 text-[11px]">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-2"
+        onClick={() => onToggle(check.id)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className={`pill pill-${check.flakyCount > 0 ? 'rejected' : 'approved'}`}>
+          {check.flakyCount} of {total} flaky
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground font-mono text-[10px]">
+          {check.totalRuns} runs
+        </span>
+        <span className="text-muted-foreground text-[10px]">{formatCheckTime(check.createdAt)}</span>
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-border px-2 py-1.5">
+          {detailError !== null ? (
+            <p className="text-destructive text-[10px]" role="alert">
+              {detailError}
+            </p>
+          ) : detail === null ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-[10px]">
+              <Loader2 className="size-3 animate-spin" /> Loading…
+            </p>
+          ) : detail.tests.length > 0 ? (
+            <ul className="space-y-1">
+              {detail.tests.map((t, i) => (
+                <FlakyRow key={`${t.name}-${i}`} test={t} />
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-[10px]">No per-test detail recorded.</p>
+          )}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
