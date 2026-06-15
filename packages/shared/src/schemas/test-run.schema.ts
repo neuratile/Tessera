@@ -157,3 +157,34 @@ export const FlakyRunResultSchema = z.object({
 });
 
 export type FlakyRunResult = z.infer<typeof FlakyRunResultSchema>;
+
+/**
+ * One entry in an artifact's persisted flaky-check history — mirrors the Rust
+ * `FlakyCheckSummary` (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md
+ * §7). A lightweight header for the trend list; the per-test verdicts are
+ * fetched on demand as a `FlakyCheckRecord`. `runId` is the iteration-#1 run
+ * the check persisted, omitted (serde `None`) only if that run row was later
+ * purged. `createdAt` is RFC-3339. `flakyCount + nonFlakyCount` is the test
+ * total — every test is exactly one of the two.
+ */
+export const FlakyCheckSummarySchema = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid().optional(),
+  totalRuns: z.number().int().positive(),
+  flakyCount: z.number().int().nonnegative(),
+  nonFlakyCount: z.number().int().nonnegative(),
+  createdAt: z.string().min(1),
+});
+
+export type FlakyCheckSummary = z.infer<typeof FlakyCheckSummarySchema>;
+
+/**
+ * A persisted flaky check with its full per-test verdict list — mirrors the
+ * Rust `FlakyCheckRecord`. The detail behind a `FlakyCheckSummary`, rendered
+ * with the same per-test UI as a live check.
+ */
+export const FlakyCheckRecordSchema = FlakyCheckSummarySchema.extend({
+  tests: z.array(FlakyTestResultSchema),
+});
+
+export type FlakyCheckRecord = z.infer<typeof FlakyCheckRecordSchema>;

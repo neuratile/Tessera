@@ -20,6 +20,8 @@ vi.mock('@/lib/ipc', () => ({
     runTestSandbox: vi.fn(),
     runTestSandboxFlaky: vi.fn(),
     cancelTestSandbox: vi.fn(),
+    listFlakyChecks: vi.fn().mockResolvedValue([]),
+    getFlakyCheck: vi.fn(),
   },
 }));
 
@@ -48,7 +50,7 @@ vi.mock('@/stores/sandbox-store', () => {
   };
 });
 
-import { SandboxRunPanel } from './sandbox-run-panel';
+import { FlakyHistorySection, SandboxRunPanel } from './sandbox-run-panel';
 
 const ARTIFACT_ID = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -124,5 +126,44 @@ describe('SandboxRunPanel — flaky check', () => {
     const html = render();
     expect(html).toContain('DOCKER_UNAVAILABLE');
     expect(html).not.toContain('tests flaky');
+  });
+});
+
+describe('FlakyHistorySection — persisted history (design §7)', () => {
+  it('renders nothing when there is no history yet', () => {
+    const html = renderToStaticMarkup(
+      <FlakyHistorySection artifactId={ARTIFACT_ID} history={[]} error={null} />,
+    );
+    expect(html).toBe('');
+  });
+
+  it('lists past checks newest-first with their flaky-count summary', () => {
+    const html = renderToStaticMarkup(
+      <FlakyHistorySection
+        artifactId={ARTIFACT_ID}
+        history={[
+          {
+            id: '00000000-0000-4000-8000-000000000aaa',
+            runId: ARTIFACT_ID,
+            totalRuns: 5,
+            flakyCount: 2,
+            nonFlakyCount: 10,
+            createdAt: '2026-06-15T10:30:00+00:00',
+          },
+        ]}
+        error={null}
+      />,
+    );
+    expect(html).toContain('Flaky history');
+    expect(html).toContain('2 of 12 flaky');
+    expect(html).toContain('5 runs');
+  });
+
+  it('surfaces a load error instead of the trend', () => {
+    const html = renderToStaticMarkup(
+      <FlakyHistorySection artifactId={ARTIFACT_ID} history={[]} error={'boom'} />,
+    );
+    expect(html).toContain('Could not load flaky history');
+    expect(html).toContain('boom');
   });
 });

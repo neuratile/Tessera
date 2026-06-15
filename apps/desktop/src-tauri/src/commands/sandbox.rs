@@ -13,7 +13,9 @@ use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::providers::runners::factory;
-use crate::providers::runners::{FlakyRunResult, RunRequest, RunResult};
+use crate::providers::runners::{
+    FlakyCheckRecord, FlakyCheckSummary, FlakyRunResult, RunRequest, RunResult,
+};
 use crate::services::sandbox_service::{self, RunRegistry, SandboxDeps};
 use crate::utils::crypto::CryptoKey;
 
@@ -76,6 +78,45 @@ pub async fn run_test_sandbox_flaky(
         registry: &registry,
     };
     sandbox_service::run_flaky(request, runs, &deps)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// List an artifact's persisted flaky-check history, newest first
+/// (`plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md` §7). Thin
+/// handler; `limit` is re-clamped by the service/repository, so the UI value
+/// is only a hint. Returns header summaries — the per-test detail is fetched
+/// on demand via [`get_flaky_check`].
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) for any
+/// database-level failure.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn list_flaky_checks(
+    pool: State<'_, SqlitePool>,
+    artifact_id: String,
+    limit: u32,
+) -> Result<Vec<FlakyCheckSummary>, String> {
+    sandbox_service::list_flaky_history(&pool, &artifact_id, limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Fetch one persisted flaky check with its per-test verdicts.
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) when no check
+/// matches `check_id` (`NOT_FOUND`) or for any database-level failure.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn get_flaky_check(
+    pool: State<'_, SqlitePool>,
+    check_id: String,
+) -> Result<FlakyCheckRecord, String> {
+    sandbox_service::get_flaky_check(&pool, &check_id)
         .await
         .map_err(|e| e.to_string())
 }

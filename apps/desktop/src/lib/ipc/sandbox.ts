@@ -1,4 +1,8 @@
 import {
+  type FlakyCheckRecord,
+  FlakyCheckRecordSchema,
+  type FlakyCheckSummary,
+  FlakyCheckSummarySchema,
   type FlakyRunResult,
   FlakyRunResultSchema,
   type RunRequest,
@@ -10,6 +14,9 @@ import { z } from 'zod';
 
 import { IpcError } from './error';
 import { invokeAndParse } from './invoke';
+
+/** Default page size for flaky-check history (mirrors the backend default). */
+const FLAKY_HISTORY_LIMIT = 20;
 
 /**
  * Execute a generated test-case artifact in the local Docker sandbox and
@@ -52,6 +59,30 @@ export async function runTestSandboxFlaky(
     request: parsed.data,
     runs,
   });
+}
+
+/**
+ * List an artifact's persisted flaky-check history, newest first
+ * (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md §7). Returns header
+ * summaries; fetch a check's per-test detail with [`getFlakyCheck`]. `limit` is
+ * a hint — the backend re-clamps it to [1, 200].
+ */
+export async function listFlakyChecks(
+  artifactId: string,
+  limit: number = FLAKY_HISTORY_LIMIT,
+): Promise<FlakyCheckSummary[]> {
+  return invokeAndParse('list_flaky_checks', z.array(FlakyCheckSummarySchema), {
+    artifactId,
+    limit,
+  });
+}
+
+/**
+ * Fetch one persisted flaky check with its per-test verdicts. Throws an
+ * `IpcError` when the id is unknown (`NOT_FOUND`).
+ */
+export async function getFlakyCheck(checkId: string): Promise<FlakyCheckRecord> {
+  return invokeAndParse('get_flaky_check', FlakyCheckRecordSchema, { checkId });
 }
 
 /**
