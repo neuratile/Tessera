@@ -2,7 +2,8 @@
 
 > Status: **draft** — research + prioritization done (2026-06-10); individual
 > feature design docs land under [`v2-feature-docs/`](./v2-feature-docs/) as they
-> are specced (first: flaky-test detection, P2 #7) · Owner: core
+> are specced (flaky-test detection P2 #7 — shipped; self-healing loop P0 #1 —
+> drafted) · Owner: core
 
 ## 1. Theme
 
@@ -46,7 +47,8 @@ the moat v2 builds on.
    case → rerun, with bounded retries. All plumbing exists
    (`generation_service` + `sandbox_service`); this composes them. Directly
    attacks "almost right but not quite" — tests prove themselves before the
-   user sees them.
+   user sees them. Design doc:
+   [`v2-feature-docs/SELF_HEALING_LOOP.md`](./v2-feature-docs/SELF_HEALING_LOOP.md).
 2. **Mutation testing + mutation score.** Mutate the source AST (tree-sitter
    already in place: operators flipped, conditions dropped), rerun the suite
    in the same hardened Docker harness, report killed/survived mutants next to
