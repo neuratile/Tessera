@@ -1,4 +1,4 @@
-import type { CoverageLine, FlakyRunResult, RunResult } from '@testing-ide/shared';
+import type { CoverageLine, FlakyRunResult, HealResult, RunResult } from '@testing-ide/shared';
 import { create } from 'zustand';
 
 /**
@@ -51,9 +51,40 @@ export const IDLE_FLAKY: ArtifactFlakyState = {
   error: null,
 };
 
+/** Live per-attempt progress streamed on `heal://event` while a heal runs. */
+export type HealAttemptProgress = { attempt: number; passed: number; failed: number };
+
+/**
+ * Self-heal UI state, kept separate from the normal-run and flaky slices so a
+ * heal, a flaky check, and a single run can coexist for one artifact
+ * (plan/versions/v2/v2-feature-docs/SELF_HEALING_LOOP.md §5.7). `progress`
+ * carries the latest streamed attempt so the UI can show "Attempt 2 of 3 · 1
+ * test still failing" before the loop settles.
+ */
+export type ArtifactHealState = {
+  phase: SandboxRunPhase;
+  /** Correlation id of the in-flight heal, used to target the Stop button. */
+  clientRunId: string | null;
+  result: HealResult | null;
+  /** Pre-flight failure (opt-out, no runnable files, IPC error). */
+  error: string | null;
+  /** Latest streamed attempt while running; null before the first event. */
+  progress: HealAttemptProgress | null;
+};
+
+/** Stable idle reference for the heal slice. */
+export const IDLE_HEAL: ArtifactHealState = {
+  phase: 'idle',
+  clientRunId: null,
+  result: null,
+  error: null,
+  progress: null,
+};
+
 export type SandboxState = {
   byArtifact: Record<string, ArtifactRunState>;
   flakyByArtifact: Record<string, ArtifactFlakyState>;
+  healByArtifact: Record<string, ArtifactHealState>;
   /** Coverage from the most recent completed run (editor gutter source). */
   coverage: CoverageLine[];
   start: (artifactId: string, clientRunId: string) => void;
@@ -64,11 +95,17 @@ export type SandboxState = {
   finishFlaky: (artifactId: string, result: FlakyRunResult) => void;
   failFlaky: (artifactId: string, message: string) => void;
   resetFlaky: (artifactId: string) => void;
+  startHeal: (artifactId: string, clientRunId: string) => void;
+  attemptHeal: (artifactId: string, progress: HealAttemptProgress) => void;
+  finishHeal: (artifactId: string, result: HealResult) => void;
+  failHeal: (artifactId: string, message: string) => void;
+  resetHeal: (artifactId: string) => void;
 };
 
 export const useSandboxStore = create<SandboxState>()((set) => ({
   byArtifact: {},
   flakyByArtifact: {},
+  healByArtifact: {},
   coverage: [],
 
   start: (artifactId, clientRunId) =>
@@ -134,5 +171,50 @@ export const useSandboxStore = create<SandboxState>()((set) => ({
       const { [artifactId]: _dropped, ...rest } = s.flakyByArtifact;
       void _dropped;
       return { flakyByArtifact: rest };
+    }),
+
+  startHeal: (artifactId, clientRunId) =>
+    set((s) => ({
+      healByArtifact: {
+        ...s.healByArtifact,
+        [artifactId]: { phase: 'running', clientRunId, result: null, error: null, progress: null },
+      },
+    })),
+
+  attemptHeal: (artifactId, progress) =>
+    set((s) => {
+      const current = s.healByArtifact[artifactId];
+      // Ignore late events for a heal that already settled or was reset.
+      if (current === undefined || current.phase !== 'running') return s;
+      return {
+        healByArtifact: {
+          ...s.healByArtifact,
+          [artifactId]: { ...current, progress },
+        },
+      };
+    }),
+
+  finishHeal: (artifactId, result) =>
+    set((s) => ({
+      healByArtifact: {
+        ...s.healByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result, error: null, progress: null },
+      },
+    })),
+
+  failHeal: (artifactId, message) =>
+    set((s) => ({
+      healByArtifact: {
+        ...s.healByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result: null, error: message, progress: null },
+      },
+    })),
+
+  resetHeal: (artifactId) =>
+    set((s) => {
+      if (!(artifactId in s.healByArtifact)) return s;
+      const { [artifactId]: _dropped, ...rest } = s.healByArtifact;
+      void _dropped;
+      return { healByArtifact: rest };
     }),
 }));

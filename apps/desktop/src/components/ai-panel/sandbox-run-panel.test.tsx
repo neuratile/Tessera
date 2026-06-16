@@ -8,7 +8,8 @@ const { uiState, sandboxState } = vi.hoisted(() => {
   const sandboxState: {
     byArtifact: Record<string, unknown>;
     flakyByArtifact: Record<string, unknown>;
-  } = { byArtifact: {}, flakyByArtifact: {} };
+    healByArtifact: Record<string, unknown>;
+  } = { byArtifact: {}, flakyByArtifact: {}, healByArtifact: {} };
   return { uiState: { sandboxOptIn: true }, sandboxState };
 });
 
@@ -23,6 +24,10 @@ vi.mock('@/lib/ipc', () => ({
     listFlakyChecks: vi.fn().mockResolvedValue([]),
     getFlakyCheck: vi.fn(),
   },
+  healing: {
+    runSelfHeal: vi.fn(),
+    subscribeToHealEvents: vi.fn().mockResolvedValue(() => {}),
+  },
 }));
 
 vi.mock('@/stores/ui-store', () => ({
@@ -31,14 +36,17 @@ vi.mock('@/stores/ui-store', () => ({
 
 vi.mock('@/stores/sandbox-store', () => {
   const IDLE = { phase: 'idle', clientRunId: null, result: null, error: null };
+  const IDLE_HEAL = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
   const noop = () => {};
   return {
     IDLE_RUN: IDLE,
     IDLE_FLAKY: IDLE,
+    IDLE_HEAL,
     useSandboxStore: (sel: (s: Record<string, unknown>) => unknown) =>
       sel({
         byArtifact: sandboxState.byArtifact,
         flakyByArtifact: sandboxState.flakyByArtifact,
+        healByArtifact: sandboxState.healByArtifact,
         start: noop,
         finish: noop,
         fail: noop,
@@ -46,22 +54,37 @@ vi.mock('@/stores/sandbox-store', () => {
         startFlaky: noop,
         finishFlaky: noop,
         failFlaky: noop,
+        startHeal: noop,
+        attemptHeal: noop,
+        finishHeal: noop,
+        failHeal: noop,
       }),
   };
 });
 
+import type { HealContext } from './sandbox-run-panel';
 import { FlakyHistorySection, SandboxRunPanel } from './sandbox-run-panel';
 
 const ARTIFACT_ID = '123e4567-e89b-12d3-a456-426614174000';
 
-function render() {
-  return renderToStaticMarkup(<SandboxRunPanel artifactId={ARTIFACT_ID} hasFiles={true} />);
+const HEAL_CONTEXT: HealContext = {
+  projectId: 'p-1',
+  projectName: 'demo',
+  model: 'qwen2.5-coder:7b',
+  provider: 'ollama',
+};
+
+function render(healContext: HealContext | undefined = HEAL_CONTEXT) {
+  return renderToStaticMarkup(
+    <SandboxRunPanel artifactId={ARTIFACT_ID} hasFiles={true} healContext={healContext} />,
+  );
 }
 
 afterEach(() => {
   uiState.sandboxOptIn = true;
   sandboxState.byArtifact = {};
   sandboxState.flakyByArtifact = {};
+  sandboxState.healByArtifact = {};
 });
 
 describe('SandboxRunPanel — flaky check', () => {
@@ -126,6 +149,118 @@ describe('SandboxRunPanel — flaky check', () => {
     const html = render();
     expect(html).toContain('DOCKER_UNAVAILABLE');
     expect(html).not.toContain('tests flaky');
+  });
+});
+
+describe('SandboxRunPanel — self-heal', () => {
+  it('offers Generate & self-heal + an attempts stepper when opted in and runnable', () => {
+    const html = render();
+    expect(html).toContain('Generate &amp; self-heal');
+    expect(html).toContain('Attempts');
+    // Default attempt budget is surfaced in the stepper.
+    expect(html).toContain('>3<');
+    expect(html).toContain('feeds failures back to the model');
+  });
+
+  it('disables self-heal when no regeneration context is configured', () => {
+    // Omit healContext entirely (a `render(undefined)` would hit the default).
+    const html = renderToStaticMarkup(
+      <SandboxRunPanel artifactId={ARTIFACT_ID} hasFiles={true} />,
+    );
+    expect(html).toContain('Generate &amp; self-heal');
+    expect(html).toContain('Configure an LLM provider and model to enable self-heal');
+  });
+
+  it('renders a healed summary and badges the test that flipped to passing', () => {
+    sandboxState.healByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          outcome: 'healed',
+          attemptsUsed: 2,
+          finalArtifactId: 'a-2',
+          finalRunId: 'r-2',
+          passedCount: 14,
+          failedCount: 0,
+          attempts: [
+            {
+              attempt: 1,
+              artifactId: 'a-1',
+              passedCount: 13,
+              failedCount: 1,
+              failures: [{ name: 'TC-CART-09 computes tax', failureMessage: 'expected 19.99 to equal 20.00' }],
+            },
+            { attempt: 2, artifactId: 'a-2', passedCount: 14, failedCount: 0, failures: [] },
+          ],
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('healed in 2 attempts · 14/14 passing');
+    expect(html).toContain('TC-CART-09 computes tax');
+    expect(html).toContain('healed · attempt 2');
+    expect(html).toContain('attempt 1: expected 19.99 to equal 20.00');
+  });
+
+  it('flags a still-failing test as a likely real bug when exhausted', () => {
+    sandboxState.healByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          outcome: 'exhausted',
+          attemptsUsed: 3,
+          finalArtifactId: 'a-3',
+          finalRunId: 'r-3',
+          passedCount: 13,
+          failedCount: 1,
+          attempts: [
+            {
+              attempt: 3,
+              artifactId: 'a-3',
+              passedCount: 13,
+              failedCount: 1,
+              failures: [{ name: 'TC-CART-07 applies bulk discount', failureMessage: 'expected 45.00 to equal 50.00' }],
+            },
+          ],
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('stopped after 3 attempts · 13/14 passing');
+    expect(html).toContain('likely real bug');
+    expect(html).toContain('TC-CART-07 applies bulk discount');
+  });
+
+  it('shows the error message for an errored heal', () => {
+    sandboxState.healByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          outcome: 'error',
+          attemptsUsed: 1,
+          finalArtifactId: 'a-1',
+          finalRunId: '',
+          passedCount: 0,
+          failedCount: 0,
+          attempts: [{ attempt: 1, artifactId: 'a-1', passedCount: 0, failedCount: 0, failures: [] }],
+          errorMessage: 'Self-heal cancelled during attempt 1 of 3.',
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('Self-heal cancelled during attempt 1 of 3.');
   });
 });
 

@@ -23,6 +23,7 @@ export * from './schemas/defect-report.schema';
 export * from './schemas/embedding-config.schema';
 export * from './schemas/export.schema';
 export * from './schemas/hardware.schema';
+export * from './schemas/heal.schema';
 export * from './schemas/health.schema';
 export * from './schemas/llm-provider.schema';
 export * from './schemas/project.schema';

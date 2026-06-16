@@ -48,7 +48,7 @@ import {
 } from '@/components/ai-panel/artifact-structured-view';
 import { JiraPushDialog } from '@/components/ai-panel/jira-push-dialog';
 import { DiffView } from '@/components/ai-panel/diff-view';
-import { SandboxRunPanel } from '@/components/ai-panel/sandbox-run-panel';
+import { type HealContext, SandboxRunPanel } from '@/components/ai-panel/sandbox-run-panel';
 
 type Props = {
   summary: ArtifactSummary;
@@ -255,6 +255,26 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
     activeProvider !== null &&
     typeof activeProvider.defaultModel === 'string' &&
     activeProvider.defaultModel.length > 0;
+
+  // Context the sandbox panel's self-heal action needs for its regeneration
+  // step — the same project + provider/model inputs as manual "Regenerate".
+  // `undefined` (no provider/model configured) disables self-heal.
+  const healContext = useMemo<HealContext | undefined>(() => {
+    if (
+      project === null ||
+      activeProvider === null ||
+      typeof activeProvider.defaultModel !== 'string' ||
+      activeProvider.defaultModel.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      projectId: project.id,
+      projectName: project.name,
+      model: activeProvider.defaultModel,
+      provider: activeProvider.provider,
+    };
+  }, [project, activeProvider]);
 
   const handleRegenerate = useCallback(() => {
     if (!canRegenerate || project === null || activeProvider === null) return;
@@ -526,6 +546,7 @@ export function ArtifactDetailDrawer({ summary, onClose }: Props) {
                     ? (structured.data.files?.length ?? 0) > 0
                     : undefined
                 }
+                healContext={healContext}
               />
             </div>
           ) : null}

@@ -108,6 +108,8 @@ pub fn run() {
             commands::analysis::get_analysis_outcome,
             // Generation commands (Phase 5)
             commands::generation::generate_artifact,
+            // Self-healing loop (v2 P0 #1 — SELF_HEALING_LOOP.md)
+            commands::healing::run_self_heal,
             // Provider config commands (Phase 4)
             commands::providers::save_provider_config,
             commands::providers::list_provider_configs,

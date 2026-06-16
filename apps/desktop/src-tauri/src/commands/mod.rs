@@ -23,6 +23,7 @@ pub mod embeddings;
 pub mod exports;
 pub mod generation;
 pub mod hardware;
+pub mod healing;
 pub mod health;
 pub mod ollama;
 pub mod projects;
