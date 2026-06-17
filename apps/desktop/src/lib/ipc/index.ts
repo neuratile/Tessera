@@ -16,6 +16,7 @@ export * as exports from './exports';
 export * as filesystem from './filesystem';
 export * as generation from './generation';
 export * as hardware from './hardware';
+export * as healing from './healing';
 export * as health from './health';
 export * as ollama from './ollama';
 export * as projects from './projects';

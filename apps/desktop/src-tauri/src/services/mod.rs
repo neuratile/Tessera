@@ -26,6 +26,7 @@ pub mod export;
 pub mod file_discovery_service;
 pub mod generation_service;
 pub mod hardware_service;
+pub mod healing_service;
 pub mod health_service;
 pub mod jira_push_service;
 pub mod ollama_health_service;

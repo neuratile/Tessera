@@ -3,6 +3,8 @@ import type {
   FlakyCheckSummary,
   FlakyRunResult,
   FlakyTestResult,
+  HealAttempt,
+  HealResult,
   RunResult,
   TestResult,
 } from '@testing-ide/shared';
@@ -17,14 +19,16 @@ import {
   Play,
   Plus,
   Repeat,
+  Sparkles,
   Square,
+  Wrench,
   XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { getErrorMessage, sandbox } from '@/lib/ipc';
-import { IDLE_FLAKY, IDLE_RUN, useSandboxStore } from '@/stores/sandbox-store';
+import { getErrorMessage, healing, sandbox } from '@/lib/ipc';
+import { IDLE_FLAKY, IDLE_HEAL, IDLE_RUN, useSandboxStore } from '@/stores/sandbox-store';
 import { useUiStore } from '@/stores/ui-store';
 
 /** Iteration bounds for a flaky check — mirrors the backend re-clamp. */
@@ -34,6 +38,27 @@ const FLAKY_DEFAULT_RUNS = 5;
 
 const clampRuns = (n: number): number =>
   Math.min(FLAKY_MAX_RUNS, Math.max(FLAKY_MIN_RUNS, Math.round(n)));
+
+/** Attempt bounds for a self-heal — mirrors the backend re-clamp [1, 5]. */
+const HEAL_MIN_ATTEMPTS = 1;
+const HEAL_MAX_ATTEMPTS = 5;
+const HEAL_DEFAULT_ATTEMPTS = 3;
+
+const clampAttempts = (n: number): number =>
+  Math.min(HEAL_MAX_ATTEMPTS, Math.max(HEAL_MIN_ATTEMPTS, Math.round(n)));
+
+/**
+ * Regeneration context the self-heal loop needs to call `generate` between
+ * runs. Sourced from the drawer's selected project + active provider (the same
+ * inputs its manual "Regenerate" uses). `undefined` when no provider/model is
+ * configured — the self-heal action is then disabled with guidance.
+ */
+export type HealContext = {
+  projectId: string;
+  projectName: string;
+  model: string;
+  provider: string;
+};
 
 type Props = {
   /** The test-cases artifact id (a UUID). */
@@ -46,6 +71,11 @@ type Props = {
    * lets the backend decide.
    */
   hasFiles?: boolean | undefined;
+  /**
+   * Context for the self-heal loop's regeneration step. `undefined` disables
+   * the "Generate & self-heal" action (no provider/model configured).
+   */
+  healContext?: HealContext | undefined;
 };
 
 /**
@@ -62,19 +92,25 @@ type Props = {
  * (plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md). Its state is kept
  * separate from the single-run state so both results can coexist.
  */
-export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
+export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const optIn = useUiStore((s) => s.sandboxOptIn);
   const runnable = hasFiles !== false;
   const runState = useSandboxStore((s) => s.byArtifact[artifactId] ?? IDLE_RUN);
   const flakyState = useSandboxStore((s) => s.flakyByArtifact[artifactId] ?? IDLE_FLAKY);
+  const healState = useSandboxStore((s) => s.healByArtifact[artifactId] ?? IDLE_HEAL);
   const start = useSandboxStore((s) => s.start);
   const finish = useSandboxStore((s) => s.finish);
   const fail = useSandboxStore((s) => s.fail);
   const startFlaky = useSandboxStore((s) => s.startFlaky);
   const finishFlaky = useSandboxStore((s) => s.finishFlaky);
   const failFlaky = useSandboxStore((s) => s.failFlaky);
+  const startHeal = useSandboxStore((s) => s.startHeal);
+  const attemptHeal = useSandboxStore((s) => s.attemptHeal);
+  const finishHeal = useSandboxStore((s) => s.finishHeal);
+  const failHeal = useSandboxStore((s) => s.failHeal);
 
   const [runs, setRuns] = useState(FLAKY_DEFAULT_RUNS);
+  const [maxAttempts, setMaxAttempts] = useState(HEAL_DEFAULT_ATTEMPTS);
 
   // Persisted flaky-check history (design §7). Kept in local state — it is
   // read-only fetched data scoped to this panel, so it does not belong in the
@@ -114,8 +150,11 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
 
   const running = runState.phase === 'running';
   const flakyRunning = flakyState.phase === 'running';
-  const busy = running || flakyRunning;
+  const healRunning = healState.phase === 'running';
+  const busy = running || flakyRunning || healRunning;
   const gated = !optIn || !runnable;
+  // Self-heal also needs a regeneration context (provider + model).
+  const healGated = gated || healContext === undefined;
 
   // Cancel whichever op is in flight when the panel unmounts (e.g. the
   // artifact drawer closes) so the Docker container is killed immediately
@@ -126,7 +165,9 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
     ? runState.clientRunId
     : flakyRunning
       ? flakyState.clientRunId
-      : null;
+      : healRunning
+        ? healState.clientRunId
+        : null;
   useEffect(
     () => () => {
       const clientRunId = inFlightRef.current;
@@ -138,6 +179,38 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
     },
     [],
   );
+
+  // Live heal progress: the backend streams one `heal://event` per attempt,
+  // tagged with the `clientRunId` the heal was started under. Subscribe once
+  // and route matching events to this artifact's heal slice. A ref holds the
+  // current in-flight clientRunId so the listener (installed once) always sees
+  // the latest value without re-subscribing.
+  const healClientRunIdRef = useRef<string | null>(null);
+  healClientRunIdRef.current = healRunning ? healState.clientRunId : null;
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const fn = await healing.subscribeToHealEvents((event) => {
+        if (event.healId === healClientRunIdRef.current) {
+          attemptHeal(artifactId, {
+            attempt: event.attempt,
+            passed: event.passed,
+            failed: event.failed,
+          });
+        }
+      });
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten !== null) unlisten();
+    };
+  }, [artifactId, attemptHeal]);
 
   const handleRun = useCallback(() => {
     if (gated || busy) return;
@@ -180,14 +253,43 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
     })();
   }, [gated, busy, artifactId, runs, startFlaky, finishFlaky, failFlaky, refreshHistory]);
 
-  // Stop targets whichever op is in flight; both share the cancel-by-id path.
+  const handleHeal = useCallback(() => {
+    if (healGated || busy || healContext === undefined) return;
+    const clientRunId = crypto.randomUUID();
+    startHeal(artifactId, clientRunId);
+    void (async () => {
+      try {
+        const result = await healing.runSelfHeal({
+          artifactId,
+          maxAttempts,
+          optInConfirmed: true,
+          clientRunId,
+          model: healContext.model,
+          provider: healContext.provider,
+          projectId: healContext.projectId,
+          projectName: healContext.projectName,
+        });
+        finishHeal(artifactId, result);
+      } catch (err) {
+        failHeal(artifactId, getErrorMessage(err));
+      }
+    })();
+  }, [healGated, busy, artifactId, maxAttempts, healContext, startHeal, finishHeal, failHeal]);
+
+  // Stop targets whichever op is in flight; all three share the cancel-by-id
+  // path (a heal's in-flight run is registered under its clientRunId, so Stop
+  // kills the current container and the loop observes the cancelled run).
   const handleStop = useCallback(() => {
-    const clientRunId = running ? runState.clientRunId : flakyState.clientRunId;
+    const clientRunId = running
+      ? runState.clientRunId
+      : flakyRunning
+        ? flakyState.clientRunId
+        : healState.clientRunId;
     if (clientRunId === null) return;
     void sandbox.cancelTestSandbox(clientRunId).catch(() => {
       // Stop is best-effort; the run still resolves and updates state.
     });
-  }, [running, runState.clientRunId, flakyState.clientRunId]);
+  }, [running, flakyRunning, runState.clientRunId, flakyState.clientRunId, healState.clientRunId]);
 
   return (
     <div className="space-y-2 rounded-md border border-border bg-background p-3">
@@ -238,6 +340,34 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
         )}
       </div>
 
+      {!busy ? (
+        <div className="flex items-center justify-end gap-2">
+          <HealAttemptsStepper
+            attempts={maxAttempts}
+            setAttempts={setMaxAttempts}
+            disabled={healGated}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleHeal}
+            disabled={healGated}
+            title={
+              !optIn
+                ? 'Enable local test execution in Settings'
+                : !runnable
+                  ? 'This artifact has no runnable files — regenerate the test cases'
+                  : healContext === undefined
+                    ? 'Configure an LLM provider and model to enable self-heal'
+                    : 'Run the suite, then feed failures back to the model to fix failing tests automatically'
+            }
+          >
+            <Wrench className="size-3.5" /> Generate &amp; self-heal
+          </Button>
+        </div>
+      ) : null}
+
       {!optIn ? (
         <p className="text-muted-foreground text-[10px]">
           Local test execution is off. Enable it in Settings to run these tests in a Docker sandbox.
@@ -255,6 +385,14 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
         <p className="text-muted-foreground text-[10px]">
           <strong className="font-semibold">Check flaky</strong> runs the suite N times to catch
           tests that pass sometimes and fail sometimes. More runs = more confidence, slower.
+        </p>
+      ) : null}
+
+      {optIn && runnable && !busy ? (
+        <p className="text-muted-foreground text-[10px]">
+          <strong className="font-semibold">Generate &amp; self-heal</strong> runs the suite, then
+          feeds failures back to the model to fix the failing tests automatically. Bounded retries;
+          stops when all pass or it stops improving.
         </p>
       ) : null}
 
@@ -285,6 +423,23 @@ export function SandboxRunPanel({ artifactId, hasFiles }: Props) {
       ) : null}
 
       {flakyState.result !== null ? <FlakyResultView result={flakyState.result} /> : null}
+
+      {healRunning ? (
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Loader2 className="size-3 animate-spin" />
+          {healState.progress !== null
+            ? `Self-healing · attempt ${healState.progress.attempt} of ${maxAttempts} · ${healState.progress.failed} ${healState.progress.failed === 1 ? 'test' : 'tests'} still failing…`
+            : 'Self-healing · running the suite…'}
+        </p>
+      ) : null}
+
+      {healState.error !== null ? (
+        <p className="text-destructive text-xs" role="alert">
+          {healState.error}
+        </p>
+      ) : null}
+
+      {healState.result !== null ? <HealResultView result={healState.result} /> : null}
 
       <FlakyHistorySection artifactId={artifactId} history={history} error={historyError} />
     </div>
@@ -437,6 +592,198 @@ function FlakyHistoryRow({
           ) : (
             <p className="text-muted-foreground text-[10px]">No per-test detail recorded.</p>
           )}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/** −/+ stepper for the self-heal attempt budget, clamped to [1, 5]. */
+function HealAttemptsStepper({
+  attempts,
+  setAttempts,
+  disabled,
+}: {
+  attempts: number;
+  setAttempts: (n: number) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center gap-1 rounded border border-border bg-surface-3 px-1.5 py-0.5"
+      title="Maximum self-heal attempts (1–5)"
+    >
+      <span className="text-muted-foreground text-[10px] uppercase tracking-wide">Attempts</span>
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+        onClick={() => setAttempts(clampAttempts(attempts - 1))}
+        disabled={disabled || attempts <= HEAL_MIN_ATTEMPTS}
+        aria-label="Fewer attempts"
+      >
+        <Minus className="size-3" />
+      </button>
+      <span className="w-4 text-center font-mono text-[11px] tabular-nums text-foreground">
+        {attempts}
+      </span>
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+        onClick={() => setAttempts(clampAttempts(attempts + 1))}
+        disabled={disabled || attempts >= HEAL_MAX_ATTEMPTS}
+        aria-label="More attempts"
+      >
+        <Plus className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+/** A test that was involved in the heal, derived from the per-attempt trail. */
+type HealRowData = {
+  name: string;
+  healed: boolean;
+  /** Attempt the test first passed (only when `healed`). */
+  healedAtAttempt: number | null;
+  /** Per-attempt failure messages, oldest first. */
+  trail: { attempt: number; message: string | null }[];
+};
+
+/**
+ * Derive per-test rows from a heal's attempt trail. `HealResult` only carries
+ * the *failing* tests per attempt (not the always-passing ones), so this lists
+ * the tests that were involved in the heal: a test absent from the landed
+ * attempt's failures flipped to passing (healed at the next attempt); one still
+ * present is a likely real source bug. Tests that never failed are reflected in
+ * the summary count, not as rows.
+ *
+ * The "landed" attempt is the one the backend chose as final (`finalArtifactId`)
+ * — the healed attempt, or for `exhausted`/`no_progress` the *best* attempt by
+ * pass count, which is not necessarily the chronologically last one. A later
+ * attempt can regress, so deriving the failing set from the last attempt would
+ * mislabel a test that fails only in that worse, discarded run.
+ */
+function deriveHealRows(result: HealResult): HealRowData[] {
+  const attempts: HealAttempt[] = result.attempts;
+  const finalAttempt =
+    attempts.find((a) => a.artifactId === result.finalArtifactId) ??
+    attempts[attempts.length - 1];
+  if (finalAttempt === undefined) return [];
+  const finalFailing = new Set(finalAttempt.failures.map((f) => f.name));
+
+  // Only attempts up to the landed one describe the artifact on screen; later
+  // (discarded) attempts must not contribute rows or trail entries.
+  const order: string[] = [];
+  const trails = new Map<string, { attempt: number; message: string | null }[]>();
+  for (const attempt of attempts) {
+    if (attempt.attempt > finalAttempt.attempt) break;
+    for (const failure of attempt.failures) {
+      let trail = trails.get(failure.name);
+      if (trail === undefined) {
+        trail = [];
+        trails.set(failure.name, trail);
+        order.push(failure.name);
+      }
+      trail.push({ attempt: attempt.attempt, message: failure.failureMessage ?? null });
+    }
+  }
+
+  return order.map((name) => {
+    const trail = trails.get(name) ?? [];
+    const stillFailing = finalFailing.has(name);
+    const lastFailAttempt = trail[trail.length - 1]?.attempt ?? 0;
+    return {
+      name,
+      healed: !stillFailing,
+      healedAtAttempt: stillFailing ? null : lastFailAttempt + 1,
+      trail,
+    };
+  });
+}
+
+/** Headline for a settled heal: outcome + attempts + pass ratio. */
+function healSummary(result: HealResult): { label: string; ok: boolean } {
+  const total = result.passedCount + result.failedCount;
+  const ratio = `${result.passedCount}/${total} passing`;
+  switch (result.outcome) {
+    case 'healed':
+      return { label: `healed in ${result.attemptsUsed} ${result.attemptsUsed === 1 ? 'attempt' : 'attempts'} · ${ratio}`, ok: true };
+    case 'exhausted':
+      return { label: `stopped after ${result.attemptsUsed} ${result.attemptsUsed === 1 ? 'attempt' : 'attempts'} · ${ratio}`, ok: false };
+    case 'no_progress':
+      return { label: `stopped — no progress · ${ratio}`, ok: false };
+    case 'error':
+      return { label: 'self-heal stopped on an error', ok: false };
+  }
+}
+
+/**
+ * Results of a self-heal: a top summary ("healed in 2 attempts · 14/14
+ * passing"), then a per-test row for each test that was involved — healed ones
+ * badged with the attempt they flipped on, still-failing ones flagged as a
+ * likely real source bug, each with a collapsible per-attempt failure trail.
+ */
+function HealResultView({ result }: { result: HealResult }) {
+  if (result.outcome === 'error') {
+    return (
+      <p className="text-destructive text-[11px]" data-testid="heal-results" role="alert">
+        {typeof result.errorMessage === 'string' && result.errorMessage.length > 0
+          ? result.errorMessage
+          : 'Self-heal stopped on an error.'}
+      </p>
+    );
+  }
+
+  const summary = healSummary(result);
+  const rows = deriveHealRows(result);
+  return (
+    <div className="space-y-2" data-testid="heal-results">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`pill pill-${summary.ok ? 'approved' : 'rejected'}`}>Self-heal</span>
+        <span className="text-muted-foreground font-mono text-[10px]">{summary.label}</span>
+      </div>
+
+      {rows.length > 0 ? (
+        <ul className="space-y-1">
+          {rows.map((row, i) => (
+            <HealRow key={`${row.name}-${i}`} row={row} />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function HealRow({ row }: { row: HealRowData }) {
+  return (
+    <li className="rounded border border-border bg-surface-3 px-2 py-1.5 text-[11px]">
+      <div className="flex items-center gap-2">
+        {row.healed ? (
+          <CheckCircle2 className="size-3 shrink-0 text-success" />
+        ) : (
+          <XCircle className="text-destructive size-3 shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-foreground" title={row.name}>
+          {row.name}
+        </span>
+        {row.healed ? (
+          <span className="border-success/35 bg-success/15 text-success inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide">
+            <Sparkles className="size-2.5" /> healed · attempt {row.healedAtAttempt}
+          </span>
+        ) : (
+          <span className="pill pill-rejected">likely real bug</span>
+        )}
+      </div>
+      {row.trail.length > 0 ? (
+        <div className="mt-1 space-y-0.5">
+          {row.trail.map((step, i) => (
+            <pre
+              key={i}
+              className="text-destructive/90 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px]"
+            >
+              attempt {step.attempt}: {step.message ?? '(no failure message captured)'}
+            </pre>
+          ))}
         </div>
       ) : null}
     </li>
