@@ -652,20 +652,31 @@ type HealRowData = {
 /**
  * Derive per-test rows from a heal's attempt trail. `HealResult` only carries
  * the *failing* tests per attempt (not the always-passing ones), so this lists
- * the tests that were involved in the heal: a test absent from the final
+ * the tests that were involved in the heal: a test absent from the landed
  * attempt's failures flipped to passing (healed at the next attempt); one still
  * present is a likely real source bug. Tests that never failed are reflected in
  * the summary count, not as rows.
+ *
+ * The "landed" attempt is the one the backend chose as final (`finalArtifactId`)
+ * — the healed attempt, or for `exhausted`/`no_progress` the *best* attempt by
+ * pass count, which is not necessarily the chronologically last one. A later
+ * attempt can regress, so deriving the failing set from the last attempt would
+ * mislabel a test that fails only in that worse, discarded run.
  */
 function deriveHealRows(result: HealResult): HealRowData[] {
   const attempts: HealAttempt[] = result.attempts;
-  const finalAttempt = attempts[attempts.length - 1];
+  const finalAttempt =
+    attempts.find((a) => a.artifactId === result.finalArtifactId) ??
+    attempts[attempts.length - 1];
   if (finalAttempt === undefined) return [];
   const finalFailing = new Set(finalAttempt.failures.map((f) => f.name));
 
+  // Only attempts up to the landed one describe the artifact on screen; later
+  // (discarded) attempts must not contribute rows or trail entries.
   const order: string[] = [];
   const trails = new Map<string, { attempt: number; message: string | null }[]>();
   for (const attempt of attempts) {
+    if (attempt.attempt > finalAttempt.attempt) break;
     for (const failure of attempt.failures) {
       let trail = trails.get(failure.name);
       if (trail === undefined) {

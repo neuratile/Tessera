@@ -239,6 +239,54 @@ describe('SandboxRunPanel — self-heal', () => {
     expect(html).toContain('TC-CART-07 applies bulk discount');
   });
 
+  it('derives rows from the landed (best) attempt, not a later regressed one', () => {
+    // Attempt 2 regresses (a test that passed in attempt 1 now fails), so the
+    // backend lands on attempt 1 as the best. The regressed test passes in the
+    // artifact on screen and must NOT be labelled a likely real bug.
+    sandboxState.healByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          outcome: 'exhausted',
+          attemptsUsed: 2,
+          finalArtifactId: 'a-1',
+          finalRunId: 'r-1',
+          passedCount: 2,
+          failedCount: 1,
+          attempts: [
+            {
+              attempt: 1,
+              artifactId: 'a-1',
+              passedCount: 2,
+              failedCount: 1,
+              failures: [{ name: 'TC-A core path', failureMessage: 'boom' }],
+            },
+            {
+              attempt: 2,
+              artifactId: 'a-2',
+              passedCount: 1,
+              failedCount: 2,
+              failures: [
+                { name: 'TC-A core path', failureMessage: 'boom again' },
+                { name: 'TC-C regressed', failureMessage: 'only fails in the discarded attempt' },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    const html = render();
+    // The genuinely-failing test (fails in the landed attempt) is flagged.
+    expect(html).toContain('likely real bug');
+    expect(html).toContain('TC-A core path');
+    // The test that fails only in the later, discarded attempt is not a row.
+    expect(html).not.toContain('TC-C regressed');
+  });
+
   it('shows the error message for an errored heal', () => {
     sandboxState.healByArtifact = {
       [ARTIFACT_ID]: {

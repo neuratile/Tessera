@@ -288,7 +288,6 @@ pub async fn heal(
             failed_count: run.failed_count,
             failures: failures.clone(),
         });
-        best.consider(&run, &current_artifact_id);
         emit(&mut on_event, attempt, run.passed_count, run.failed_count);
 
         // 3. A runner-level failure or cancellation ends the heal (design §4.4).
@@ -303,6 +302,12 @@ pub async fn heal(
                 .unwrap_or_else(|| format!("The sandbox run failed on attempt {attempt} of {max}."));
             return Ok(result_error(attempts, &best, &current_artifact_id, message));
         }
+
+        // The run completed normally, so it is now eligible as the best attempt.
+        // Errored/cancelled runs return above and are deliberately *not*
+        // considered — otherwise an errored run's `run_id` could surface as
+        // `final_run_id`, pointing a consumer at a failed run.
+        best.consider(&run, &current_artifact_id);
 
         // 4. All tests pass → healed (design §4.1).
         if run.failed_count == 0 {
@@ -993,6 +998,9 @@ mod tests {
         assert_eq!(result.outcome, HealOutcome::Error);
         assert_eq!(result.attempts_used, 1);
         assert!(result.error_message.is_some());
+        // The errored run is never the "best" attempt, so its run_id must not
+        // surface as `final_run_id` (would point a consumer at a failed run).
+        assert!(result.final_run_id.is_empty());
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
@@ -1020,6 +1028,8 @@ mod tests {
 
         assert_eq!(result.outcome, HealOutcome::Error);
         assert!(result.error_message.as_deref().unwrap_or_default().contains("cancelled"));
+        // A cancelled run is likewise never recorded as "best".
+        assert!(result.final_run_id.is_empty());
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
