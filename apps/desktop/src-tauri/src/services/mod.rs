@@ -29,6 +29,7 @@ pub mod hardware_service;
 pub mod healing_service;
 pub mod health_service;
 pub mod jira_push_service;
+pub mod mutation_service;
 pub mod ollama_health_service;
 pub mod project_service;
 pub mod provider_config_service;

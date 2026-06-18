@@ -5,6 +5,10 @@ import type {
   FlakyTestResult,
   HealAttempt,
   HealResult,
+  MutantResult,
+  MutationCheckRecord,
+  MutationCheckSummary,
+  MutationResult,
   RunResult,
   TestResult,
 } from '@testing-ide/shared';
@@ -13,6 +17,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  FlaskConical,
   History,
   Loader2,
   Minus,
@@ -27,8 +32,14 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { getErrorMessage, healing, sandbox } from '@/lib/ipc';
-import { IDLE_FLAKY, IDLE_HEAL, IDLE_RUN, useSandboxStore } from '@/stores/sandbox-store';
+import { getErrorMessage, healing, mutation, sandbox } from '@/lib/ipc';
+import {
+  IDLE_FLAKY,
+  IDLE_HEAL,
+  IDLE_MUTATION,
+  IDLE_RUN,
+  useSandboxStore,
+} from '@/stores/sandbox-store';
 import { useUiStore } from '@/stores/ui-store';
 
 /** Iteration bounds for a flaky check — mirrors the backend re-clamp. */
@@ -98,6 +109,7 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const runState = useSandboxStore((s) => s.byArtifact[artifactId] ?? IDLE_RUN);
   const flakyState = useSandboxStore((s) => s.flakyByArtifact[artifactId] ?? IDLE_FLAKY);
   const healState = useSandboxStore((s) => s.healByArtifact[artifactId] ?? IDLE_HEAL);
+  const mutationState = useSandboxStore((s) => s.mutationByArtifact[artifactId] ?? IDLE_MUTATION);
   const start = useSandboxStore((s) => s.start);
   const finish = useSandboxStore((s) => s.finish);
   const fail = useSandboxStore((s) => s.fail);
@@ -108,6 +120,10 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const attemptHeal = useSandboxStore((s) => s.attemptHeal);
   const finishHeal = useSandboxStore((s) => s.finishHeal);
   const failHeal = useSandboxStore((s) => s.failHeal);
+  const startMutation = useSandboxStore((s) => s.startMutation);
+  const progressMutation = useSandboxStore((s) => s.progressMutation);
+  const finishMutation = useSandboxStore((s) => s.finishMutation);
+  const failMutation = useSandboxStore((s) => s.failMutation);
 
   const [runs, setRuns] = useState(FLAKY_DEFAULT_RUNS);
   const [maxAttempts, setMaxAttempts] = useState(HEAL_DEFAULT_ATTEMPTS);
@@ -118,6 +134,11 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   // completed check so a fresh run shows up at the top of the trend.
   const [history, setHistory] = useState<FlakyCheckSummary[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+
+  // Persisted mutation-score history (design §5.5), kept separate from the flaky
+  // trend. Same read-only, panel-scoped lifecycle.
+  const [mutationHistory, setMutationHistory] = useState<MutationCheckSummary[]>([]);
+  const [mutationHistoryError, setMutationHistoryError] = useState<string | null>(null);
 
   // Always-current artifact id, read by in-flight history fetches to detect a
   // switch. If the panel is reused with a new `artifactId` before a previous
@@ -140,18 +161,36 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     })();
   }, [artifactId]);
 
+  const refreshMutationHistory = useCallback(() => {
+    void (async () => {
+      try {
+        const checks = await mutation.listMutationChecks(artifactId);
+        if (artifactIdRef.current !== artifactId) return; // artifact switched mid-fetch
+        setMutationHistory(checks);
+        setMutationHistoryError(null);
+      } catch (err) {
+        if (artifactIdRef.current !== artifactId) return;
+        setMutationHistoryError(getErrorMessage(err));
+      }
+    })();
+  }, [artifactId]);
+
   // Clear stale history immediately on an artifact switch so the previous
-  // artifact's trend never lingers while the new fetch is in flight.
+  // artifact's trends never linger while the new fetches are in flight.
   useEffect(() => {
     setHistory([]);
     setHistoryError(null);
+    setMutationHistory([]);
+    setMutationHistoryError(null);
     refreshHistory();
-  }, [refreshHistory]);
+    refreshMutationHistory();
+  }, [refreshHistory, refreshMutationHistory]);
 
   const running = runState.phase === 'running';
   const flakyRunning = flakyState.phase === 'running';
   const healRunning = healState.phase === 'running';
-  const busy = running || flakyRunning || healRunning;
+  const mutationRunning = mutationState.phase === 'running';
+  const busy = running || flakyRunning || healRunning || mutationRunning;
   const gated = !optIn || !runnable;
   // Self-heal also needs a regeneration context (provider + model).
   const healGated = gated || healContext === undefined;
@@ -167,7 +206,9 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
       ? flakyState.clientRunId
       : healRunning
         ? healState.clientRunId
-        : null;
+        : mutationRunning
+          ? mutationState.clientRunId
+          : null;
   useEffect(
     () => () => {
       const clientRunId = inFlightRef.current;
@@ -211,6 +252,31 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
       if (unlisten !== null) unlisten();
     };
   }, [artifactId, attemptHeal]);
+
+  // Live mutation progress: the backend streams one `mutation://event` per
+  // mutant, tagged with the sweep's `clientRunId`. Mirrors the heal subscription.
+  const mutationClientRunIdRef = useRef<string | null>(null);
+  mutationClientRunIdRef.current = mutationRunning ? mutationState.clientRunId : null;
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const fn = await mutation.subscribeToMutationEvents((event) => {
+        if (event.mutationId === mutationClientRunIdRef.current) {
+          progressMutation(artifactId, { done: event.done, total: event.total });
+        }
+      });
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten !== null) unlisten();
+    };
+  }, [artifactId, progressMutation]);
 
   const handleRun = useCallback(() => {
     if (gated || busy) return;
@@ -276,20 +342,51 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     })();
   }, [healGated, busy, artifactId, maxAttempts, healContext, startHeal, finishHeal, failHeal]);
 
-  // Stop targets whichever op is in flight; all three share the cancel-by-id
-  // path (a heal's in-flight run is registered under its clientRunId, so Stop
+  const handleMutationTest = useCallback(() => {
+    if (gated || busy) return;
+    const clientRunId = crypto.randomUUID();
+    startMutation(artifactId, clientRunId);
+    void (async () => {
+      try {
+        const result = await mutation.runMutationTest({
+          artifactId,
+          optInConfirmed: true,
+          clientRunId,
+        });
+        finishMutation(artifactId, result);
+        // A completed score is persisted to history — refresh so it appears at
+        // the top of the trend.
+        refreshMutationHistory();
+      } catch (err) {
+        failMutation(artifactId, getErrorMessage(err));
+      }
+    })();
+  }, [gated, busy, artifactId, startMutation, finishMutation, failMutation, refreshMutationHistory]);
+
+  // Stop targets whichever op is in flight; all share the cancel-by-id path (a
+  // heal's / sweep's in-flight run is registered under its clientRunId, so Stop
   // kills the current container and the loop observes the cancelled run).
   const handleStop = useCallback(() => {
     const clientRunId = running
       ? runState.clientRunId
       : flakyRunning
         ? flakyState.clientRunId
-        : healState.clientRunId;
+        : healRunning
+          ? healState.clientRunId
+          : mutationState.clientRunId;
     if (clientRunId === null) return;
     void sandbox.cancelTestSandbox(clientRunId).catch(() => {
       // Stop is best-effort; the run still resolves and updates state.
     });
-  }, [running, flakyRunning, runState.clientRunId, flakyState.clientRunId, healState.clientRunId]);
+  }, [
+    running,
+    flakyRunning,
+    healRunning,
+    runState.clientRunId,
+    flakyState.clientRunId,
+    healState.clientRunId,
+    mutationState.clientRunId,
+  ]);
 
   return (
     <div className="space-y-2 rounded-md border border-border bg-background p-3">
@@ -319,6 +416,22 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
               }
             >
               <Repeat className="size-3.5" /> Check flaky
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleMutationTest}
+              disabled={gated}
+              title={
+                !optIn
+                  ? 'Enable local test execution in Settings'
+                  : !runnable
+                    ? 'This artifact has no runnable files — regenerate the test cases'
+                    : 'Seed bugs into the source and check how many your tests catch (mutation score)'
+              }
+            >
+              <FlaskConical className="size-3.5" /> Mutation test
             </Button>
             <Button
               type="button"
@@ -396,6 +509,14 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
         </p>
       ) : null}
 
+      {optIn && runnable && !busy ? (
+        <p className="text-muted-foreground text-[10px]">
+          <strong className="font-semibold">Mutation test</strong> seeds small bugs into the source
+          and reruns your suite — a high mutation score means your tests would actually catch those
+          bugs. Needs an all-green suite first.
+        </p>
+      ) : null}
+
       {running ? (
         <p className="text-muted-foreground flex items-center gap-2 text-xs">
           <Loader2 className="size-3 animate-spin" /> Running tests in sandbox…
@@ -441,7 +562,30 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
 
       {healState.result !== null ? <HealResultView result={healState.result} /> : null}
 
+      {mutationRunning ? (
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Loader2 className="size-3 animate-spin" />
+          {mutationState.progress !== null
+            ? `Mutation testing · mutant ${mutationState.progress.done} of ${mutationState.progress.total}…`
+            : 'Mutation testing · running the baseline…'}
+        </p>
+      ) : null}
+
+      {mutationState.error !== null ? (
+        <p className="text-destructive text-xs" role="alert">
+          {mutationState.error}
+        </p>
+      ) : null}
+
+      {mutationState.result !== null ? <MutationResultView result={mutationState.result} /> : null}
+
       <FlakyHistorySection artifactId={artifactId} history={history} error={historyError} />
+
+      <MutationHistorySection
+        artifactId={artifactId}
+        history={mutationHistory}
+        error={mutationHistoryError}
+      />
     </div>
   );
 }
@@ -964,6 +1108,242 @@ function FlakyRow({ test }: { test: FlakyTestResult }) {
         <pre className="text-destructive/90 mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px]">
           {test.sampleFailure}
         </pre>
+      ) : null}
+    </li>
+  );
+}
+
+/** Mutation score as a whole-number percentage (e.g. 0.78 → "78%"). */
+function mutationScorePct(score: number): string {
+  return `${Math.round(score * 100)}%`;
+}
+
+/** A short, human hint for why a survivor matters, keyed by the operator kind. */
+function survivorHint(operatorId: string): string {
+  switch (operatorId) {
+    case 'arithmetic':
+      return 'arithmetic not asserted';
+    case 'relational':
+      return 'boundary not tested';
+    case 'logical':
+      return 'branch not exercised';
+    case 'boolean_literal':
+      return 'branch not exercised';
+    case 'return_negation':
+      return 'return value not asserted';
+    default:
+      return 'not caught';
+  }
+}
+
+/**
+ * Results of a mutation test: a top "Mutation score · 78% · killed 31/40"
+ * summary, then the survivor list — the seeded bugs the suite did *not* catch,
+ * each as `file:line  original → replacement  (why)`. A score with no survivors
+ * is celebrated; a sweep that found no mutable operators says so.
+ */
+function MutationResultView({ result }: { result: MutationResult }) {
+  const scorable = result.killed + result.survived;
+  const survivors = result.mutants.filter((m) => m.status === 'survived');
+  const ok = result.survived === 0 && result.total > 0;
+  return (
+    <div className="space-y-2" data-testid="mutation-results">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`pill pill-${result.total === 0 ? 'draft' : ok ? 'approved' : 'rejected'}`}>
+          Mutation score{result.total > 0 ? ` · ${mutationScorePct(result.score)}` : ''}
+        </span>
+        <span className="text-muted-foreground font-mono text-[10px]">
+          {result.total === 0
+            ? 'no mutable operators on covered lines'
+            : `killed ${result.killed}/${scorable} mutants${
+                result.errored > 0 ? ` · ${result.errored} errored` : ''
+              }${result.droppedCount > 0 ? ` · ${result.droppedCount} sampled out` : ''}`}
+        </span>
+      </div>
+
+      {result.total > 0 && survivors.length === 0 ? (
+        <p className="text-success text-[11px]">
+          Every seeded bug was caught — your tests are load-bearing here.
+        </p>
+      ) : null}
+
+      {survivors.length > 0 ? (
+        <>
+          <p className="text-muted-foreground text-[10px]">
+            Survived ({survivors.length}) — bugs your tests would miss:
+          </p>
+          <ul className="space-y-1">
+            {survivors.map((m, i) => (
+              <MutationMutantRow key={`${m.mutant.file}-${m.mutant.line}-${i}`} result={m} />
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** One mutant row: status icon + `file:line  original → replacement  (hint)`. */
+function MutationMutantRow({ result }: { result: MutantResult }) {
+  const { mutant, status } = result;
+  return (
+    <li className="rounded border border-border bg-surface-3 px-2 py-1.5 text-[11px]">
+      <div className="flex items-center gap-2">
+        {status === 'killed' ? (
+          <CheckCircle2 className="size-3 shrink-0 text-success" />
+        ) : status === 'survived' ? (
+          <XCircle className="text-destructive size-3 shrink-0" />
+        ) : (
+          <span className="bg-surface-2 size-3 shrink-0 rounded-full" aria-hidden="true" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground" title={mutant.file}>
+          {mutant.file}:{mutant.line}
+        </span>
+        <span className="text-muted-foreground font-mono text-[10px]">
+          {mutant.original} → {mutant.replacement}
+        </span>
+        {status === 'survived' ? (
+          <span className="text-muted-foreground text-[10px]">{survivorHint(mutant.operatorId)}</span>
+        ) : status === 'errored' ? (
+          <span className="text-muted-foreground text-[10px]">errored</span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Collapsible "Mutation history" trend for an artifact (design §5.5). Lists past
+ * scores newest-first; expanding a row lazily fetches that check's per-mutant
+ * detail. Hidden entirely until a check has been run. Mirrors
+ * {@link FlakyHistorySection}.
+ */
+export function MutationHistorySection({
+  artifactId,
+  history,
+  error,
+}: {
+  artifactId: string;
+  history: MutationCheckSummary[];
+  error: string | null;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ checkId: string; record: MutationCheckRecord } | null>(null);
+  const [detailError, setDetailError] = useState<{ checkId: string; message: string } | null>(null);
+
+  useEffect(() => {
+    setExpandedId(null);
+    setDetail(null);
+    setDetailError(null);
+  }, [artifactId]);
+
+  const handleToggle = useCallback(
+    (checkId: string) => {
+      if (expandedId === checkId) {
+        setExpandedId(null);
+        return;
+      }
+      setExpandedId(checkId);
+      setDetail(null);
+      setDetailError(null);
+      void (async () => {
+        try {
+          const record = await mutation.getMutationCheck(checkId);
+          setDetail({ checkId, record });
+        } catch (err) {
+          setDetailError({ checkId, message: getErrorMessage(err) });
+        }
+      })();
+    },
+    [expandedId],
+  );
+
+  if (error !== null) {
+    return (
+      <p className="text-muted-foreground text-[10px]" role="alert">
+        Could not load mutation history: {error}
+      </p>
+    );
+  }
+  if (history.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 border-t border-border pt-2" data-testid="mutation-history">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <History className="size-3" /> Mutation history
+      </div>
+      <ul className="space-y-1">
+        {history.map((check) => (
+          <MutationHistoryRow
+            key={check.id}
+            check={check}
+            expanded={expandedId === check.id}
+            detail={detail?.checkId === check.id ? detail.record : null}
+            detailError={detailError?.checkId === check.id ? detailError.message : null}
+            onToggle={handleToggle}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MutationHistoryRow({
+  check,
+  expanded,
+  detail,
+  detailError,
+  onToggle,
+}: {
+  check: MutationCheckSummary;
+  expanded: boolean;
+  detail: MutationCheckRecord | null;
+  detailError: string | null;
+  onToggle: (checkId: string) => void;
+}) {
+  const scorable = check.killed + check.survived;
+  return (
+    <li className="rounded border border-border bg-surface-3 text-[11px]">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-2"
+        onClick={() => onToggle(check.id)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className={`pill pill-${check.survived === 0 && check.total > 0 ? 'approved' : 'rejected'}`}>
+          {check.total > 0 ? mutationScorePct(check.score) : '—'}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground font-mono text-[10px]">
+          killed {check.killed}/{scorable}
+        </span>
+        <span className="text-muted-foreground text-[10px]">{formatCheckTime(check.createdAt)}</span>
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-border px-2 py-1.5">
+          {detailError !== null ? (
+            <p className="text-destructive text-[10px]" role="alert">
+              {detailError}
+            </p>
+          ) : detail === null ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-[10px]">
+              <Loader2 className="size-3 animate-spin" /> Loading…
+            </p>
+          ) : detail.mutants.length > 0 ? (
+            <ul className="space-y-1">
+              {detail.mutants.map((m, i) => (
+                <MutationMutantRow key={`${m.mutant.file}-${m.mutant.line}-${i}`} result={m} />
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-[10px]">No per-mutant detail recorded.</p>
+          )}
+        </div>
       ) : null}
     </li>
   );

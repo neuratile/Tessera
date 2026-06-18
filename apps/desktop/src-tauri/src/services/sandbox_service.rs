@@ -93,7 +93,7 @@ impl RunRegistry {
 /// Unregisters a run's token on scope exit so a token never outlives its
 /// run, on the happy path or any early `?` return. Owns its key so it can be
 /// handed back from [`register_cancel`] and live in the caller's scope.
-struct RegistryGuard<'a> {
+pub struct RegistryGuard<'a> {
     registry: &'a RunRegistry,
     cancel_key: String,
 }
@@ -180,13 +180,17 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     test_run_repo::fetch_run(deps.pool, &run_id).await
 }
 
-/// The product of the shared run preamble (steps 1–3), consumed by both
-/// [`run`] and [`run_flaky`].
-struct Prepared {
-    input: RunInput,
-    runner: Arc<dyn TestRunner>,
-    artifact: artifact_repo::Artifact,
-    case_ids: HashSet<String>,
+/// The product of the shared run preamble (steps 1–3), consumed by [`run`],
+/// [`run_flaky`], and (cross-service) `mutation_service`, which drives the
+/// `runner` directly against each mutated workspace. Public so a sibling
+/// orchestrator can reuse the opt-in/load/language/`RunInput` preamble rather
+/// than duplicate it (rules §4.2 — the loop that needs it lives in its own
+/// service, exactly as flaky/heal reuse `run`).
+pub struct Prepared {
+    pub input: RunInput,
+    pub runner: Arc<dyn TestRunner>,
+    pub artifact: artifact_repo::Artifact,
+    pub case_ids: HashSet<String>,
 }
 
 /// Steps 1–3 common to [`run`] and [`run_flaky`]: enforce the opt-in gate,
@@ -198,7 +202,7 @@ struct Prepared {
 /// [`AppError::InvalidInput`] when opt-in is off, the id is empty, the
 /// artifact is not a test-cases artifact, or it carries no runnable files;
 /// [`AppError::NotFound`] when the artifact does not exist.
-async fn prepare_run(request: &RunRequest, deps: &SandboxDeps<'_>) -> AppResult<Prepared> {
+pub async fn prepare_run(request: &RunRequest, deps: &SandboxDeps<'_>) -> AppResult<Prepared> {
     // 1. Opt-in gate (plan §3 — backend rejects when the flag is off).
     if !request.opt_in_confirmed {
         return Err(AppError::InvalidInput(
@@ -257,7 +261,8 @@ async fn open_run_row(
 /// returns once finished). A blank id is simply not cancellable. The returned
 /// [`RegistryGuard`] must be held for the duration of the run — it deregisters
 /// the token on every exit path, so a token never outlives its run.
-fn register_cancel<'a>(
+#[must_use]
+pub fn register_cancel<'a>(
     deps: &SandboxDeps<'a>,
     client_run_id: &str,
 ) -> (CancelToken, RegistryGuard<'a>) {

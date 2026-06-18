@@ -144,6 +144,10 @@ pub fn run() {
             commands::sandbox::list_flaky_checks,
             commands::sandbox::get_flaky_check,
             commands::sandbox::cancel_test_sandbox,
+            // Mutation testing (v2 P0 #2 — MUTATION_TESTING.md, Stage 1)
+            commands::sandbox::run_mutation_test,
+            commands::sandbox::list_mutation_checks,
+            commands::sandbox::get_mutation_check,
             // Test-case result sidecar commands (Test Case table cols 8–9)
             commands::test_case_results::list_test_case_results,
             commands::test_case_results::upsert_test_case_result,

@@ -1,4 +1,10 @@
-import type { CoverageLine, FlakyRunResult, HealResult, RunResult } from '@testing-ide/shared';
+import type {
+  CoverageLine,
+  FlakyRunResult,
+  HealResult,
+  MutationResult,
+  RunResult,
+} from '@testing-ide/shared';
 import { create } from 'zustand';
 
 /**
@@ -81,10 +87,41 @@ export const IDLE_HEAL: ArtifactHealState = {
   progress: null,
 };
 
+/** Live per-mutant progress streamed on `mutation://event` during a sweep. */
+export type MutationProgress = { done: number; total: number };
+
+/**
+ * Mutation-score UI state, kept separate from the run / flaky / heal slices so a
+ * mutation test can coexist with the others for one artifact
+ * (plan/versions/v2/v2-feature-docs/MUTATION_TESTING.md §5.8). `progress` carries
+ * the latest streamed "mutant N of M" so the UI can show sweep progress before
+ * the score settles.
+ */
+export type ArtifactMutationState = {
+  phase: SandboxRunPhase;
+  /** Correlation id of the in-flight sweep, used to target the Stop button. */
+  clientRunId: string | null;
+  result: MutationResult | null;
+  /** Pre-flight / abort failure (opt-out, red baseline, cancellation, IPC error). */
+  error: string | null;
+  /** Latest streamed per-mutant progress while running; null before the first event. */
+  progress: MutationProgress | null;
+};
+
+/** Stable idle reference for the mutation slice. */
+export const IDLE_MUTATION: ArtifactMutationState = {
+  phase: 'idle',
+  clientRunId: null,
+  result: null,
+  error: null,
+  progress: null,
+};
+
 export type SandboxState = {
   byArtifact: Record<string, ArtifactRunState>;
   flakyByArtifact: Record<string, ArtifactFlakyState>;
   healByArtifact: Record<string, ArtifactHealState>;
+  mutationByArtifact: Record<string, ArtifactMutationState>;
   /** Coverage from the most recent completed run (editor gutter source). */
   coverage: CoverageLine[];
   start: (artifactId: string, clientRunId: string) => void;
@@ -100,12 +137,18 @@ export type SandboxState = {
   finishHeal: (artifactId: string, result: HealResult) => void;
   failHeal: (artifactId: string, message: string) => void;
   resetHeal: (artifactId: string) => void;
+  startMutation: (artifactId: string, clientRunId: string) => void;
+  progressMutation: (artifactId: string, progress: MutationProgress) => void;
+  finishMutation: (artifactId: string, result: MutationResult) => void;
+  failMutation: (artifactId: string, message: string) => void;
+  resetMutation: (artifactId: string) => void;
 };
 
 export const useSandboxStore = create<SandboxState>()((set) => ({
   byArtifact: {},
   flakyByArtifact: {},
   healByArtifact: {},
+  mutationByArtifact: {},
   coverage: [],
 
   start: (artifactId, clientRunId) =>
@@ -216,5 +259,50 @@ export const useSandboxStore = create<SandboxState>()((set) => ({
       const { [artifactId]: _dropped, ...rest } = s.healByArtifact;
       void _dropped;
       return { healByArtifact: rest };
+    }),
+
+  startMutation: (artifactId, clientRunId) =>
+    set((s) => ({
+      mutationByArtifact: {
+        ...s.mutationByArtifact,
+        [artifactId]: { phase: 'running', clientRunId, result: null, error: null, progress: null },
+      },
+    })),
+
+  progressMutation: (artifactId, progress) =>
+    set((s) => {
+      const current = s.mutationByArtifact[artifactId];
+      // Ignore late events for a sweep that already settled or was reset.
+      if (current === undefined || current.phase !== 'running') return s;
+      return {
+        mutationByArtifact: {
+          ...s.mutationByArtifact,
+          [artifactId]: { ...current, progress },
+        },
+      };
+    }),
+
+  finishMutation: (artifactId, result) =>
+    set((s) => ({
+      mutationByArtifact: {
+        ...s.mutationByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result, error: null, progress: null },
+      },
+    })),
+
+  failMutation: (artifactId, message) =>
+    set((s) => ({
+      mutationByArtifact: {
+        ...s.mutationByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result: null, error: message, progress: null },
+      },
+    })),
+
+  resetMutation: (artifactId) =>
+    set((s) => {
+      if (!(artifactId in s.mutationByArtifact)) return s;
+      const { [artifactId]: _dropped, ...rest } = s.mutationByArtifact;
+      void _dropped;
+      return { mutationByArtifact: rest };
     }),
 }));
