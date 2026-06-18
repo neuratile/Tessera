@@ -152,11 +152,10 @@ pub async fn check_status(base_url: &str) -> AppResult<OllamaStatus> {
     }
 }
 
-/// Fetch the list of installed model names from `GET /api/tags`.
-///
-/// Returns an empty vec if the request fails so that a partial failure in
-/// model listing does not mask the fact that the daemon is running.
-async fn fetch_model_list(client: &Client, base: &str) -> AppResult<Vec<String>> {
+/// Fetch + deserialize `GET {base}/api/tags`. Surfaces transport failures,
+/// non-2xx responses, and parse failures as errors; the two callers decide
+/// whether to soften them. `base` must already be normalized.
+async fn fetch_tags_response(client: &Client, base: &str) -> AppResult<OllamaTagsResponse> {
     let tags_url = format!("{base}/api/tags");
     let response = client
         .get(&tags_url)
@@ -165,27 +164,43 @@ async fn fetch_model_list(client: &Client, base: &str) -> AppResult<Vec<String>>
         .map_err(|error| anyhow!("ollama /api/tags request failed: {error}"))?;
 
     if !response.status().is_success() {
-        tracing::warn!(
-            status = %response.status(),
-            "ollama /api/tags returned non-2xx; returning empty model list"
-        );
-        return Ok(Vec::new());
+        return Err(anyhow!("ollama responded with HTTP {}", response.status().as_u16()).into());
     }
 
-    let tags: OllamaTagsResponse = response
-        .json()
+    response
+        .json::<OllamaTagsResponse>()
         .await
-        .map_err(|error| anyhow!("ollama /api/tags response parse failed: {error}"))?;
+        .map_err(|error| anyhow!("ollama /api/tags response parse failed: {error}").into())
+}
 
-    Ok(tags.models.into_iter().map(|model| model.name).collect())
+/// Fetch the list of installed model names from `GET /api/tags`.
+///
+/// Returns an empty vec if the request fails (transport, non-2xx, or parse)
+/// so that a partial failure in model listing does not mask the fact that
+/// the daemon is running — matching this function's documented contract.
+async fn fetch_model_list(client: &Client, base: &str) -> AppResult<Vec<String>> {
+    match fetch_tags_response(client, base).await {
+        Ok(tags) => Ok(tags.models.into_iter().map(|model| model.name).collect()),
+        Err(error) => {
+            tracing::warn!(%error, "ollama /api/tags failed; returning empty model list");
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// List locally-pulled Ollama models (name + size) from `GET /api/tags`.
 ///
-/// Unlike [`check_status`], a transport/parse failure here is surfaced as
-/// an error rather than an empty list: the provider wizard uses the
-/// presence of a specific model to decide whether to show an
+/// Unlike [`fetch_model_list`], a transport/non-2xx/parse failure here is
+/// surfaced as an error rather than an empty list: the provider wizard uses
+/// the presence of a specific model to decide whether to show an
 /// `ollama pull <model>` hint, so a silently-empty list would mislead.
+///
+/// The base URL is normalized with [`normalize_base_url`] — the same
+/// host:port canonicalization [`check_status`] already applies — so a custom
+/// base URL carrying a path (e.g. `.../v1`) reaches the correct
+/// `{host}/api/tags` endpoint rather than `{host}/v1/api/tags`. (The old
+/// inline command only trimmed a trailing slash; this aligns the two
+/// `/api/tags` callers on one canonicalization.)
 ///
 /// # Errors
 ///
@@ -195,22 +210,7 @@ async fn fetch_model_list(client: &Client, base: &str) -> AppResult<Vec<String>>
 pub async fn list_models(base_url: &str) -> AppResult<Vec<OllamaModelInfo>> {
     let client = build_client()?;
     let base = normalize_base_url(base_url);
-    let tags_url = format!("{base}/api/tags");
-
-    let response = client
-        .get(&tags_url)
-        .send()
-        .await
-        .map_err(|error| anyhow!("ollama unreachable: {error}"))?;
-
-    if !response.status().is_success() {
-        return Err(anyhow!("ollama responded with HTTP {}", response.status().as_u16()).into());
-    }
-
-    let tags: OllamaTagsResponse = response
-        .json()
-        .await
-        .map_err(|error| anyhow!("ollama returned an unparseable tags payload: {error}"))?;
+    let tags = fetch_tags_response(&client, &base).await?;
 
     Ok(tags
         .models
@@ -333,5 +333,62 @@ mod tests {
             models.is_empty(),
             "failed /api/tags should yield empty model list"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_models_returns_models_with_sizes_on_success() {
+        let mut server = Server::new_async().await;
+
+        let _tags_mock = server
+            .mock("GET", "/api/tags")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"models":[{"name":"qwen2.5-coder:7b","size":4096},{"name":"nomic-embed-text"}]}"#,
+            )
+            .create_async()
+            .await;
+
+        let models = list_models(&server.url()).await.expect("should succeed");
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].name, "qwen2.5-coder:7b");
+        assert_eq!(models[0].size_bytes, 4096);
+        // `size` is optional in the daemon payload and defaults to 0.
+        assert_eq!(models[1].name, "nomic-embed-text");
+        assert_eq!(models[1].size_bytes, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_models_surfaces_non_2xx_as_error() {
+        let mut server = Server::new_async().await;
+
+        let _tags_mock = server
+            .mock("GET", "/api/tags")
+            .with_status(500)
+            .with_body("internal error")
+            .create_async()
+            .await;
+
+        // Unlike `fetch_model_list`, `list_models` must NOT swallow the
+        // failure: the pull-hint logic depends on the error.
+        let result = list_models(&server.url()).await;
+        assert!(result.is_err(), "non-2xx must surface as Err");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_models_surfaces_unparseable_body_as_error() {
+        let mut server = Server::new_async().await;
+
+        let _tags_mock = server
+            .mock("GET", "/api/tags")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("not json")
+            .create_async()
+            .await;
+
+        let result = list_models(&server.url()).await;
+        assert!(result.is_err(), "unparseable tags body must surface as Err");
     }
 }
