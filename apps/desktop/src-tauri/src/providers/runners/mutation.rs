@@ -339,8 +339,13 @@ fn swap_operator(op: &str) -> Option<(&'static str, &'static str)> {
     let pair = match op {
         "+" => ("-", "arithmetic"),
         "-" => ("+", "arithmetic"),
+        // A distinct 3-cycle so every multiplicative operator is both mutated
+        // and produced as a replacement: `*` → `/` → `%` → `*`. (A flat
+        // `/ | % => *` would never produce `%`, hiding `a * b` bugs that should
+        // have been `a % b`.)
         "*" => ("/", "arithmetic"),
-        "/" | "%" => ("*", "arithmetic"),
+        "/" => ("%", "arithmetic"),
+        "%" => ("*", "arithmetic"),
         ">" => (">=", "relational"),
         ">=" => (">", "relational"),
         "<" => ("<=", "relational"),
@@ -457,6 +462,21 @@ mod tests {
         assert_eq!(arith.len(), 1);
         assert_eq!(arith[0].original, "+");
         assert_eq!(arith[0].replacement, "-");
+    }
+
+    #[test]
+    fn arithmetic_operators_form_a_distinct_cycle() {
+        // *→/, /→%, %→* : every multiplicative operator is both a mutation
+        // source and a replacement target (no operator is a dead-end).
+        let arith_replacement = |src: &str| {
+            gen(src)
+                .into_iter()
+                .find(|m| m.operator_id == "arithmetic")
+                .map(|m| m.replacement)
+        };
+        assert_eq!(arith_replacement("export const f = (a, b) => a * b;").as_deref(), Some("/"));
+        assert_eq!(arith_replacement("export const f = (a, b) => a / b;").as_deref(), Some("%"));
+        assert_eq!(arith_replacement("export const f = (a, b) => a % b;").as_deref(), Some("*"));
     }
 
     #[test]

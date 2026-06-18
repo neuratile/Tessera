@@ -75,9 +75,23 @@ pub async fn score(
     deps: &SandboxDeps<'_>,
     mut on_event: Option<MutationSink>,
 ) -> AppResult<MutationResult> {
+    // Register ONE cancel token under the caller's `client_run_id` spanning the
+    // *entire* operation — the baseline run and every per-mutant run. Without
+    // this, `run` would register-then-deregister its own token and the sweep's
+    // token would only be registered after `prepare_run` + `cap_mutants`,
+    // leaving a window where a user Stop finds no token and is silently dropped
+    // (Greptile review). Holding it here closes that gap.
+    let (cancel, _guard) = sandbox_service::register_cancel(deps, &request.client_run_id);
+
     // 1. Baseline: run the suite once through the existing persisted, opt-in
-    //    gated path. A pre-flight `Err` (opt-out, bad artifact) propagates.
-    let baseline = sandbox_service::run(request.clone(), deps).await?;
+    //    gated path, under the shared token. A pre-flight `Err` (opt-out, bad
+    //    artifact) propagates.
+    let baseline = sandbox_service::run_with_token(request.clone(), deps, cancel.clone()).await?;
+    if baseline.status == RunStatus::Cancelled {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Mutation test cancelled during the baseline run."
+        )));
+    }
     gate_green(&baseline)?;
 
     let span = tracing::info_span!(
@@ -113,11 +127,17 @@ pub async fn score(
         tracing::info!(kept = total, dropped = dropped_count, "mutant cap applied; some mutants sampled out");
     }
 
-    // 5. One cancel token spans the whole sweep — a Stop kills the current
-    //    container and ends the check (design §4).
-    let (cancel, _guard) = sandbox_service::register_cancel(deps, &request.client_run_id);
+    // A Stop fired during the baseline run or this setup (gate, prepare, mutant
+    // generation) already fired the shared token — honour it before spending a
+    // single mutant run rather than discovering it on the first `runner.run`.
+    if cancel.is_cancelled() {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Mutation test cancelled before the sweep started."
+        )));
+    }
 
-    // 6. Run the unchanged suite once per mutant and classify the verdict.
+    // 5. Run the unchanged suite once per mutant under the shared token (a Stop
+    //    kills the current container and ends the check, design §4).
     let mut results: Vec<MutantResult> = Vec::with_capacity(mutants.len());
     let (mut killed, mut survived, mut errored) = (0u32, 0u32, 0u32);
     for (index, mutant) in mutants.into_iter().enumerate() {
@@ -361,6 +381,31 @@ mod tests {
         move |_| runner.clone()
     }
 
+    /// Runner that fires the cancel token it is handed *during* the baseline run
+    /// (simulating a user Stop landing right as the baseline finishes) and
+    /// returns a green baseline. It asserts it is never called a second time —
+    /// proving the orchestrator honours the Stop before spending a mutant run,
+    /// and that the baseline and the sweep share one token (the gap fix).
+    struct CancelDuringBaselineRunner {
+        calls: Mutex<u32>,
+    }
+
+    #[async_trait]
+    impl TestRunner for CancelDuringBaselineRunner {
+        fn name(&self) -> &'static str {
+            "cancel-during-baseline"
+        }
+        async fn run(&self, input: RunInput, cancel: CancelToken) -> Result<RunnerOutput, RunnerError> {
+            input.validate().expect("service must pass a valid RunInput");
+            let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
+            *calls += 1;
+            assert_eq!(*calls, 1, "no mutant must run after a Stop during the baseline");
+            // A Stop arrives during the baseline run, firing the shared token.
+            cancel.cancel();
+            Ok(pass_baseline("src/calc.ts", &[1]))
+        }
+    }
+
     fn out(status: RunStatus, tests: Vec<TestResult>, coverage: Vec<CoverageLine>) -> RunnerOutput {
         RunnerOutput { status, tests, coverage, stdout: String::new(), stderr: String::new() }
     }
@@ -590,6 +635,29 @@ mod tests {
         assert_eq!(result.total, 2);
         let captured = events.lock().unwrap_or_else(PoisonError::into_inner).clone();
         assert_eq!(captured, vec![(1, 2), (2, 2)]);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_during_baseline_aborts_before_any_mutant_runs() {
+        let (pool, path) = open_pool().await;
+        // Source has one covered arithmetic operator → a mutant *would* run if
+        // the Stop were dropped (the pre-fix bug).
+        let artifact_id = seed(&pool, "export const f = (a, b) => a + b;").await;
+
+        let runner: Arc<dyn TestRunner> = Arc::new(CancelDuringBaselineRunner { calls: Mutex::new(0) });
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        // The single shared token (registered for the whole `score`) is fired
+        // during the baseline; the sweep must abort instead of running mutants.
+        let err = score(request(&artifact_id), 40, &deps, None)
+            .await
+            .expect_err("a Stop during the baseline aborts the sweep");
+        assert_eq!(err.code(), "INTERNAL_ERROR");
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

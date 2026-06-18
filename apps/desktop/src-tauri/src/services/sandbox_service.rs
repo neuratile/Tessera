@@ -138,6 +138,33 @@ pub struct SandboxDeps<'a> {
 /// Runner-level failures do not error here — they are persisted as an
 /// [`RunStatus::Error`] run and returned in the [`RunResult`].
 pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunResult> {
+    // Register the cancel token under the caller's `client_run_id` for the
+    // duration of this single run, then drive it. The guard (held here) and the
+    // token are threaded into [`run_with_token`] so a concurrent
+    // `cancel_test_sandbox` can fire it.
+    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
+    run_with_token(request, deps, cancel).await
+}
+
+/// Drive one sandboxed run under a **caller-supplied** [`CancelToken`] instead
+/// of registering its own, returning the persisted result.
+///
+/// This is the body of [`run`]; [`run`] is just `register_cancel` + this. A
+/// sibling orchestrator (`mutation_service`) registers **one** token spanning a
+/// whole multi-run operation (baseline + per-mutant sweep) and passes it here,
+/// so a user Stop arriving between sub-runs is never silently dropped in the gap
+/// where no token is registered.
+///
+/// # Errors
+///
+/// Same as [`run`]: pre-flight problems short-circuit with an `Err`; a
+/// runner-level failure is persisted as an [`RunStatus::Error`] / `Cancelled`
+/// run and returned in the [`RunResult`].
+pub async fn run_with_token(
+    request: RunRequest,
+    deps: &SandboxDeps<'_>,
+    cancel: CancelToken,
+) -> AppResult<RunResult> {
     // 1–3. Shared preamble: opt-in gate, artifact load + type-check, workspace
     //       + runner selection (also used by `run_flaky`).
     let Prepared { input, runner, artifact, case_ids } = prepare_run(&request, deps).await?;
@@ -153,12 +180,8 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     );
     let _enter = span.enter();
 
-    // 5. Drive the runner. The cancellation token is registered under the
-    //    caller's `client_run_id` so a concurrent `cancel_test_sandbox` can
-    //    fire it; the guard deregisters it on every exit path. The runner's
-    //    own wall-clock timeout is independent of this user-Stop token.
-    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
-
+    // 5. Drive the runner. The runner's own wall-clock timeout is independent of
+    //    the user-Stop `cancel` token threaded in by the caller.
     tracing::debug!("driving runner");
     let started = Instant::now();
     let outcome = runner.run(input, cancel).await;
