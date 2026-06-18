@@ -143,7 +143,8 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     // token are threaded into [`run_with_token`] so a concurrent
     // `cancel_test_sandbox` can fire it.
     let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
-    run_with_token(request, deps, cancel).await
+    // A direct user-requested run posts its result to a configured tracker.
+    run_with_token(request, deps, cancel, true).await
 }
 
 /// Drive one sandboxed run under a **caller-supplied** [`CancelToken`] instead
@@ -155,6 +156,12 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
 /// so a user Stop arriving between sub-runs is never silently dropped in the gap
 /// where no token is registered.
 ///
+/// `post_jira_comment` gates the per-run tracker comment: a direct [`run`]
+/// passes `true`, but an **internal** baseline (a mutation sweep's green check)
+/// passes `false` — the user did not request that run, so posting its pass/fail
+/// to Jira would be spurious (the same reason `run_flaky` suppresses it for its
+/// iteration #1).
+///
 /// # Errors
 ///
 /// Same as [`run`]: pre-flight problems short-circuit with an `Err`; a
@@ -164,6 +171,7 @@ pub async fn run_with_token(
     request: RunRequest,
     deps: &SandboxDeps<'_>,
     cancel: CancelToken,
+    post_jira_comment: bool,
 ) -> AppResult<RunResult> {
     // 1–3. Shared preamble: opt-in gate, artifact load + type-check, workspace
     //       + runner selection (also used by `run_flaky`).
@@ -194,9 +202,9 @@ pub async fn run_with_token(
 
     match outcome {
         Ok(output) => {
-            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids, true).await?;
+            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids, post_jira_comment).await?;
         }
-        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms).await?,
+        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms, post_jira_comment).await?,
     }
 
     // 6. Read back the canonical result.
@@ -551,6 +559,7 @@ async fn persist_failure(
     artifact_id: &str,
     err: &RunnerError,
     duration_ms: u32,
+    post_jira_comment: bool,
 ) -> AppResult<()> {
     tracing::warn!(run_id, code = err.code(), error = %err, "sandbox run failed");
     let status = match err {
@@ -570,16 +579,18 @@ async fn persist_failure(
     )
     .await?;
 
-    if let Some(crypto) = deps.crypto {
-        let _ = crate::services::jira_push_service::post_run_comment(
-            deps.pool,
-            crypto,
-            artifact_id,
-            status.as_str(),
-            0,
-            0,
-        )
-        .await;
+    if post_jira_comment {
+        if let Some(crypto) = deps.crypto {
+            let _ = crate::services::jira_push_service::post_run_comment(
+                deps.pool,
+                crypto,
+                artifact_id,
+                status.as_str(),
+                0,
+                0,
+            )
+            .await;
+        }
     }
 
     Ok(())

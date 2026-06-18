@@ -84,9 +84,13 @@ pub async fn score(
     let (cancel, _guard) = sandbox_service::register_cancel(deps, &request.client_run_id);
 
     // 1. Baseline: run the suite once through the existing persisted, opt-in
-    //    gated path, under the shared token. A pre-flight `Err` (opt-out, bad
-    //    artifact) propagates.
-    let baseline = sandbox_service::run_with_token(request.clone(), deps, cancel.clone()).await?;
+    //    gated path, under the shared token. `post_jira_comment = false`: this
+    //    baseline is internal to the mutation sweep, not a user-requested run,
+    //    so posting its pass/fail to a tracker would be spurious (mirrors how
+    //    `run_flaky` suppresses the Jira post for its iteration #1). A pre-flight
+    //    `Err` (opt-out, bad artifact) propagates.
+    let baseline =
+        sandbox_service::run_with_token(request.clone(), deps, cancel.clone(), false).await?;
     if baseline.status == RunStatus::Cancelled {
         return Err(AppError::Internal(anyhow::anyhow!(
             "Mutation test cancelled during the baseline run."
