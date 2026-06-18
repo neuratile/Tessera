@@ -535,17 +535,7 @@ async fn persist_success(
     bridge_sandbox_results(deps, run_id, artifact_id, &output.tests, case_ids).await;
 
     if post_jira_comment {
-        if let Some(crypto) = deps.crypto {
-            let _ = crate::services::jira_push_service::post_run_comment(
-                deps.pool,
-                crypto,
-                artifact_id,
-                status.as_str(),
-                passed_count,
-                failed_count,
-            )
-            .await;
-        }
+        post_jira_run_summary(deps, artifact_id, status, passed_count, failed_count).await;
     }
 
     write_err.map_or(Ok(()), Err)
@@ -580,20 +570,34 @@ async fn persist_failure(
     .await?;
 
     if post_jira_comment {
-        if let Some(crypto) = deps.crypto {
-            let _ = crate::services::jira_push_service::post_run_comment(
-                deps.pool,
-                crypto,
-                artifact_id,
-                status.as_str(),
-                0,
-                0,
-            )
-            .await;
-        }
+        post_jira_run_summary(deps, artifact_id, status, 0, 0).await;
     }
 
     Ok(())
+}
+
+/// Best-effort Jira run-summary comment. Posts only when a crypto key is
+/// available; a tracker failure is swallowed so it never affects the run,
+/// whose canonical state is already persisted. Shared by [`persist_success`]
+/// and [`persist_failure`].
+async fn post_jira_run_summary(
+    deps: &SandboxDeps<'_>,
+    artifact_id: &str,
+    status: RunStatus,
+    passed_count: u32,
+    failed_count: u32,
+) {
+    if let Some(crypto) = deps.crypto {
+        let _ = crate::services::jira_push_service::post_run_comment(
+            deps.pool,
+            crypto,
+            artifact_id,
+            status.as_str(),
+            passed_count,
+            failed_count,
+        )
+        .await;
+    }
 }
 
 /// Build a [`RunInput`] from the artifact's `structured_data.files`.

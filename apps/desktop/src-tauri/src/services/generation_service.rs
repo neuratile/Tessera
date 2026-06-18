@@ -193,24 +193,15 @@ pub async fn generate(
         )));
     }
 
-    // 4. Stream + aggregate.
-    let llm_request = GenerateRequest {
-        model: request.model.clone(),
+    // 4-5. Stream + aggregate, then parse + schema-validate the payload.
+    let (mut structured_data, aggregated) = stream_and_validate(
+        deps.llm.as_ref(),
+        &request.model,
         messages,
-        tools: vec![tool_schema.clone()],
-        temperature: Some(0.2),
-        max_tokens: Some(RESPONSE_RESERVE_TOKENS),
-        stop_sequences: Vec::new(),
-    };
-    let aggregated = drive_stream(deps.llm.as_ref(), llm_request, on_event.as_mut()).await?;
-
-    // 5. Parse the structured payload.
-    let raw_json = extract_raw_json(&aggregated, &tool_schema, &request.model)?;
-
-    let mut structured_data: JsonValue =
-        serde_json::from_str(&raw_json).map_err(AppError::Serde)?;
-    normalize_missing_arrays(&mut structured_data, &tool_schema);
-    validate_tool_output(&tool_schema, &structured_data)?;
+        &tool_schema,
+        on_event.as_mut(),
+    )
+    .await?;
 
     // 5b. Self-heal the runnable workspace when a test-cases payload
     //     skipped the optional `files[]` (sandbox prerequisite).
@@ -456,19 +447,8 @@ async fn repair_runnable_files(
         return Ok(None);
     }
 
-    let llm_request = GenerateRequest {
-        model: request.model.clone(),
-        messages,
-        tools: vec![tool.clone()],
-        temperature: Some(0.2),
-        max_tokens: Some(RESPONSE_RESERVE_TOKENS),
-        stop_sequences: Vec::new(),
-    };
-    let aggregated = drive_stream(deps.llm.as_ref(), llm_request, None).await?;
-    let raw_json = extract_raw_json(&aggregated, &tool, &request.model)?;
-    let mut payload: JsonValue = serde_json::from_str(&raw_json).map_err(AppError::Serde)?;
-    normalize_missing_arrays(&mut payload, &tool);
-    validate_tool_output(&tool, &payload)?;
+    let (payload, aggregated) =
+        stream_and_validate(deps.llm.as_ref(), &request.model, messages, &tool, None).await?;
 
     // Validation guarantees a non-empty `files` array (`minItems: 1`).
     let files = payload
@@ -485,6 +465,36 @@ async fn repair_runnable_files(
         input_tokens: aggregated.input_tokens,
         output_tokens: aggregated.output_tokens,
     }))
+}
+
+/// Build the standard tool-call request, stream it to completion, then
+/// parse + schema-validate the model's tool output into a [`JsonValue`].
+///
+/// This is the build → stream → extract → normalize → validate pipeline
+/// shared by [`generate`] and [`repair_runnable_files`] (rules.md §12.1 —
+/// every LLM tool call lands in one place). The [`StreamAggregate`] is
+/// returned alongside the payload so callers can fold in token usage.
+async fn stream_and_validate(
+    llm: &dyn LlmProvider,
+    model: &str,
+    messages: Vec<Message>,
+    tool: &ToolSchema,
+    sink: Option<&mut StreamSink>,
+) -> AppResult<(JsonValue, StreamAggregate)> {
+    let llm_request = GenerateRequest {
+        model: model.to_string(),
+        messages,
+        tools: vec![tool.clone()],
+        temperature: Some(0.2),
+        max_tokens: Some(RESPONSE_RESERVE_TOKENS),
+        stop_sequences: Vec::new(),
+    };
+    let aggregated = drive_stream(llm, llm_request, sink).await?;
+    let raw_json = extract_raw_json(&aggregated, tool, model)?;
+    let mut payload: JsonValue = serde_json::from_str(&raw_json).map_err(AppError::Serde)?;
+    normalize_missing_arrays(&mut payload, tool);
+    validate_tool_output(tool, &payload)?;
+    Ok((payload, aggregated))
 }
 
 /// Result of draining the LLM stream — extracted so [`generate`] stays
