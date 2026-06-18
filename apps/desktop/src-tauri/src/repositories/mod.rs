@@ -22,12 +22,14 @@
 //!   verdicts) for the flaky-test trend UI.
 //! - [`test_case_result_repo`] (Test Case table) — per-case
 //!   execution-outcome sidecar (Actual output / Result + remarks).
+//! - [`health_repo`] — database liveness probe for the health check.
 //!
 pub mod artifact_repo;
 pub mod chunk_repo;
 pub mod embedding_config_repo;
 pub mod external_link_repo;
 pub mod flaky_check_repo;
+pub mod health_repo;
 pub mod project_file_repo;
 pub mod project_repo;
 pub mod provider_config_repo;

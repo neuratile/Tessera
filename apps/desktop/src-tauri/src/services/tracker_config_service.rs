@@ -125,6 +125,46 @@ pub fn build_tracker_client(
     Ok(build_tracker(&row.site_url, &row.email, &api_token))
 }
 
+/// Probe a tracker connection and return the authenticated user's display
+/// name. Uses the caller-supplied API token, or falls back to the stored
+/// (decrypted) token for the local user when the token is omitted.
+///
+/// # Errors
+///
+/// - [`AppError::InvalidInput`] for an unsupported tracker type or when no
+///   token is available (neither supplied nor stored).
+/// - [`AppError::Tracker`] when the live connection probe fails.
+pub async fn test_connection(
+    pool: &SqlitePool,
+    crypto: &CryptoKey,
+    tracker: &str,
+    site_url: &str,
+    email: &str,
+    api_token: Option<String>,
+) -> AppResult<String> {
+    if tracker.trim() != "jira" {
+        return Err(AppError::InvalidInput("Unsupported tracker type".into()));
+    }
+
+    let token = if let Some(t) = api_token {
+        t
+    } else {
+        let existing =
+            tracker_config_repo::fetch_for_user_tracker(pool, DEFAULT_USER_ID, "jira").await?;
+        match existing {
+            Some(row) => match (&row.api_token_encrypted, &row.api_token_nonce) {
+                (Some(ct), Some(nonce)) => crypto.decrypt_string(ct, nonce)?,
+                _ => return Err(AppError::InvalidInput("API token missing".into())),
+            },
+            None => return Err(AppError::InvalidInput("API token missing".into())),
+        }
+    };
+
+    let client = build_tracker(site_url, email, &token);
+    let user = client.test_connection().await?;
+    Ok(user.display_name)
+}
+
 fn resolve_encrypted_key_material(
     crypto: &CryptoKey,
     api_token: Option<String>,

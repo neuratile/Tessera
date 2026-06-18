@@ -4,13 +4,12 @@
 //! API keys are encrypted before persistence and never returned in
 //! plaintext over IPC.
 
-use std::time::Duration;
-
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::config::AppConfig;
+use crate::services::ollama_health_service::{self, OllamaModelInfo};
 use crate::services::provider_config_service::{self, ProviderConfigView};
 use crate::services::provider_connection_service::{self, ProviderConnectionTestResult};
 use crate::utils::crypto::CryptoKey;
@@ -108,29 +107,6 @@ pub async fn test_provider_connection(
     .map_err(|error| error.to_string())
 }
 
-/// Listed model from the Ollama daemon. Mirrors the subset of
-/// `/api/tags` we surface to the UI (we drop the digest / sha256
-/// fields the daemon returns — UI only needs name + size for the
-/// wizard's "do I have this model pulled?" check).
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OllamaModel {
-    pub name: String,
-    pub size_bytes: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaTagsResponse {
-    models: Vec<OllamaTagsEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaTagsEntry {
-    name: String,
-    #[serde(default)]
-    size: u64,
-}
-
 /// List the locally pulled Ollama models. Returns an error when the
 /// daemon is unreachable; the UI uses presence/absence of the chosen
 /// model to decide whether to surface an `ollama pull <model>` hint.
@@ -138,47 +114,17 @@ struct OllamaTagsEntry {
 /// `base_url` falls back to the configured `AppConfig::ollama_base_url`
 /// when omitted. This avoids the previous behavior of silently routing
 /// to `http://localhost:11434` even when the user had configured a
-/// remote daemon.
+/// remote daemon. The HTTP probe itself lives in `ollama_health_service`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 pub async fn list_ollama_models(
     cfg: State<'_, AppConfig>,
     base_url: Option<String>,
-) -> Result<Vec<OllamaModel>, String> {
+) -> Result<Vec<OllamaModelInfo>, String> {
     let base = base_url
         .as_deref()
         .unwrap_or(cfg.ollama_base_url.as_str());
-    let url = format!("{}/api/tags", base.trim_end_matches('/'));
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .map_err(|_| "could not build HTTP client".to_string())?;
-
-    let resp = client
-        .get(&url)
-        .send()
+    ollama_health_service::list_models(base)
         .await
-        .map_err(|_| "Ollama unreachable".to_string())?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "Ollama responded with HTTP {}",
-            resp.status().as_u16()
-        ));
-    }
-
-    let body: OllamaTagsResponse = resp
-        .json()
-        .await
-        .map_err(|_| "Ollama returned an unparseable tags payload".to_string())?;
-
-    Ok(body
-        .models
-        .into_iter()
-        .map(|e| OllamaModel {
-            name: e.name,
-            size_bytes: e.size,
-        })
-        .collect())
+        .map_err(|e| e.to_string())
 }
