@@ -23,6 +23,7 @@ pub mod docker_harness;
 pub mod docker_js;
 pub mod docker_py;
 pub mod factory;
+pub mod mutation;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

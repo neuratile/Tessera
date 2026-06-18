@@ -93,7 +93,7 @@ impl RunRegistry {
 /// Unregisters a run's token on scope exit so a token never outlives its
 /// run, on the happy path or any early `?` return. Owns its key so it can be
 /// handed back from [`register_cancel`] and live in the caller's scope.
-struct RegistryGuard<'a> {
+pub struct RegistryGuard<'a> {
     registry: &'a RunRegistry,
     cancel_key: String,
 }
@@ -138,6 +138,41 @@ pub struct SandboxDeps<'a> {
 /// Runner-level failures do not error here — they are persisted as an
 /// [`RunStatus::Error`] run and returned in the [`RunResult`].
 pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunResult> {
+    // Register the cancel token under the caller's `client_run_id` for the
+    // duration of this single run, then drive it. The guard (held here) and the
+    // token are threaded into [`run_with_token`] so a concurrent
+    // `cancel_test_sandbox` can fire it.
+    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
+    // A direct user-requested run posts its result to a configured tracker.
+    run_with_token(request, deps, cancel, true).await
+}
+
+/// Drive one sandboxed run under a **caller-supplied** [`CancelToken`] instead
+/// of registering its own, returning the persisted result.
+///
+/// This is the body of [`run`]; [`run`] is just `register_cancel` + this. A
+/// sibling orchestrator (`mutation_service`) registers **one** token spanning a
+/// whole multi-run operation (baseline + per-mutant sweep) and passes it here,
+/// so a user Stop arriving between sub-runs is never silently dropped in the gap
+/// where no token is registered.
+///
+/// `post_jira_comment` gates the per-run tracker comment: a direct [`run`]
+/// passes `true`, but an **internal** baseline (a mutation sweep's green check)
+/// passes `false` — the user did not request that run, so posting its pass/fail
+/// to Jira would be spurious (the same reason `run_flaky` suppresses it for its
+/// iteration #1).
+///
+/// # Errors
+///
+/// Same as [`run`]: pre-flight problems short-circuit with an `Err`; a
+/// runner-level failure is persisted as an [`RunStatus::Error`] / `Cancelled`
+/// run and returned in the [`RunResult`].
+pub async fn run_with_token(
+    request: RunRequest,
+    deps: &SandboxDeps<'_>,
+    cancel: CancelToken,
+    post_jira_comment: bool,
+) -> AppResult<RunResult> {
     // 1–3. Shared preamble: opt-in gate, artifact load + type-check, workspace
     //       + runner selection (also used by `run_flaky`).
     let Prepared { input, runner, artifact, case_ids } = prepare_run(&request, deps).await?;
@@ -153,12 +188,8 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
     );
     let _enter = span.enter();
 
-    // 5. Drive the runner. The cancellation token is registered under the
-    //    caller's `client_run_id` so a concurrent `cancel_test_sandbox` can
-    //    fire it; the guard deregisters it on every exit path. The runner's
-    //    own wall-clock timeout is independent of this user-Stop token.
-    let (cancel, _guard) = register_cancel(deps, &request.client_run_id);
-
+    // 5. Drive the runner. The runner's own wall-clock timeout is independent of
+    //    the user-Stop `cancel` token threaded in by the caller.
     tracing::debug!("driving runner");
     let started = Instant::now();
     let outcome = runner.run(input, cancel).await;
@@ -171,22 +202,26 @@ pub async fn run(request: RunRequest, deps: &SandboxDeps<'_>) -> AppResult<RunRe
 
     match outcome {
         Ok(output) => {
-            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids, true).await?;
+            persist_success(deps, &run_id, &artifact.id, output, duration_ms, &case_ids, post_jira_comment).await?;
         }
-        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms).await?,
+        Err(err) => persist_failure(deps, &run_id, &artifact.id, &err, duration_ms, post_jira_comment).await?,
     }
 
     // 6. Read back the canonical result.
     test_run_repo::fetch_run(deps.pool, &run_id).await
 }
 
-/// The product of the shared run preamble (steps 1–3), consumed by both
-/// [`run`] and [`run_flaky`].
-struct Prepared {
-    input: RunInput,
-    runner: Arc<dyn TestRunner>,
-    artifact: artifact_repo::Artifact,
-    case_ids: HashSet<String>,
+/// The product of the shared run preamble (steps 1–3), consumed by [`run`],
+/// [`run_flaky`], and (cross-service) `mutation_service`, which drives the
+/// `runner` directly against each mutated workspace. Public so a sibling
+/// orchestrator can reuse the opt-in/load/language/`RunInput` preamble rather
+/// than duplicate it (rules §4.2 — the loop that needs it lives in its own
+/// service, exactly as flaky/heal reuse `run`).
+pub struct Prepared {
+    pub input: RunInput,
+    pub runner: Arc<dyn TestRunner>,
+    pub artifact: artifact_repo::Artifact,
+    pub case_ids: HashSet<String>,
 }
 
 /// Steps 1–3 common to [`run`] and [`run_flaky`]: enforce the opt-in gate,
@@ -198,7 +233,7 @@ struct Prepared {
 /// [`AppError::InvalidInput`] when opt-in is off, the id is empty, the
 /// artifact is not a test-cases artifact, or it carries no runnable files;
 /// [`AppError::NotFound`] when the artifact does not exist.
-async fn prepare_run(request: &RunRequest, deps: &SandboxDeps<'_>) -> AppResult<Prepared> {
+pub async fn prepare_run(request: &RunRequest, deps: &SandboxDeps<'_>) -> AppResult<Prepared> {
     // 1. Opt-in gate (plan §3 — backend rejects when the flag is off).
     if !request.opt_in_confirmed {
         return Err(AppError::InvalidInput(
@@ -257,7 +292,8 @@ async fn open_run_row(
 /// returns once finished). A blank id is simply not cancellable. The returned
 /// [`RegistryGuard`] must be held for the duration of the run — it deregisters
 /// the token on every exit path, so a token never outlives its run.
-fn register_cancel<'a>(
+#[must_use]
+pub fn register_cancel<'a>(
     deps: &SandboxDeps<'a>,
     client_run_id: &str,
 ) -> (CancelToken, RegistryGuard<'a>) {
@@ -513,6 +549,7 @@ async fn persist_failure(
     artifact_id: &str,
     err: &RunnerError,
     duration_ms: u32,
+    post_jira_comment: bool,
 ) -> AppResult<()> {
     tracing::warn!(run_id, code = err.code(), error = %err, "sandbox run failed");
     let status = match err {
@@ -532,7 +569,9 @@ async fn persist_failure(
     )
     .await?;
 
-    post_jira_run_summary(deps, artifact_id, status, 0, 0).await;
+    if post_jira_comment {
+        post_jira_run_summary(deps, artifact_id, status, 0, 0).await;
+    }
 
     Ok(())
 }

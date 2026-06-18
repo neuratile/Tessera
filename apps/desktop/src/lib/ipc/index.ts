@@ -18,6 +18,7 @@ export * as generation from './generation';
 export * as hardware from './hardware';
 export * as healing from './healing';
 export * as health from './health';
+export * as mutation from './mutation';
 export * as ollama from './ollama';
 export * as projects from './projects';
 export * as providers from './providers';

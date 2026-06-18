@@ -9,7 +9,8 @@ const { uiState, sandboxState } = vi.hoisted(() => {
     byArtifact: Record<string, unknown>;
     flakyByArtifact: Record<string, unknown>;
     healByArtifact: Record<string, unknown>;
-  } = { byArtifact: {}, flakyByArtifact: {}, healByArtifact: {} };
+    mutationByArtifact: Record<string, unknown>;
+  } = { byArtifact: {}, flakyByArtifact: {}, healByArtifact: {}, mutationByArtifact: {} };
   return { uiState: { sandboxOptIn: true }, sandboxState };
 });
 
@@ -28,6 +29,12 @@ vi.mock('@/lib/ipc', () => ({
     runSelfHeal: vi.fn(),
     subscribeToHealEvents: vi.fn().mockResolvedValue(() => {}),
   },
+  mutation: {
+    runMutationTest: vi.fn(),
+    listMutationChecks: vi.fn().mockResolvedValue([]),
+    getMutationCheck: vi.fn(),
+    subscribeToMutationEvents: vi.fn().mockResolvedValue(() => {}),
+  },
 }));
 
 vi.mock('@/stores/ui-store', () => ({
@@ -37,16 +44,19 @@ vi.mock('@/stores/ui-store', () => ({
 vi.mock('@/stores/sandbox-store', () => {
   const IDLE = { phase: 'idle', clientRunId: null, result: null, error: null };
   const IDLE_HEAL = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
+  const IDLE_MUTATION = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
   const noop = () => {};
   return {
     IDLE_RUN: IDLE,
     IDLE_FLAKY: IDLE,
     IDLE_HEAL,
+    IDLE_MUTATION,
     useSandboxStore: (sel: (s: Record<string, unknown>) => unknown) =>
       sel({
         byArtifact: sandboxState.byArtifact,
         flakyByArtifact: sandboxState.flakyByArtifact,
         healByArtifact: sandboxState.healByArtifact,
+        mutationByArtifact: sandboxState.mutationByArtifact,
         start: noop,
         finish: noop,
         fail: noop,
@@ -58,12 +68,20 @@ vi.mock('@/stores/sandbox-store', () => {
         attemptHeal: noop,
         finishHeal: noop,
         failHeal: noop,
+        startMutation: noop,
+        progressMutation: noop,
+        finishMutation: noop,
+        failMutation: noop,
       }),
   };
 });
 
 import type { HealContext } from './sandbox-run-panel';
-import { FlakyHistorySection, SandboxRunPanel } from './sandbox-run-panel';
+import {
+  FlakyHistorySection,
+  MutationHistorySection,
+  SandboxRunPanel,
+} from './sandbox-run-panel';
 
 const ARTIFACT_ID = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -85,6 +103,7 @@ afterEach(() => {
   sandboxState.byArtifact = {};
   sandboxState.flakyByArtifact = {};
   sandboxState.healByArtifact = {};
+  sandboxState.mutationByArtifact = {};
 });
 
 describe('SandboxRunPanel — flaky check', () => {
@@ -309,6 +328,135 @@ describe('SandboxRunPanel — self-heal', () => {
 
     const html = render();
     expect(html).toContain('Self-heal cancelled during attempt 1 of 3.');
+  });
+});
+
+describe('SandboxRunPanel — mutation test', () => {
+  it('offers a Mutation test action and helper copy when opted in and runnable', () => {
+    const html = render();
+    expect(html).toContain('Mutation test');
+    expect(html).toContain('seeds small bugs into the source');
+  });
+
+  it('renders the score header and the survivor list', () => {
+    sandboxState.mutationByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          score: 0.78,
+          killed: 31,
+          survived: 9,
+          errored: 0,
+          total: 40,
+          baselineRunId: ARTIFACT_ID,
+          droppedCount: 0,
+          mutants: [
+            {
+              mutant: { file: 'cart.ts', line: 42, operatorId: 'relational', original: '>', replacement: '>=', byteStart: 0, byteEnd: 1 },
+              status: 'survived',
+            },
+            {
+              mutant: { file: 'cart.ts', line: 51, operatorId: 'arithmetic', original: '+', replacement: '-', byteStart: 0, byteEnd: 1 },
+              status: 'killed',
+            },
+          ],
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('Mutation score');
+    expect(html).toContain('78%');
+    expect(html).toContain('killed 31/40 mutants');
+    // The survivor is listed; the killed mutant is not in the survivor list.
+    expect(html).toContain('cart.ts:42');
+    expect(html).toContain('boundary not tested');
+    expect(html).not.toContain('cart.ts:51');
+  });
+
+  it('celebrates a clean sweep with no survivors', () => {
+    sandboxState.mutationByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          score: 1,
+          killed: 5,
+          survived: 0,
+          errored: 0,
+          total: 5,
+          baselineRunId: ARTIFACT_ID,
+          droppedCount: 0,
+          mutants: [],
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('100%');
+    expect(html).toContain('Every seeded bug was caught');
+  });
+
+  it('shows the error message for an aborted sweep (e.g. red baseline)', () => {
+    sandboxState.mutationByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        result: null,
+        error: 'mutation scoring needs an all-green baseline; the suite has 2 failing test(s).',
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('all-green baseline');
+  });
+});
+
+describe('MutationHistorySection — persisted history (design §5.5)', () => {
+  it('renders nothing when there is no history yet', () => {
+    const html = renderToStaticMarkup(
+      <MutationHistorySection artifactId={ARTIFACT_ID} history={[]} error={null} />,
+    );
+    expect(html).toBe('');
+  });
+
+  it('lists past scores with their kill ratio', () => {
+    const html = renderToStaticMarkup(
+      <MutationHistorySection
+        artifactId={ARTIFACT_ID}
+        history={[
+          {
+            id: '00000000-0000-4000-8000-000000000bbb',
+            baselineRunId: ARTIFACT_ID,
+            score: 0.9,
+            killed: 9,
+            survived: 1,
+            errored: 0,
+            total: 10,
+            droppedCount: 0,
+            createdAt: '2026-06-16T10:30:00+00:00',
+          },
+        ]}
+        error={null}
+      />,
+    );
+    expect(html).toContain('Mutation history');
+    expect(html).toContain('90%');
+    expect(html).toContain('killed 9/10');
+  });
+
+  it('surfaces a load error instead of the trend', () => {
+    const html = renderToStaticMarkup(
+      <MutationHistorySection artifactId={ARTIFACT_ID} history={[]} error={'boom'} />,
+    );
+    expect(html).toContain('Could not load mutation history');
+    expect(html).toContain('boom');
   });
 });
 

@@ -26,6 +26,7 @@ export * from './schemas/hardware.schema';
 export * from './schemas/heal.schema';
 export * from './schemas/health.schema';
 export * from './schemas/llm-provider.schema';
+export * from './schemas/mutation.schema';
 export * from './schemas/project.schema';
 export * from './schemas/provider.schema';
 export * from './schemas/test-case.schema';
