@@ -1,6 +1,6 @@
 //! System health and hardware detection.
 //!
-//! Per `rules.md` §4.2: no SQL here — delegates to the pool for a
+//! Per `rules.md` §4.2: no SQL here — delegates to `health_repo` for the
 //! connectivity check and uses `sysinfo` for hardware detection.
 
 use serde::Serialize;
@@ -21,7 +21,7 @@ pub struct HealthStatus {
 }
 
 pub async fn check(pool: &SqlitePool) -> AppResult<HealthStatus> {
-    let db_ok = sqlx::query("SELECT 1").execute(pool).await.is_ok();
+    let db_ok = crate::repositories::health_repo::is_reachable(pool).await;
 
     let mut sys = System::new();
     sys.refresh_memory();

@@ -60,6 +60,23 @@ struct OllamaVersionResponse {
 #[derive(Debug, Deserialize)]
 struct OllamaModelEntry {
     name: String,
+    /// On-disk size in bytes. Absent in older daemon responses, hence the
+    /// default — [`check_status`] ignores it; [`list_models`] surfaces it.
+    #[serde(default)]
+    size: u64,
+}
+
+/// One locally-pulled model with its on-disk size, from `GET /api/tags`.
+///
+/// Mirrors the subset the provider wizard surfaces (name + size); the
+/// digest/sha fields the daemon returns are dropped. Serializes to the
+/// same shape the `list_ollama_models` IPC command returns
+/// (`{ name, sizeBytes }`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaModelInfo {
+    pub name: String,
+    pub size_bytes: u64,
 }
 
 /// Wire type for `GET /api/tags`.
@@ -161,6 +178,48 @@ async fn fetch_model_list(client: &Client, base: &str) -> AppResult<Vec<String>>
         .map_err(|error| anyhow!("ollama /api/tags response parse failed: {error}"))?;
 
     Ok(tags.models.into_iter().map(|model| model.name).collect())
+}
+
+/// List locally-pulled Ollama models (name + size) from `GET /api/tags`.
+///
+/// Unlike [`check_status`], a transport/parse failure here is surfaced as
+/// an error rather than an empty list: the provider wizard uses the
+/// presence of a specific model to decide whether to show an
+/// `ollama pull <model>` hint, so a silently-empty list would mislead.
+///
+/// # Errors
+///
+/// Returns an application error when the HTTP client cannot be built, the
+/// daemon is unreachable or returns a non-2xx status, or the tags payload
+/// cannot be parsed.
+pub async fn list_models(base_url: &str) -> AppResult<Vec<OllamaModelInfo>> {
+    let client = build_client()?;
+    let base = normalize_base_url(base_url);
+    let tags_url = format!("{base}/api/tags");
+
+    let response = client
+        .get(&tags_url)
+        .send()
+        .await
+        .map_err(|error| anyhow!("ollama unreachable: {error}"))?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!("ollama responded with HTTP {}", response.status().as_u16()).into());
+    }
+
+    let tags: OllamaTagsResponse = response
+        .json()
+        .await
+        .map_err(|error| anyhow!("ollama returned an unparseable tags payload: {error}"))?;
+
+    Ok(tags
+        .models
+        .into_iter()
+        .map(|model| OllamaModelInfo {
+            name: model.name,
+            size_bytes: model.size,
+        })
+        .collect())
 }
 
 /// Build a short-timeout HTTP client for health-check calls.

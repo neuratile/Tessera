@@ -5,7 +5,6 @@ use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::repositories::external_link_repo::{self, ExternalLinkRow};
-use crate::repositories::tracker_config_repo;
 use crate::services::tracker_config_service::{self, TrackerConfigView};
 use crate::services::jira_push_service::{self, BulkPushResultItem, PushResult};
 use crate::utils::crypto::CryptoKey;
@@ -86,41 +85,16 @@ pub async fn test_tracker_connection(
     crypto: State<'_, CryptoKey>,
     args: TestTrackerConnectionArgs,
 ) -> Result<String, String> {
-    if args.tracker.trim() != "jira" {
-        return Err("Unsupported tracker type".to_string());
-    }
-
-    let token = if let Some(t) = args.api_token {
-        t
-    } else {
-        let existing = tracker_config_repo::fetch_for_user_tracker(
-            &pool,
-            "00000000-0000-4000-8000-000000000001",
-            "jira",
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-        if let Some(row) = existing {
-            match (&row.api_token_encrypted, &row.api_token_nonce) {
-                (Some(ct), Some(nonce)) => crypto
-                    .decrypt_string(ct, nonce)
-                    .map_err(|e| e.to_string())?,
-                _ => return Err("API token missing".to_string()),
-            }
-        } else {
-            return Err("API token missing".to_string());
-        }
-    };
-
-    let client = crate::providers::trackers::factory::build_tracker(
+    tracker_config_service::test_connection(
+        &pool,
+        &crypto,
+        &args.tracker,
         &args.site_url,
         &args.email,
-        &token,
-    );
-    let user = client.test_connection().await.map_err(|e| e.to_string())?;
-
-    Ok(user.display_name)
+        args.api_token,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
