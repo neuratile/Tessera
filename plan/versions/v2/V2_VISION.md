@@ -3,7 +3,7 @@
 > Status: **draft** — research + prioritization done (2026-06-10); individual
 > feature design docs land under [`v2-feature-docs/`](./v2-feature-docs/) as they
 > are specced (flaky-test detection P2 #7 — shipped; self-healing loop P0 #1 —
-> drafted) · Owner: core
+> shipped; mutation testing P0 #2 — drafted) · Owner: core
 
 ## 1. Theme
 
@@ -53,7 +53,10 @@ the moat v2 builds on.
    already in place: operators flipped, conditions dropped), rerun the suite
    in the same hardened Docker harness, report killed/survived mutants next to
    line coverage. Promoted from ROADMAP standout #2 on the strength of Meta's
-   ACH results.
+   ACH results. Design doc:
+   [`v2-feature-docs/MUTATION_TESTING.md`](./v2-feature-docs/MUTATION_TESTING.md)
+   — two stages (score, then auto-generate tests to kill survivors), JS/TS
+   first, persisted history from PR 1.
 3. **Headless CLI + GitHub Action.** `tessera generate --diff`,
    `tessera run`, machine-readable output, CI-friendly exit codes; a published
    Action so any OSS repo gets generated tests + coverage + mutation score as
