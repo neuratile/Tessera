@@ -2,6 +2,7 @@ import type {
   CoverageLine,
   FlakyRunResult,
   HealResult,
+  ImproveResult,
   MutationResult,
   RunResult,
 } from '@testing-ide/shared';
@@ -117,11 +118,41 @@ export const IDLE_MUTATION: ArtifactMutationState = {
   progress: null,
 };
 
+/** Live per-attempt progress streamed on `improve://event` during an improve. */
+export type ImproveProgress = { attempt: number; score: number };
+
+/**
+ * "Improve coverage" UI state (MUTATION_TESTING.md §5.8), kept separate from the
+ * run / flaky / heal / mutation slices so an improve loop can coexist with the
+ * others for one artifact. `progress` carries the latest streamed "attempt N ·
+ * score" so the UI can show the loop advancing before it settles.
+ */
+export type ArtifactImproveState = {
+  phase: SandboxRunPhase;
+  /** Correlation id of the in-flight loop, used to target the Stop button. */
+  clientRunId: string | null;
+  result: ImproveResult | null;
+  /** Pre-flight / abort failure (opt-out, red baseline, provider, IPC error). */
+  error: string | null;
+  /** Latest streamed per-attempt progress while running; null before the first event. */
+  progress: ImproveProgress | null;
+};
+
+/** Stable idle reference for the improve slice. */
+export const IDLE_IMPROVE: ArtifactImproveState = {
+  phase: 'idle',
+  clientRunId: null,
+  result: null,
+  error: null,
+  progress: null,
+};
+
 export type SandboxState = {
   byArtifact: Record<string, ArtifactRunState>;
   flakyByArtifact: Record<string, ArtifactFlakyState>;
   healByArtifact: Record<string, ArtifactHealState>;
   mutationByArtifact: Record<string, ArtifactMutationState>;
+  improveByArtifact: Record<string, ArtifactImproveState>;
   /** Coverage from the most recent completed run (editor gutter source). */
   coverage: CoverageLine[];
   start: (artifactId: string, clientRunId: string) => void;
@@ -142,6 +173,11 @@ export type SandboxState = {
   finishMutation: (artifactId: string, result: MutationResult) => void;
   failMutation: (artifactId: string, message: string) => void;
   resetMutation: (artifactId: string) => void;
+  startImprove: (artifactId: string, clientRunId: string) => void;
+  progressImprove: (artifactId: string, progress: ImproveProgress) => void;
+  finishImprove: (artifactId: string, result: ImproveResult) => void;
+  failImprove: (artifactId: string, message: string) => void;
+  resetImprove: (artifactId: string) => void;
 };
 
 export const useSandboxStore = create<SandboxState>()((set) => ({
@@ -149,6 +185,7 @@ export const useSandboxStore = create<SandboxState>()((set) => ({
   flakyByArtifact: {},
   healByArtifact: {},
   mutationByArtifact: {},
+  improveByArtifact: {},
   coverage: [],
 
   start: (artifactId, clientRunId) =>
@@ -304,5 +341,50 @@ export const useSandboxStore = create<SandboxState>()((set) => ({
       const { [artifactId]: _dropped, ...rest } = s.mutationByArtifact;
       void _dropped;
       return { mutationByArtifact: rest };
+    }),
+
+  startImprove: (artifactId, clientRunId) =>
+    set((s) => ({
+      improveByArtifact: {
+        ...s.improveByArtifact,
+        [artifactId]: { phase: 'running', clientRunId, result: null, error: null, progress: null },
+      },
+    })),
+
+  progressImprove: (artifactId, progress) =>
+    set((s) => {
+      const current = s.improveByArtifact[artifactId];
+      // Ignore late events for an improve that already settled or was reset.
+      if (current === undefined || current.phase !== 'running') return s;
+      return {
+        improveByArtifact: {
+          ...s.improveByArtifact,
+          [artifactId]: { ...current, progress },
+        },
+      };
+    }),
+
+  finishImprove: (artifactId, result) =>
+    set((s) => ({
+      improveByArtifact: {
+        ...s.improveByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result, error: null, progress: null },
+      },
+    })),
+
+  failImprove: (artifactId, message) =>
+    set((s) => ({
+      improveByArtifact: {
+        ...s.improveByArtifact,
+        [artifactId]: { phase: 'done', clientRunId: null, result: null, error: message, progress: null },
+      },
+    })),
+
+  resetImprove: (artifactId) =>
+    set((s) => {
+      if (!(artifactId in s.improveByArtifact)) return s;
+      const { [artifactId]: _dropped, ...rest } = s.improveByArtifact;
+      void _dropped;
+      return { improveByArtifact: rest };
     }),
 }));

@@ -5,6 +5,8 @@ import type {
   FlakyTestResult,
   HealAttempt,
   HealResult,
+  ImproveAttempt,
+  ImproveResult,
   MutantResult,
   MutationCheckRecord,
   MutationCheckSummary,
@@ -26,6 +28,7 @@ import {
   Repeat,
   Sparkles,
   Square,
+  TrendingUp,
   Wrench,
   XCircle,
 } from 'lucide-react';
@@ -36,6 +39,7 @@ import { getErrorMessage, healing, mutation, sandbox } from '@/lib/ipc';
 import {
   IDLE_FLAKY,
   IDLE_HEAL,
+  IDLE_IMPROVE,
   IDLE_MUTATION,
   IDLE_RUN,
   useSandboxStore,
@@ -57,6 +61,12 @@ const HEAL_DEFAULT_ATTEMPTS = 3;
 
 const clampAttempts = (n: number): number =>
   Math.min(HEAL_MAX_ATTEMPTS, Math.max(HEAL_MIN_ATTEMPTS, Math.round(n)));
+
+/** Default improve attempt budget; same [1, 5] bounds as self-heal. */
+const IMPROVE_DEFAULT_ATTEMPTS = 3;
+
+/** Default mutant cap forwarded to each inner score (re-clamped to [1, 200]). */
+const IMPROVE_MAX_MUTANTS = 40;
 
 /**
  * Regeneration context the self-heal loop needs to call `generate` between
@@ -110,6 +120,7 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const flakyState = useSandboxStore((s) => s.flakyByArtifact[artifactId] ?? IDLE_FLAKY);
   const healState = useSandboxStore((s) => s.healByArtifact[artifactId] ?? IDLE_HEAL);
   const mutationState = useSandboxStore((s) => s.mutationByArtifact[artifactId] ?? IDLE_MUTATION);
+  const improveState = useSandboxStore((s) => s.improveByArtifact[artifactId] ?? IDLE_IMPROVE);
   const start = useSandboxStore((s) => s.start);
   const finish = useSandboxStore((s) => s.finish);
   const fail = useSandboxStore((s) => s.fail);
@@ -124,9 +135,14 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const progressMutation = useSandboxStore((s) => s.progressMutation);
   const finishMutation = useSandboxStore((s) => s.finishMutation);
   const failMutation = useSandboxStore((s) => s.failMutation);
+  const startImprove = useSandboxStore((s) => s.startImprove);
+  const progressImprove = useSandboxStore((s) => s.progressImprove);
+  const finishImprove = useSandboxStore((s) => s.finishImprove);
+  const failImprove = useSandboxStore((s) => s.failImprove);
 
   const [runs, setRuns] = useState(FLAKY_DEFAULT_RUNS);
   const [maxAttempts, setMaxAttempts] = useState(HEAL_DEFAULT_ATTEMPTS);
+  const [improveAttempts, setImproveAttempts] = useState(IMPROVE_DEFAULT_ATTEMPTS);
 
   // Persisted flaky-check history (design §7). Kept in local state — it is
   // read-only fetched data scoped to this panel, so it does not belong in the
@@ -190,10 +206,16 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const flakyRunning = flakyState.phase === 'running';
   const healRunning = healState.phase === 'running';
   const mutationRunning = mutationState.phase === 'running';
-  const busy = running || flakyRunning || healRunning || mutationRunning;
+  const improveRunning = improveState.phase === 'running';
+  const busy = running || flakyRunning || healRunning || mutationRunning || improveRunning;
   const gated = !optIn || !runnable;
   // Self-heal also needs a regeneration context (provider + model).
   const healGated = gated || healContext === undefined;
+  // "Improve coverage" needs the regeneration context AND a prior mutation
+  // score that found survivors to chase (design §5.8) — the user runs
+  // "Mutation test" first to see the gaps, then improves them.
+  const hasSurvivors = (mutationState.result?.survived ?? 0) > 0;
+  const improveGated = healGated || !hasSurvivors;
 
   // Cancel whichever op is in flight when the panel unmounts (e.g. the
   // artifact drawer closes) so the Docker container is killed immediately
@@ -208,7 +230,9 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
         ? healState.clientRunId
         : mutationRunning
           ? mutationState.clientRunId
-          : null;
+          : improveRunning
+            ? improveState.clientRunId
+            : null;
   useEffect(
     () => () => {
       const clientRunId = inFlightRef.current;
@@ -277,6 +301,32 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
       if (unlisten !== null) unlisten();
     };
   }, [artifactId, progressMutation]);
+
+  // Live improve progress: the backend streams one `improve://event` per
+  // attempt, tagged with the loop's `clientRunId`. Mirrors the mutation/heal
+  // subscriptions.
+  const improveClientRunIdRef = useRef<string | null>(null);
+  improveClientRunIdRef.current = improveRunning ? improveState.clientRunId : null;
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const fn = await mutation.subscribeToImproveEvents((event) => {
+        if (event.improveId === improveClientRunIdRef.current) {
+          progressImprove(artifactId, { attempt: event.attempt, score: event.score });
+        }
+      });
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten !== null) unlisten();
+    };
+  }, [artifactId, progressImprove]);
 
   const handleRun = useCallback(() => {
     if (gated || busy) return;
@@ -363,6 +413,43 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     })();
   }, [gated, busy, artifactId, startMutation, finishMutation, failMutation, refreshMutationHistory]);
 
+  const handleImprove = useCallback(() => {
+    if (improveGated || busy || healContext === undefined) return;
+    const clientRunId = crypto.randomUUID();
+    startImprove(artifactId, clientRunId);
+    void (async () => {
+      try {
+        const result = await mutation.improveCoverage({
+          artifactId,
+          maxAttempts: improveAttempts,
+          maxMutants: IMPROVE_MAX_MUTANTS,
+          optInConfirmed: true,
+          clientRunId,
+          model: healContext.model,
+          provider: healContext.provider,
+          projectId: healContext.projectId,
+          projectName: healContext.projectName,
+        });
+        finishImprove(artifactId, result);
+        // Each attempt re-scores and persists a check — refresh the trend so the
+        // improved score appears at the top.
+        refreshMutationHistory();
+      } catch (err) {
+        failImprove(artifactId, getErrorMessage(err));
+      }
+    })();
+  }, [
+    improveGated,
+    busy,
+    artifactId,
+    improveAttempts,
+    healContext,
+    startImprove,
+    finishImprove,
+    failImprove,
+    refreshMutationHistory,
+  ]);
+
   // Stop targets whichever op is in flight; all share the cancel-by-id path (a
   // heal's / sweep's in-flight run is registered under its clientRunId, so Stop
   // kills the current container and the loop observes the cancelled run).
@@ -373,7 +460,9 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
         ? flakyState.clientRunId
         : healRunning
           ? healState.clientRunId
-          : mutationState.clientRunId;
+          : mutationRunning
+            ? mutationState.clientRunId
+            : improveState.clientRunId;
     if (clientRunId === null) return;
     void sandbox.cancelTestSandbox(clientRunId).catch(() => {
       // Stop is best-effort; the run still resolves and updates state.
@@ -382,10 +471,12 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     running,
     flakyRunning,
     healRunning,
+    mutationRunning,
     runState.clientRunId,
     flakyState.clientRunId,
     healState.clientRunId,
     mutationState.clientRunId,
+    improveState.clientRunId,
   ]);
 
   return (
@@ -455,10 +546,12 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
 
       {!busy ? (
         <div className="flex items-center justify-end gap-2">
-          <HealAttemptsStepper
+          <AttemptsStepper
             attempts={maxAttempts}
             setAttempts={setMaxAttempts}
             disabled={healGated}
+            title="Maximum self-heal attempts (1–5)"
+            ariaSuffix="attempts"
           />
           <Button
             type="button"
@@ -477,6 +570,38 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
             }
           >
             <Wrench className="size-3.5" /> Generate &amp; self-heal
+          </Button>
+        </div>
+      ) : null}
+
+      {!busy ? (
+        <div className="flex items-center justify-end gap-2">
+          <AttemptsStepper
+            attempts={improveAttempts}
+            setAttempts={setImproveAttempts}
+            disabled={improveGated}
+            title="Maximum improve attempts (1–5)"
+            ariaSuffix="improve attempts"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleImprove}
+            disabled={improveGated}
+            title={
+              !optIn
+                ? 'Enable local test execution in Settings'
+                : !runnable
+                  ? 'This artifact has no runnable files — regenerate the test cases'
+                  : healContext === undefined
+                    ? 'Configure an LLM provider and model to enable improve'
+                    : !hasSurvivors
+                      ? 'Run “Mutation test” first — improve needs surviving mutants to fix'
+                      : 'Auto-generate tests that kill the surviving mutants, then re-score to prove the lift'
+            }
+          >
+            <TrendingUp className="size-3.5" /> Improve coverage
           </Button>
         </div>
       ) : null}
@@ -514,6 +639,14 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
           <strong className="font-semibold">Mutation test</strong> seeds small bugs into the source
           and reruns your suite — a high mutation score means your tests would actually catch those
           bugs. Needs an all-green suite first.
+        </p>
+      ) : null}
+
+      {optIn && runnable && !busy ? (
+        <p className="text-muted-foreground text-[10px]">
+          <strong className="font-semibold">Improve coverage</strong> feeds the surviving mutants
+          back to the model to auto-write tests that catch them, then re-scores to prove the lift.
+          Run <strong className="font-semibold">Mutation test</strong> first; spends LLM calls.
         </p>
       ) : null}
 
@@ -578,6 +711,23 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
       ) : null}
 
       {mutationState.result !== null ? <MutationResultView result={mutationState.result} /> : null}
+
+      {improveRunning ? (
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          <Loader2 className="size-3 animate-spin" />
+          {improveState.progress !== null
+            ? `Improving · attempt ${improveState.progress.attempt} of ${improveAttempts} · ${mutationScorePct(improveState.progress.score)} · re-scoring…`
+            : 'Improving · scoring the current suite…'}
+        </p>
+      ) : null}
+
+      {improveState.error !== null ? (
+        <p className="text-destructive text-xs" role="alert">
+          {improveState.error}
+        </p>
+      ) : null}
+
+      {improveState.result !== null ? <ImproveResultView result={improveState.result} /> : null}
 
       <FlakyHistorySection artifactId={artifactId} history={history} error={historyError} />
 
@@ -742,20 +892,28 @@ function FlakyHistoryRow({
   );
 }
 
-/** −/+ stepper for the self-heal attempt budget, clamped to [1, 5]. */
-function HealAttemptsStepper({
+/**
+ * −/+ stepper for an attempt budget, clamped to [1, 5]. Shared by self-heal and
+ * improve; `ariaSuffix` keeps each instance's controls individually addressable
+ * (e.g. "Fewer attempts" vs "Fewer improve attempts").
+ */
+function AttemptsStepper({
   attempts,
   setAttempts,
   disabled,
+  title,
+  ariaSuffix,
 }: {
   attempts: number;
   setAttempts: (n: number) => void;
   disabled: boolean;
+  title: string;
+  ariaSuffix: string;
 }) {
   return (
     <div
       className="flex items-center gap-1 rounded border border-border bg-surface-3 px-1.5 py-0.5"
-      title="Maximum self-heal attempts (1–5)"
+      title={title}
     >
       <span className="text-muted-foreground text-[10px] uppercase tracking-wide">Attempts</span>
       <button
@@ -763,7 +921,7 @@ function HealAttemptsStepper({
         className="text-muted-foreground hover:text-foreground disabled:opacity-40"
         onClick={() => setAttempts(clampAttempts(attempts - 1))}
         disabled={disabled || attempts <= HEAL_MIN_ATTEMPTS}
-        aria-label="Fewer attempts"
+        aria-label={`Fewer ${ariaSuffix}`}
       >
         <Minus className="size-3" />
       </button>
@@ -775,7 +933,7 @@ function HealAttemptsStepper({
         className="text-muted-foreground hover:text-foreground disabled:opacity-40"
         onClick={() => setAttempts(clampAttempts(attempts + 1))}
         disabled={disabled || attempts >= HEAL_MAX_ATTEMPTS}
-        aria-label="More attempts"
+        aria-label={`More ${ariaSuffix}`}
       >
         <Plus className="size-3" />
       </button>
@@ -1206,6 +1364,87 @@ function MutationMutantRow({ result }: { result: MutantResult }) {
           <span className="text-muted-foreground text-[10px]">{survivorHint(mutant.operatorId)}</span>
         ) : status === 'errored' ? (
           <span className="text-muted-foreground text-[10px]">errored</span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/** Headline for a settled improve loop: outcome + score lift. */
+function improveSummary(result: ImproveResult): { label: string; ok: boolean } {
+  const lift = `${mutationScorePct(result.startScore)} → ${mutationScorePct(result.finalScore)}`;
+  const attemptWord = result.attemptsUsed === 1 ? 'attempt' : 'attempts';
+  switch (result.outcome) {
+    case 'perfect':
+      return { label: `perfect — every mutant killed · ${lift}`, ok: true };
+    case 'improved':
+      return { label: `improved · ${lift} · ${result.attemptsUsed} ${attemptWord}`, ok: true };
+    case 'exhausted':
+      return { label: `stopped after ${result.attemptsUsed} ${attemptWord} · ${lift}`, ok: false };
+    case 'no_progress':
+      return { label: `stopped — no progress · ${lift}`, ok: false };
+    case 'error':
+      return { label: 'improve stopped on an error', ok: false };
+  }
+}
+
+/**
+ * Results of an "Improve coverage" loop: a top summary ("improved · 78% → 93% ·
+ * 2 attempts"), then a per-attempt row showing each version's score, with the
+ * landed (best) version badged.
+ */
+function ImproveResultView({ result }: { result: ImproveResult }) {
+  if (result.outcome === 'error') {
+    return (
+      <p className="text-destructive text-[11px]" data-testid="improve-results" role="alert">
+        {typeof result.errorMessage === 'string' && result.errorMessage.length > 0
+          ? result.errorMessage
+          : 'Improve coverage stopped on an error.'}
+      </p>
+    );
+  }
+
+  const summary = improveSummary(result);
+  return (
+    <div className="space-y-2" data-testid="improve-results">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`pill pill-${summary.ok ? 'approved' : 'rejected'}`}>Improve coverage</span>
+        <span className="text-muted-foreground font-mono text-[10px]">{summary.label}</span>
+      </div>
+
+      {result.attempts.length > 0 ? (
+        <ul className="space-y-1">
+          {result.attempts.map((attempt) => (
+            <ImproveAttemptRow
+              key={`${attempt.attempt}-${attempt.artifactId}`}
+              attempt={attempt}
+              isFinal={attempt.artifactId === result.finalArtifactId}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** One improve attempt row: `attempt N · 78% · killed 31/40`, badged when it is
+ * the landed (best) version. */
+function ImproveAttemptRow({ attempt, isFinal }: { attempt: ImproveAttempt; isFinal: boolean }) {
+  const scorable = attempt.killed + attempt.survived;
+  return (
+    <li className="rounded border border-border bg-surface-3 px-2 py-1.5 text-[11px]">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground font-mono text-[10px]">attempt {attempt.attempt}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+          {mutationScorePct(attempt.score)}
+        </span>
+        <span className="text-muted-foreground font-mono text-[10px]">
+          killed {attempt.killed}/{scorable}
+        </span>
+        {isFinal ? (
+          <span className="border-success/35 bg-success/15 text-success inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide">
+            <Sparkles className="size-2.5" /> landed
+          </span>
         ) : null}
       </div>
     </li>

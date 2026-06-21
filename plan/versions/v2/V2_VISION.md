@@ -3,7 +3,8 @@
 > Status: **draft** — research + prioritization done (2026-06-10); individual
 > feature design docs land under [`v2-feature-docs/`](./v2-feature-docs/) as they
 > are specced (flaky-test detection P2 #7 — shipped; self-healing loop P0 #1 —
-> shipped; mutation testing P0 #2 — drafted) · Owner: core
+> shipped; mutation testing P0 #2 — shipped, Stage 1 score + Stage 2 improve) ·
+> Owner: core
 
 ## 1. Theme
 
