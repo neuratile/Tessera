@@ -59,10 +59,11 @@ const HEAL_MIN_ATTEMPTS = 1;
 const HEAL_MAX_ATTEMPTS = 5;
 const HEAL_DEFAULT_ATTEMPTS = 3;
 
-const clampAttempts = (n: number): number =>
-  Math.min(HEAL_MAX_ATTEMPTS, Math.max(HEAL_MIN_ATTEMPTS, Math.round(n)));
-
-/** Default improve attempt budget; same [1, 5] bounds as self-heal. */
+/** Attempt bounds for an improve loop — mirrors the backend re-clamp [1, 5].
+ * Kept distinct from the heal bounds so either can change independently (the
+ * shared `AttemptsStepper` takes them as props rather than hardcoding one set). */
+const IMPROVE_MIN_ATTEMPTS = 1;
+const IMPROVE_MAX_ATTEMPTS = 5;
 const IMPROVE_DEFAULT_ATTEMPTS = 3;
 
 /** Default mutant cap forwarded to each inner score (re-clamped to [1, 200]). */
@@ -552,6 +553,8 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
             disabled={healGated}
             title="Maximum self-heal attempts (1–5)"
             ariaSuffix="attempts"
+            min={HEAL_MIN_ATTEMPTS}
+            max={HEAL_MAX_ATTEMPTS}
           />
           <Button
             type="button"
@@ -582,6 +585,8 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
             disabled={improveGated}
             title="Maximum improve attempts (1–5)"
             ariaSuffix="improve attempts"
+            min={IMPROVE_MIN_ATTEMPTS}
+            max={IMPROVE_MAX_ATTEMPTS}
           />
           <Button
             type="button"
@@ -893,9 +898,10 @@ function FlakyHistoryRow({
 }
 
 /**
- * −/+ stepper for an attempt budget, clamped to [1, 5]. Shared by self-heal and
- * improve; `ariaSuffix` keeps each instance's controls individually addressable
- * (e.g. "Fewer attempts" vs "Fewer improve attempts").
+ * −/+ stepper for an attempt budget. Shared by self-heal and improve; the
+ * `[min, max]` bounds are passed in (not hardcoded) so each caller clamps to its
+ * own backend re-clamp range, and `ariaSuffix` keeps each instance's controls
+ * individually addressable (e.g. "Fewer attempts" vs "Fewer improve attempts").
  */
 function AttemptsStepper({
   attempts,
@@ -903,13 +909,18 @@ function AttemptsStepper({
   disabled,
   title,
   ariaSuffix,
+  min,
+  max,
 }: {
   attempts: number;
   setAttempts: (n: number) => void;
   disabled: boolean;
   title: string;
   ariaSuffix: string;
+  min: number;
+  max: number;
 }) {
+  const clamp = (n: number): number => Math.min(max, Math.max(min, Math.round(n)));
   return (
     <div
       className="flex items-center gap-1 rounded border border-border bg-surface-3 px-1.5 py-0.5"
@@ -919,8 +930,8 @@ function AttemptsStepper({
       <button
         type="button"
         className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-        onClick={() => setAttempts(clampAttempts(attempts - 1))}
-        disabled={disabled || attempts <= HEAL_MIN_ATTEMPTS}
+        onClick={() => setAttempts(clamp(attempts - 1))}
+        disabled={disabled || attempts <= min}
         aria-label={`Fewer ${ariaSuffix}`}
       >
         <Minus className="size-3" />
@@ -931,8 +942,8 @@ function AttemptsStepper({
       <button
         type="button"
         className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-        onClick={() => setAttempts(clampAttempts(attempts + 1))}
-        disabled={disabled || attempts >= HEAL_MAX_ATTEMPTS}
+        onClick={() => setAttempts(clamp(attempts + 1))}
+        disabled={disabled || attempts >= max}
         aria-label={`More ${ariaSuffix}`}
       >
         <Plus className="size-3" />
