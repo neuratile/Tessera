@@ -768,17 +768,23 @@ fn improve_error(
     current_artifact_id: &str,
     message: String,
 ) -> ImproveResult {
+    // `best.set` is always true here: `best.consider` runs unconditionally after
+    // every successful `score()`, and the only pre-flight failure (the very first
+    // `score()` returning `Err`) is propagated directly without entering this
+    // function. The branch below is a defensive fallback only.
     if best.set {
         let mut result = improve_outcome(ImproveOutcome::Error, attempts, best, start_score);
         result.error_message = Some(message);
         return result;
     }
+    // Unreachable in practice — kept total. `final_score = start_score` (not a
+    // hardcoded 0.0) so the fallback can never misreport a measured score.
     ImproveResult {
         outcome: ImproveOutcome::Error,
         attempts_used: attempts_len(&attempts),
         final_artifact_id: current_artifact_id.to_string(),
         start_score,
-        final_score: 0.0,
+        final_score: start_score,
         attempts,
         error_message: Some(message),
     }

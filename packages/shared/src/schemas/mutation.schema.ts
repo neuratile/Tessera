@@ -176,7 +176,10 @@ export type ImproveAttempt = z.infer<typeof ImproveAttemptSchema>;
 export const ImproveResultSchema = z.object({
   outcome: ImproveOutcomeSchema,
   attemptsUsed: z.number().int().nonnegative(),
-  finalArtifactId: z.string(),
+  // The backend always lands on a real version (the best attempt, or the input
+  // artifact on a pre-flight error), so this is never empty — enforce `.min(1)`
+  // for consistency with `ImproveAttemptSchema.artifactId`.
+  finalArtifactId: z.string().min(1),
   startScore: z.number().min(0).max(1),
   finalScore: z.number().min(0).max(1),
   attempts: z.array(ImproveAttemptSchema),
