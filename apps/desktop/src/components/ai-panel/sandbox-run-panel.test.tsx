@@ -10,7 +10,14 @@ const { uiState, sandboxState } = vi.hoisted(() => {
     flakyByArtifact: Record<string, unknown>;
     healByArtifact: Record<string, unknown>;
     mutationByArtifact: Record<string, unknown>;
-  } = { byArtifact: {}, flakyByArtifact: {}, healByArtifact: {}, mutationByArtifact: {} };
+    improveByArtifact: Record<string, unknown>;
+  } = {
+    byArtifact: {},
+    flakyByArtifact: {},
+    healByArtifact: {},
+    mutationByArtifact: {},
+    improveByArtifact: {},
+  };
   return { uiState: { sandboxOptIn: true }, sandboxState };
 });
 
@@ -34,6 +41,8 @@ vi.mock('@/lib/ipc', () => ({
     listMutationChecks: vi.fn().mockResolvedValue([]),
     getMutationCheck: vi.fn(),
     subscribeToMutationEvents: vi.fn().mockResolvedValue(() => {}),
+    improveCoverage: vi.fn(),
+    subscribeToImproveEvents: vi.fn().mockResolvedValue(() => {}),
   },
 }));
 
@@ -45,18 +54,21 @@ vi.mock('@/stores/sandbox-store', () => {
   const IDLE = { phase: 'idle', clientRunId: null, result: null, error: null };
   const IDLE_HEAL = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
   const IDLE_MUTATION = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
+  const IDLE_IMPROVE = { phase: 'idle', clientRunId: null, result: null, error: null, progress: null };
   const noop = () => {};
   return {
     IDLE_RUN: IDLE,
     IDLE_FLAKY: IDLE,
     IDLE_HEAL,
     IDLE_MUTATION,
+    IDLE_IMPROVE,
     useSandboxStore: (sel: (s: Record<string, unknown>) => unknown) =>
       sel({
         byArtifact: sandboxState.byArtifact,
         flakyByArtifact: sandboxState.flakyByArtifact,
         healByArtifact: sandboxState.healByArtifact,
         mutationByArtifact: sandboxState.mutationByArtifact,
+        improveByArtifact: sandboxState.improveByArtifact,
         start: noop,
         finish: noop,
         fail: noop,
@@ -72,6 +84,10 @@ vi.mock('@/stores/sandbox-store', () => {
         progressMutation: noop,
         finishMutation: noop,
         failMutation: noop,
+        startImprove: noop,
+        progressImprove: noop,
+        finishImprove: noop,
+        failImprove: noop,
       }),
   };
 });
@@ -104,7 +120,33 @@ afterEach(() => {
   sandboxState.flakyByArtifact = {};
   sandboxState.healByArtifact = {};
   sandboxState.mutationByArtifact = {};
+  sandboxState.improveByArtifact = {};
 });
+
+/** A completed mutation score carrying one survivor — enables Improve coverage.
+ * Assigned only to the `unknown`-typed store slot, so no literal narrowing is
+ * needed. */
+const MUTATION_WITH_SURVIVOR = {
+  phase: 'done',
+  clientRunId: null,
+  progress: null,
+  error: null,
+  result: {
+    score: 0.5,
+    killed: 1,
+    survived: 1,
+    errored: 0,
+    total: 2,
+    baselineRunId: ARTIFACT_ID,
+    droppedCount: 0,
+    mutants: [
+      {
+        mutant: { file: 'cart.ts', line: 42, operatorId: 'relational', original: '>', replacement: '>=', byteStart: 0, byteEnd: 1 },
+        status: 'survived',
+      },
+    ],
+  },
+};
 
 describe('SandboxRunPanel — flaky check', () => {
   it('offers Check flaky + a runs stepper when opted in and runnable', () => {
@@ -415,6 +457,79 @@ describe('SandboxRunPanel — mutation test', () => {
 
     const html = render();
     expect(html).toContain('all-green baseline');
+  });
+});
+
+describe('SandboxRunPanel — improve coverage (Stage 2)', () => {
+  it('offers an Improve coverage action and helper copy when opted in and runnable', () => {
+    const html = render();
+    expect(html).toContain('Improve coverage');
+    expect(html).toContain('feeds the surviving mutants');
+  });
+
+  it('disables improve and guides the user to run a mutation test first when no survivors', () => {
+    // No mutation result in the store → no survivors to chase.
+    const html = render();
+    expect(html).toContain('improve needs surviving mutants to fix');
+  });
+
+  it('enables improve once a mutation score with survivors exists', () => {
+    sandboxState.mutationByArtifact = { [ARTIFACT_ID]: MUTATION_WITH_SURVIVOR };
+    const html = render();
+    expect(html).toContain('Auto-generate tests that kill the surviving mutants');
+  });
+
+  it('renders an improved summary with the score lift and badges the landed version', () => {
+    sandboxState.improveByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        error: null,
+        result: {
+          outcome: 'improved',
+          attemptsUsed: 2,
+          finalArtifactId: 'a-2',
+          startScore: 0.78,
+          finalScore: 0.93,
+          attempts: [
+            { attempt: 1, artifactId: 'a-1', score: 0.78, killed: 31, survived: 9 },
+            { attempt: 2, artifactId: 'a-2', score: 0.93, killed: 37, survived: 3 },
+          ],
+        },
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('Improve coverage');
+    expect(html).toContain('improved');
+    expect(html).toContain('78%');
+    expect(html).toContain('93%');
+    expect(html).toContain('attempt 2');
+    expect(html).toContain('landed');
+  });
+
+  it('shows the error message for an improve that stopped on an error', () => {
+    sandboxState.improveByArtifact = {
+      [ARTIFACT_ID]: {
+        phase: 'done',
+        clientRunId: null,
+        progress: null,
+        result: {
+          outcome: 'error',
+          attemptsUsed: 1,
+          finalArtifactId: 'a-1',
+          startScore: 0,
+          finalScore: 0,
+          attempts: [{ attempt: 1, artifactId: 'a-1', score: 0, killed: 0, survived: 1 }],
+          errorMessage: 'Regenerating the test cases failed on attempt 1: boom',
+        },
+        error: null,
+      },
+    };
+
+    const html = render();
+    expect(html).toContain('Regenerating the test cases failed');
   });
 });
 

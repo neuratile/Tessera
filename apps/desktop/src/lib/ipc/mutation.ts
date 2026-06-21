@@ -1,5 +1,11 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
+  type ImproveRequest,
+  ImproveRequestSchema,
+  type ImproveResult,
+  ImproveResultSchema,
+  type ImproveStreamEvent,
+  ImproveStreamEventSchema,
   type MutationCheckRecord,
   MutationCheckRecordSchema,
   type MutationCheckSummary,
@@ -28,6 +34,12 @@ const MUTATION_HISTORY_LIMIT = 20;
  * `commands/sandbox.rs::MUTATION_EVENT`.
  */
 const MUTATION_EVENT_CHANNEL = 'mutation://event';
+
+/**
+ * Channel the backend emits per-attempt "improve coverage" progress on.
+ * Mirrored from `commands/sandbox.rs::IMPROVE_EVENT`.
+ */
+const IMPROVE_EVENT_CHANNEL = 'improve://event';
 
 /**
  * Mutation-test a generated test-case artifact: score how many seeded bugs the
@@ -95,6 +107,46 @@ export async function subscribeToMutationEvents(
     });
   } catch (err) {
     throw new IpcError(MUTATION_EVENT_CHANNEL, asMessage(err), { cause: err });
+  }
+}
+
+/**
+ * Auto-generate tests that kill a suite's surviving mutants and re-score to
+ * prove the lift (plan/versions/v2/v2-feature-docs/MUTATION_TESTING.md, Stage 2).
+ * Validates `args` against `ImproveRequestSchema` before sending. `maxAttempts`
+ * is a hint re-clamped to [1, 5]; `maxMutants` to [1, 200].
+ *
+ * A later score failure (the regenerated suite was not green) or a regeneration
+ * error is **not** thrown — it comes back as an `ImproveResult` with `outcome:
+ * 'error'` carrying an `errorMessage`. Only a pre-flight rejection (opt-out,
+ * blank/missing artifact, unresolvable provider, or a **red baseline** on the
+ * first score) throws an `IpcError`.
+ */
+export async function improveCoverage(args: ImproveRequest): Promise<ImproveResult> {
+  const parsed = ImproveRequestSchema.safeParse(args);
+  if (!parsed.success) {
+    throw new IpcError('improve_coverage', `invalid arguments: ${parsed.error.message}`);
+  }
+  return invokeAndParse('improve_coverage', ImproveResultSchema, { request: parsed.data });
+}
+
+/**
+ * Subscribe to per-attempt improve progress events. Returns an `unlisten`
+ * callback the caller MUST invoke on unmount. Schema-invalid payloads are
+ * dropped silently so a future backend event kind cannot crash the renderer.
+ */
+export async function subscribeToImproveEvents(
+  handler: (event: ImproveStreamEvent) => void,
+): Promise<UnlistenFn> {
+  try {
+    return await listen<unknown>(IMPROVE_EVENT_CHANNEL, (event) => {
+      const parsed = ImproveStreamEventSchema.safeParse(event.payload);
+      if (parsed.success) {
+        handler(parsed.data);
+      }
+    });
+  } catch (err) {
+    throw new IpcError(IMPROVE_EVENT_CHANNEL, asMessage(err), { cause: err });
   }
 }
 

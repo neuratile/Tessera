@@ -124,3 +124,104 @@ export const MutationStreamEventSchema = z.object({
 });
 
 export type MutationStreamEvent = z.infer<typeof MutationStreamEventSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Stage 2 — "Improve coverage" (MUTATION_TESTING.md §5.1, §5.6).             */
+/*                                                                            */
+/* Mirrors the Rust structs + enums in                                        */
+/* `apps/desktop/src-tauri/src/services/mutation_service.rs` (results) and     */
+/* `commands/sandbox.rs` (the request + event wire forms).                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Terminal state of an improve loop — mirrors the Rust `ImproveOutcome` enum.
+ *
+ * - `improved`    — the mutation score rose but did not reach 100%.
+ * - `perfect`     — every scorable mutant is now killed (100%).
+ * - `exhausted`   — the attempt budget ran out with no net gain.
+ * - `no_progress` — a regeneration failed to raise the score; the loop bailed.
+ * - `error`       — a score sweep failed / was cancelled, or a regen errored.
+ */
+export const ImproveOutcomeSchema = z.union([
+  z.literal('improved'),
+  z.literal('perfect'),
+  z.literal('exhausted'),
+  z.literal('no_progress'),
+  z.literal('error'),
+]);
+
+export type ImproveOutcome = z.infer<typeof ImproveOutcomeSchema>;
+
+/**
+ * Record of one score → (maybe) regenerate cycle — mirrors the Rust
+ * `ImproveAttempt` struct. `artifactId` is the version that was *scored* on this
+ * attempt; `score` is its mutation score in `[0, 1]`.
+ */
+export const ImproveAttemptSchema = z.object({
+  attempt: z.number().int().positive(),
+  artifactId: z.string().min(1),
+  score: z.number().min(0).max(1),
+  killed: z.number().int().nonnegative(),
+  survived: z.number().int().nonnegative(),
+});
+
+export type ImproveAttempt = z.infer<typeof ImproveAttemptSchema>;
+
+/**
+ * Aggregate result of an improve loop — mirrors the Rust `ImproveResult` struct.
+ * `finalArtifactId` is the best-scoring version the user lands on; `startScore`
+ * / `finalScore` carry the lift. `errorMessage` is set only when
+ * `outcome === 'error'`.
+ */
+export const ImproveResultSchema = z.object({
+  outcome: ImproveOutcomeSchema,
+  attemptsUsed: z.number().int().nonnegative(),
+  // The backend always lands on a real version (the best attempt, or the input
+  // artifact on a pre-flight error), so this is never empty — enforce `.min(1)`
+  // for consistency with `ImproveAttemptSchema.artifactId`.
+  finalArtifactId: z.string().min(1),
+  startScore: z.number().min(0).max(1),
+  finalScore: z.number().min(0).max(1),
+  attempts: z.array(ImproveAttemptSchema),
+  errorMessage: z.string().optional(),
+});
+
+export type ImproveResult = z.infer<typeof ImproveResultSchema>;
+
+/**
+ * IPC request to run the improve loop — mirrors the Rust `ImproveArgs` struct in
+ * `commands/sandbox.rs` (camelCase). `clientRunId`, `scopeHint`, and
+ * `projectSummary` carry Rust `#[serde(default)]`, so they are optional here.
+ * `maxAttempts` is a hint re-clamped to `[1, 5]`; `maxMutants` to `[1, 200]`.
+ */
+export const ImproveRequestSchema = z.object({
+  artifactId: z.string().min(1),
+  maxAttempts: z.number().int().positive(),
+  maxMutants: z.number().int().positive(),
+  optInConfirmed: z.boolean(),
+  clientRunId: z.string().optional(),
+  model: z.string().min(1),
+  provider: z.string().min(1),
+  projectId: z.string().min(1),
+  projectName: z.string().min(1),
+  scopeHint: z.string().optional(),
+  projectSummary: z.string().optional(),
+});
+
+export type ImproveRequest = z.infer<typeof ImproveRequestSchema>;
+
+/**
+ * Per-attempt progress event streamed on the `improve://event` channel —
+ * mirrors the Rust `ImproveEventPayload` struct in `commands/sandbox.rs`. `kind`
+ * is always `'attempt'`; it is kept so the renderer can pivot on future event
+ * kinds without a schema change. `improveId` correlates events to one loop when
+ * several are in flight.
+ */
+export const ImproveStreamEventSchema = z.object({
+  improveId: z.string(),
+  kind: z.literal('attempt'),
+  attempt: z.number().int().positive(),
+  score: z.number().min(0).max(1),
+});
+
+export type ImproveStreamEvent = z.infer<typeof ImproveStreamEventSchema>;

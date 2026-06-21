@@ -37,10 +37,14 @@ extracted into a shared harness — see
 [`SANDBOX_PYTHON_RUNNER.md`](./versions/v1/SANDBOX_PYTHON_RUNNER.md). Java/Go + cloud
 runners reuse the same `TestRunner` trait next.
 
-### 2. Mutation testing integration
+### 2. Mutation testing integration — **shipped (JS/TS)**
 After generating tests, mutate the source (flip operators, drop conditions) and check
 whether the tests catch the mutations, reporting a **mutation score** alongside coverage.
 **Edge:** proves test quality objectively, not just a coverage percentage.
+**Status:** both stages shipped (v2 P0 #2) — Stage 1 scores the suite and lists
+survivors; Stage 2 ("Improve coverage") feeds survivors back to the LLM to
+auto-write tests that kill them and re-scores to prove the lift. See
+[`MUTATION_TESTING.md`](./versions/v2/v2-feature-docs/MUTATION_TESTING.md).
 
 ### 3. Diff-aware incremental generation
 Watch git diffs (pre-commit hook or file watcher); when code changes, regenerate only

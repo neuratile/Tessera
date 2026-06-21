@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ImproveOutcomeSchema,
+  ImproveRequestSchema,
+  ImproveResultSchema,
+  ImproveStreamEventSchema,
   MutantResultSchema,
   MutantStatusSchema,
   MutationCheckRecordSchema,
@@ -152,5 +156,109 @@ describe('MutationStreamEventSchema', () => {
     });
     expect(parsed.done).toBe(12);
     expect(parsed.total).toBe(40);
+  });
+});
+
+describe('ImproveOutcomeSchema', () => {
+  it('accepts the five serde outcome literals', () => {
+    for (const outcome of ['improved', 'perfect', 'exhausted', 'no_progress', 'error'] as const) {
+      expect(ImproveOutcomeSchema.parse(outcome)).toBe(outcome);
+    }
+  });
+
+  it('rejects an unknown outcome', () => {
+    expect(ImproveOutcomeSchema.safeParse('healed').success).toBe(false);
+  });
+});
+
+describe('ImproveResultSchema', () => {
+  it('round-trips an improved result with its attempt trail', () => {
+    const parsed = ImproveResultSchema.parse({
+      outcome: 'improved',
+      attemptsUsed: 2,
+      finalArtifactId: 'a-2',
+      startScore: 0.5,
+      finalScore: 0.9,
+      attempts: [
+        { attempt: 1, artifactId: 'a-1', score: 0.5, killed: 5, survived: 5 },
+        { attempt: 2, artifactId: 'a-2', score: 0.9, killed: 9, survived: 1 },
+      ],
+    });
+    expect(parsed.outcome).toBe('improved');
+    expect(parsed.startScore).toBeCloseTo(0.5);
+    expect(parsed.finalScore).toBeCloseTo(0.9);
+    expect(parsed.attempts).toHaveLength(2);
+    expect(parsed.errorMessage).toBeUndefined();
+  });
+
+  it('carries an errorMessage on an error outcome', () => {
+    const parsed = ImproveResultSchema.parse({
+      outcome: 'error',
+      attemptsUsed: 1,
+      finalArtifactId: 'a-1',
+      startScore: 0,
+      finalScore: 0,
+      attempts: [{ attempt: 1, artifactId: 'a-1', score: 0, killed: 0, survived: 1 }],
+      errorMessage: 'Regenerating the test cases failed on attempt 1: boom',
+    });
+    expect(parsed.errorMessage).toContain('Regenerating');
+  });
+
+  it('rejects a score outside [0, 1]', () => {
+    expect(
+      ImproveResultSchema.safeParse({
+        outcome: 'perfect',
+        attemptsUsed: 1,
+        finalArtifactId: 'a-1',
+        startScore: 0,
+        finalScore: 1.4,
+        attempts: [],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('ImproveRequestSchema', () => {
+  it('round-trips a request with the optional defaults omitted', () => {
+    const parsed = ImproveRequestSchema.parse({
+      artifactId: 'a-1',
+      maxAttempts: 3,
+      maxMutants: 40,
+      optInConfirmed: true,
+      model: 'qwen2.5-coder:7b',
+      provider: 'ollama',
+      projectId: 'p-1',
+      projectName: 'demo',
+    });
+    expect(parsed.maxMutants).toBe(40);
+    expect(parsed.clientRunId).toBeUndefined();
+  });
+
+  it('rejects a non-positive maxAttempts', () => {
+    expect(
+      ImproveRequestSchema.safeParse({
+        artifactId: 'a-1',
+        maxAttempts: 0,
+        maxMutants: 40,
+        optInConfirmed: true,
+        model: 'm',
+        provider: 'ollama',
+        projectId: 'p-1',
+        projectName: 'demo',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('ImproveStreamEventSchema', () => {
+  it('round-trips a per-attempt progress event', () => {
+    const parsed = ImproveStreamEventSchema.parse({
+      improveId: 'i-1',
+      kind: 'attempt',
+      attempt: 2,
+      score: 0.93,
+    });
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.score).toBeCloseTo(0.93);
   });
 });

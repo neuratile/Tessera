@@ -9,11 +9,13 @@
 //! The opt-in gate (plan §3) is enforced in the service, not here, so the
 //! backend rejects an opted-out run regardless of how it is invoked.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+use crate::config::AppConfig;
+use crate::providers::factory as llm_factory;
 use crate::providers::runners::factory;
 use crate::providers::runners::mutation::{
     MutationCheckRecord, MutationCheckSummary, MutationResult,
@@ -21,14 +23,28 @@ use crate::providers::runners::mutation::{
 use crate::providers::runners::{
     FlakyCheckRecord, FlakyCheckSummary, FlakyRunResult, RunRequest, RunResult,
 };
-use crate::services::mutation_service::{self, MutationEvent, MutationSink};
+use crate::repositories::provider_config_repo;
+use crate::services::generation_service::GenerationDeps;
+use crate::services::mutation_service::{
+    self, ImproveEvent, ImproveRequest, ImproveResult, ImproveSink, MutationEvent, MutationSink,
+};
 use crate::services::sandbox_service::{self, RunRegistry, SandboxDeps};
+use crate::services::{embedding_config_service, provider_config_service};
 use crate::utils::crypto::CryptoKey;
+
+/// Default single-user id used to resolve the active provider config — mirrors
+/// `commands/healing.rs` (the app is single-user today).
+const DEFAULT_USER_ID: &str = "00000000-0000-4000-8000-000000000001";
 
 /// Tauri event channel the renderer subscribes to for per-mutant sweep
 /// progress. Carries a `mutationId` so a sweep started while another is
 /// mid-flight is not cross-wired in the UI (mirrors `heal://event`).
 const MUTATION_EVENT: &str = "mutation://event";
+
+/// Tauri event channel the renderer subscribes to for per-attempt "improve
+/// coverage" progress. Carries an `improveId` so an improve started while
+/// another is mid-flight is not cross-wired in the UI (mirrors `heal://event`).
+const IMPROVE_EVENT: &str = "improve://event";
 
 /// Execute a generated test-case artifact in the local Docker sandbox and
 /// return the persisted result.
@@ -253,5 +269,136 @@ fn build_mutation_sink(app: AppHandle, mutation_id: String) -> MutationSink {
             total,
         };
         let _ = app.emit(MUTATION_EVENT, payload);
+    })
+}
+
+/// IPC arguments for [`improve_coverage`]. Mirrors `ImproveRequestSchema`
+/// (camelCase). `provider` selects the active LLM config used to build the
+/// generation deps; it is not part of the service-level [`ImproveRequest`].
+/// `maxMutants` / `maxAttempts` are hints — the backend re-clamps them.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImproveArgs {
+    pub artifact_id: String,
+    pub max_attempts: u32,
+    pub max_mutants: u32,
+    pub opt_in_confirmed: bool,
+    #[serde(default)]
+    pub client_run_id: String,
+    pub model: String,
+    pub provider: String,
+    pub project_id: String,
+    pub project_name: String,
+    #[serde(default)]
+    pub scope_hint: String,
+    #[serde(default)]
+    pub project_summary: String,
+}
+
+/// Per-attempt progress payload emitted on the `improve://event` channel
+/// (`plan/versions/v2/v2-feature-docs/MUTATION_TESTING.md` §5.4). `kind` is
+/// always `"attempt"`; the field is kept so the renderer can pivot on future
+/// event kinds without a schema change.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImproveEventPayload {
+    pub improve_id: String,
+    pub kind: &'static str,
+    pub attempt: u32,
+    pub score: f64,
+}
+
+/// Auto-generate tests that kill a suite's surviving mutants and re-score to
+/// prove the lift (`plan/versions/v2/v2-feature-docs/MUTATION_TESTING.md`,
+/// Stage 2). Thin handler mirroring [`run_self_heal`](crate::commands::healing::run_self_heal):
+/// it builds *both* the [`GenerationDeps`] (LLM + embeddings, as
+/// `generate_artifact` does) and the [`SandboxDeps`] (runner factory + cancel
+/// registry, as [`run_test_sandbox`] does), then delegates to
+/// [`mutation_service::improve`].
+///
+/// Streams per-attempt progress on `improve://event`, correlated by the caller's
+/// `clientRunId`. `maxAttempts` is re-clamped to `[1, 5]` and `maxMutants` to
+/// `[1, 200]` by the service.
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) only for a
+/// pre-flight failure before any attempt runs: a blank artifact id, an
+/// unresolvable provider config, or whatever the first score rejects up front
+/// (opt-out, missing / wrong-type artifact, or a **red baseline**). A later
+/// score failure or a regeneration error is **not** an error here — it comes
+/// back as an [`ImproveResult`] with `outcome: "error"`.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn improve_coverage(
+    app: AppHandle,
+    pool: State<'_, SqlitePool>,
+    registry: State<'_, RunRegistry>,
+    config: State<'_, AppConfig>,
+    crypto: State<'_, CryptoKey>,
+    request: ImproveArgs,
+) -> Result<ImproveResult, String> {
+    // Generation deps: resolve the active provider into an LLM + embeddings,
+    // exactly as `generate_artifact` / `run_self_heal` do.
+    let row = provider_config_repo::fetch_active(&pool, DEFAULT_USER_ID, &request.provider)
+        .await
+        .map_err(|e| e.to_string())?;
+    let provider_config =
+        provider_config_service::build_provider_config(&crypto, &row).map_err(|e| e.to_string())?;
+    let llm = llm_factory::build_llm_provider(&provider_config).map_err(|e| e.to_string())?;
+    let embeddings =
+        embedding_config_service::resolve_provider(&pool, &crypto, &config.ollama_base_url)
+            .await
+            .map_err(|e| e.to_string())?;
+    let gen_deps = GenerationDeps { pool: &pool, llm, embeddings };
+
+    // Sandbox deps: per-language runner factory + cancel registry, exactly as
+    // `run_test_sandbox` does.
+    let sandbox_deps = SandboxDeps {
+        pool: &pool,
+        crypto: Some(&crypto),
+        runner_factory: &factory::runner_for,
+        registry: &registry,
+    };
+
+    let improve_id = if request.client_run_id.trim().is_empty() {
+        Uuid::new_v4().to_string()
+    } else {
+        request.client_run_id.clone()
+    };
+
+    let improve_request = ImproveRequest {
+        artifact_id: request.artifact_id,
+        max_attempts: request.max_attempts,
+        max_mutants: request.max_mutants,
+        opt_in_confirmed: request.opt_in_confirmed,
+        client_run_id: request.client_run_id,
+        model: request.model,
+        project_id: request.project_id,
+        project_name: request.project_name,
+        scope_hint: request.scope_hint,
+        project_summary: request.project_summary,
+    };
+
+    let sink = build_improve_sink(app.clone(), improve_id);
+
+    mutation_service::improve(improve_request, &gen_deps, &sandbox_deps, Some(sink))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Build an [`ImproveSink`] that fans `ImproveEvent`s out as Tauri events on the
+/// `improve://event` channel. Emit failures are swallowed — a disconnected
+/// renderer must not abort the loop.
+fn build_improve_sink(app: AppHandle, improve_id: String) -> ImproveSink {
+    Box::new(move |event: ImproveEvent| {
+        let ImproveEvent::Attempt { attempt, score } = event;
+        let payload = ImproveEventPayload {
+            improve_id: improve_id.clone(),
+            kind: "attempt",
+            attempt,
+            score,
+        };
+        let _ = app.emit(IMPROVE_EVENT, payload);
     })
 }

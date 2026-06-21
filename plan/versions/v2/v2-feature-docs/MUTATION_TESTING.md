@@ -1,6 +1,7 @@
 # Mutation testing + mutation score
 
-> Status: **draft** (v2, P0 #2) — design only, not yet built · Owner: core
+> Status: **shipped** (v2, P0 #2) — Stage 1 (score) + Stage 2 (improve) both
+> built · Owner: core
 > Depends on: `sandbox_service::run` (execution entry point, v1, reused
 > verbatim), `ast_service` (tree-sitter parsing, v1) and
 > `generation_service::generate` (LLM entry point, v1 — Stage 2 only).
@@ -11,6 +12,21 @@
 > (improve)** feeds survivors back to the LLM to auto-generate tests that kill
 > them, then re-scores to prove it. Persisted history ships from the first PR.
 > Language scope: **JS/TS only** in v1 (Python/Go reuse the same engine later).
+>
+> **Stage 1 shipped** (#86/#87): the `mutation_service::score` orchestrator, the
+> pure mutant engine (`providers/runners/mutation.rs`), `mutation_check_repo` +
+> migration `0009`, the `run_mutation_test` / `list_mutation_checks` /
+> `get_mutation_check` commands, and the "Mutation test" action + "Mutation
+> history" trend in the sandbox panel.
+>
+> **Stage 2 shipped** (this PR): `mutation_service::improve` (mirrors
+> `healing_service::heal` — score → synth survivor feedback → `generate` with
+> `parent_id` → re-score → keep best, bounded by an attempt budget), the
+> `improve_coverage` command streaming `improve://event`, the `Improve*` Zod
+> mirror + IPC wrapper, the store `improve` slice, and the **"Improve coverage"**
+> action + `ImproveResultView` (start → final score lift, per-attempt rows,
+> "landed" badge) in the sandbox panel. No new migration — each improve attempt
+> re-scores through Stage 1, so every attempt persists via `mutation_check_repo`.
 
 ## 0. Where this sits in v2
 
