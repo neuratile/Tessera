@@ -487,6 +487,36 @@ pub fn request_cancel(registry: &RunRegistry, run_id: &str) -> bool {
 /// only one of N runs, so posting that single run's pass/fail to Jira would
 /// misrepresent the overall flaky verdict (a test can pass on run #1 yet be
 /// flaky). Surfacing the flaky verdict to trackers is deferred to §7 hardening.
+/// Build a human-readable reason for a run the runner classified as
+/// [`RunStatus::Error`]. That status means the container executed but no
+/// test produced a pass/fail verdict — almost always the suite failing to
+/// load (a missing dependency, an import error, or no test files matched
+/// the runner's glob). The container's stderr/stdout carries the real
+/// cause, so surface it rather than persisting a bare ERROR with no
+/// message (which reads to the user as "nothing happened").
+fn explain_error_run(output: &RunnerOutput) -> String {
+    let stderr = output.stderr.trim();
+    let stdout = output.stdout.trim();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no diagnostic output was captured"
+    };
+    if output.tests.is_empty() {
+        format!(
+            "the runner executed 0 tests — the suite failed to load. This usually \
+             means a missing dependency, an import error, or no files matched the \
+             test glob. The sandbox only provides the pre-installed runner image \
+             (vitest / pytest); it cannot resolve project dependencies such as \
+             React, @testing-library, or jsdom. Runner output:\n{detail}"
+        )
+    } else {
+        format!("the test run errored before completing. Runner output:\n{detail}")
+    }
+}
+
 async fn persist_success(
     deps: &SandboxDeps<'_>,
     run_id: &str,
@@ -512,6 +542,14 @@ async fn persist_success(
     let failed_count = count_status(&output.tests, TestStatus::Failed);
     let (status, error_message) = match &write_err {
         Some(e) => (RunStatus::Error, Some(format!("DB write failed: {e}"))),
+        // A runner that returns `Ok` but with `RunStatus::Error` ran the
+        // container fine yet produced no pass/fail verdict — the suite
+        // failed to load (missing dependency, import error, or no matching
+        // test files). The reason is in the captured stderr/stdout; surface
+        // it instead of finalizing with a bare, message-less ERROR.
+        None if output.status == RunStatus::Error => {
+            (RunStatus::Error, Some(explain_error_run(&output)))
+        }
         None => (output.status, None),
     };
 
@@ -998,6 +1036,68 @@ mod tests {
             stdout: "ran 2 tests".into(),
             stderr: String::new(),
         }
+    }
+
+    /// A runner image with no project deps makes vitest collect 0 tests;
+    /// that is `RunStatus::Error` with no verdicts. The captured stderr
+    /// must reach the user, not be dropped as a null message.
+    fn empty_error_output(stderr: &str) -> RunnerOutput {
+        RunnerOutput {
+            status: RunStatus::Error,
+            tests: Vec::new(),
+            coverage: Vec::new(),
+            stdout: String::new(),
+            stderr: stderr.into(),
+        }
+    }
+
+    #[test]
+    fn explain_error_run_surfaces_stderr_and_zero_test_hint() {
+        let out = empty_error_output("Error: Cannot find package '@testing-library/react'");
+        let msg = explain_error_run(&out);
+        assert!(msg.contains("executed 0 tests"), "got: {msg}");
+        assert!(msg.contains("@testing-library/react"), "must include stderr: {msg}");
+    }
+
+    #[test]
+    fn explain_error_run_falls_back_to_stdout_then_placeholder() {
+        let mut out = empty_error_output("");
+        out.stdout = "No test files found, exiting with code 1".into();
+        assert!(explain_error_run(&out).contains("No test files found"));
+
+        let bare = empty_error_output("");
+        assert!(explain_error_run(&bare).contains("no diagnostic output"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_with_zero_tests_persists_error_message_from_stderr() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed_artifact(&pool, ArtifactType::TestCases).await;
+
+        let runner: Arc<dyn TestRunner> = Arc::new(ScriptedRunner::new(Scripted::Succeed(
+            empty_error_output("Error: Cannot find package '@testing-library/react'"),
+        )));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let result = run(
+            RunRequest {
+                artifact_id,
+                opt_in_confirmed: true,
+                client_run_id: String::new(),
+            },
+            &deps,
+        )
+        .await
+        .expect("run completes");
+
+        assert_eq!(result.status, RunStatus::Error);
+        let msg = result.error_message.expect("error message must be populated");
+        assert!(msg.contains("@testing-library/react"), "got: {msg}");
+        assert!(msg.contains("0 tests"), "got: {msg}");
+        drop(pool);
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test(flavor = "multi_thread")]

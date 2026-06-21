@@ -159,7 +159,11 @@ fn materialize_workspace(root: &Path, input: &RunInput) -> Result<(), RunnerErro
 
 /// Command run inside the container. Emits a vitest JSON report and an
 /// istanbul `coverage-final.json`, both into the mounted workspace.
-const IN_CONTAINER_CMD: &str = "vitest run --coverage \
+// `--no-file-parallelism` runs test files in a single worker instead of
+// spawning one per host core (paired with the GOMAXPROCS cap in
+// `docker_harness`, this keeps the container's thread/process count bounded
+// — see the EAGAIN "failed to create new OS thread" failure mode).
+const IN_CONTAINER_CMD: &str = "vitest run --coverage --no-file-parallelism \
      --reporter=json --outputFile=results.json \
      --coverage.reporter=json --coverage.reportsDirectory=coverage";
 
