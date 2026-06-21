@@ -569,7 +569,10 @@ pub async fn improve(
         best.consider(&current_artifact_id, &scored);
 
         // 2. Perfect — every scorable mutant was killed → nothing left to chase.
-        if scored.survived == 0 && scored.total > 0 {
+        //    Gate on `killed > 0`, not `total > 0`: `total` counts errored mutants
+        //    too, so an all-errored sweep (killed = 0, survived = 0, errored = N)
+        //    would otherwise be misreported as Perfect at a 0% score.
+        if scored.survived == 0 && scored.killed > 0 {
             tracing::info!(attempt, score = scored.score, "improve reached a perfect score");
             return Ok(improve_outcome(ImproveOutcome::Perfect, attempts, &best, start_score));
         }
@@ -1557,6 +1560,41 @@ mod tests {
         assert_eq!(result.attempts_used, 1);
         assert_eq!(result.final_artifact_id, artifact_id);
         assert!((result.final_score - 1.0).abs() < f64::EPSILON);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn improve_all_errored_mutants_is_not_perfect() {
+        let (pool, path) = open_pool().await;
+        let artifact_id = seed(&pool, "export const f = (a, b) => a + b;").await;
+        seed_chunk(&pool).await;
+
+        // Baseline passes, but the lone mutant fails to build → errored, not
+        // killed. With killed = 0 / survived = 0 / errored = 1, score is 0.0:
+        // this must NOT be reported as Perfect (the guard regression Greptile
+        // caught), and with no survivors to chase the loop bails as NoProgress.
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(vec![
+            Scripted::Succeed(pass_baseline("src/calc.ts", &[1])),
+            Scripted::Succeed(out(RunStatus::Error, vec![], vec![])),
+        ]));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let sandbox_deps =
+            SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let llm = Arc::new(SequencedLlm::new(vec![])); // never regenerates
+        let embeddings: Arc<dyn EmbeddingProvider> = Arc::new(ScriptedEmbeddings { dim: 8 });
+        let gen_deps = GenerationDeps { pool: &pool, llm, embeddings };
+
+        let result = improve(improve_request(&artifact_id, 3), &gen_deps, &sandbox_deps, None)
+            .await
+            .expect("improve runs");
+
+        assert_ne!(result.outcome, ImproveOutcome::Perfect, "all-errored is not perfect");
+        assert_eq!(result.outcome, ImproveOutcome::NoProgress);
+        assert!((result.final_score - 0.0).abs() < f64::EPSILON);
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
