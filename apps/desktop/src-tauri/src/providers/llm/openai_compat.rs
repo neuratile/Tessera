@@ -334,11 +334,62 @@ fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, Ll
                 provider,
                 message: format!("invalid stream JSON: {e}"),
             })?;
+        // OpenRouter (and other aggregators) return upstream failures
+        // *in-band*: HTTP 200, then a `data:` chunk with empty `choices`
+        // and an `error` object (e.g. a 504 timeout from the routed
+        // provider). Without this branch the chunk parses as "no content",
+        // the stream ends empty, and the caller misreports it as an empty
+        // response / unsupported tool calling. Surface the real cause.
+        if let Some(err) = &parsed.error {
+            return Err(stream_error_to_llm(provider, err));
+        }
         for chunk in openai_chunk_to_chunks(parsed) {
             out.push(chunk);
         }
     }
     Ok(out)
+}
+
+/// Map an in-band streamed `error` object to the closest [`LlmError`].
+/// The `code` can be an integer (`504`) or a string; classify on the
+/// numeric form when present and always preserve the upstream message.
+fn stream_error_to_llm(provider: &'static str, err: &OpenAiStreamError) -> LlmError {
+    let message = err
+        .message
+        .clone()
+        .unwrap_or_else(|| "upstream provider error".to_string());
+    let code_num = err.code.as_ref().and_then(serde_json::Value::as_u64);
+    let error_type = err
+        .metadata
+        .as_ref()
+        .and_then(|m| m.error_type.as_deref());
+    let is_timeout = matches!(code_num, Some(504 | 408 | 524))
+        || error_type == Some("timeout")
+        || message.to_lowercase().contains("timeout")
+        || message.to_lowercase().contains("aborted");
+
+    match code_num {
+        Some(401 | 403) => LlmError::AuthFailed { provider, message },
+        Some(429) => LlmError::RateLimited {
+            provider,
+            retry_after_seconds: None,
+        },
+        _ if is_timeout => LlmError::ProviderUnavailable {
+            provider,
+            message: format!(
+                "{message} — the upstream model timed out before responding. This is common \
+                 on free / heavily-loaded routes with a large prompt. Try a faster or smaller \
+                 model, or a different provider route."
+            ),
+        },
+        _ => LlmError::ProviderUnavailable {
+            provider,
+            message: match code_num {
+                Some(code) => format!("upstream error {code}: {message}"),
+                None => message,
+            },
+        },
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,6 +398,26 @@ struct OpenAiStreamChunk {
     choices: Vec<OpenAiStreamChoice>,
     #[serde(default)]
     usage: Option<OpenAiUsage>,
+    /// In-band error envelope used by `OpenRouter` and other aggregators
+    /// when an upstream provider fails mid-stream (HTTP stays 200).
+    #[serde(default)]
+    error: Option<OpenAiStreamError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStreamError {
+    #[serde(default)]
+    code: Option<serde_json::Value>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    metadata: Option<OpenAiStreamErrorMeta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStreamErrorMeta {
+    #[serde(default)]
+    error_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -514,6 +585,32 @@ mod tests {
             }
             other => panic!("expected Done, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_inband_504_timeout_surfaces_provider_unavailable() {
+        // Exact shape OpenRouter streams when the routed provider (here
+        // "Nex AGI") times out: HTTP 200, empty choices, in-band error.
+        let payload = r#"data: {"id":"gen-1","object":"chat.completion.chunk","model":"unknown","provider":"Nex AGI","choices":[],"error":{"code":504,"message":"The operation was aborted","metadata":{"error_type":"timeout"}}}"#;
+        let err = parse_sse_event("openrouter", payload).expect_err("in-band error must surface");
+        assert_eq!(err.code(), "LLM_PROVIDER_UNAVAILABLE");
+        let msg = err.to_string();
+        assert!(msg.contains("The operation was aborted"), "got: {msg}");
+        assert!(msg.contains("timed out"), "must hint timeout cause: {msg}");
+    }
+
+    #[test]
+    fn parse_inband_rate_limit_maps_to_rate_limited() {
+        let payload = r#"data: {"choices":[],"error":{"code":429,"message":"rate limited"}}"#;
+        let err = parse_sse_event("openrouter", payload).expect_err("must surface");
+        assert_eq!(err.code(), "LLM_RATE_LIMITED");
+    }
+
+    #[test]
+    fn parse_inband_auth_error_maps_to_auth_failed() {
+        let payload = r#"data: {"choices":[],"error":{"code":401,"message":"invalid key"}}"#;
+        let err = parse_sse_event("openrouter", payload).expect_err("must surface");
+        assert_eq!(err.code(), "LLM_AUTH_FAILED");
     }
 
     #[test]

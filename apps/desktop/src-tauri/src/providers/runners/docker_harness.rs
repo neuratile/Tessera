@@ -175,6 +175,21 @@ pub fn hardened_run_args(
         WORK_MOUNT.into(),
     ];
 
+    // Cap the Go runtime's thread pool. esbuild (the TypeScript transformer
+    // vitest shells out to) is a Go binary that defaults GOMAXPROCS to the
+    // number of *host* cores — `--cpus` caps CPU time, not visible cores — so
+    // on a many-core machine it tries to spawn one OS thread per core. Under
+    // the container's memory/pids budget those `clone()` calls intermittently
+    // fail with EAGAIN ("failed to create new OS thread"), killing the run.
+    // Pinning GOMAXPROCS to the CPU allotment keeps the thread count bounded
+    // and the run deterministic. (No effect on the Python runner.)
+    // `cpus` is a small positive fraction (default 1.0); rounding to the
+    // nearest whole CPU and flooring at 1 cannot meaningfully truncate or
+    // lose sign — the cast is safe by construction.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let gomaxprocs = limits.cpus.round().max(1.0) as u32;
+    args.extend(["-e".into(), format!("GOMAXPROCS={gomaxprocs}")]);
+
     // The workspace is 0o700 host-user-only (see `WorkspaceGuard::create`),
     // so the container must run as the host uid:gid to write its results
     // into the bind mount — and every file it creates stays owned by the
@@ -430,6 +445,10 @@ mod tests {
         assert!(has_pair("--cpus", "1.00"), "cpu cap missing");
         assert!(has_pair("--memory", "512m"), "memory cap missing");
         assert!(has_pair("--pids-limit", "256"), "pids cap missing");
+        assert!(
+            has_pair("-e", "GOMAXPROCS=1"),
+            "GOMAXPROCS thread cap missing (default 1.0 cpus → 1)"
+        );
         assert!(
             has_pair("--ulimit", &format!("fsize={MAX_WRITE_BYTES}")),
             "fsize cap missing"

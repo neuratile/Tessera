@@ -203,6 +203,16 @@ pub async fn generate(
     )
     .await?;
 
+    // 5a. Reject a schema-valid but *empty* payload. `emit_test_cases`
+    //     allows `cases: []` (no `minItems`, kept lax so `normalize_missing_arrays`
+    //     can backfill an absent array), so a model that emits `{}` or
+    //     `{"cases":[]}` passes validation and would persist as a useless
+    //     "0 test cases" artifact. Small / reasoning-only free models do
+    //     exactly this — they exhaust their token budget before emitting a
+    //     usable tool call. Fail loudly with a model hint instead of
+    //     silently saving nothing.
+    guard_non_empty_payload(request.artifact_type, &structured_data, &request.model)?;
+
     // 5b. Self-heal the runnable workspace when a test-cases payload
     //     skipped the optional `files[]` (sandbox prerequisite).
     let (repair_input, repair_output) = ensure_runnable_files(
@@ -299,6 +309,38 @@ fn extract_raw_json(
     Err(AppError::InvalidInput(format!(
         "model `{model}` did not invoke `{tool_name}` and emitted {text_len} chars of free text \
          that does not contain a JSON object. Preview: {preview}"
+    )))
+}
+
+/// Reject a payload that is schema-valid but carries no actual content.
+/// Today this guards `TestCases` (whose `cases` array is intentionally
+/// allowed to be empty by the JSON Schema so a missing array can be
+/// backfilled) — an empty `cases` is never a useful artifact and almost
+/// always signals a model that cannot handle the schema. Other artifact
+/// types fall through unchanged.
+fn guard_non_empty_payload(
+    kind: ArtifactType,
+    data: &JsonValue,
+    model: &str,
+) -> AppResult<()> {
+    // True when the array is absent OR present-but-empty. Phrased via
+    // `is_some_and` (MSRV 1.81 — `Option::is_none_or` is 1.82).
+    let empty_array = |key: &str| {
+        !data
+            .get(key)
+            .and_then(JsonValue::as_array)
+            .is_some_and(|a| !a.is_empty())
+    };
+    let noun = match kind {
+        ArtifactType::TestCases if empty_array("cases") => "test cases",
+        _ => return Ok(()),
+    };
+    Err(AppError::InvalidInput(format!(
+        "model `{model}` produced no {noun}. This usually means the model is too weak \
+         for the {noun} schema — small or reasoning-only free models often exhaust their \
+         token budget before emitting a usable tool call. Try a tool-capable model such \
+         as `qwen2.5-coder:7b`, `qwen2.5:14b`, or a cloud model like `gpt-4o-mini` / \
+         `claude-3-5-sonnet`."
     )))
 }
 
@@ -479,17 +521,57 @@ async fn stream_and_validate(
     model: &str,
     messages: Vec<Message>,
     tool: &ToolSchema,
-    sink: Option<&mut StreamSink>,
+    mut sink: Option<&mut StreamSink>,
 ) -> AppResult<(JsonValue, StreamAggregate)> {
     let llm_request = GenerateRequest {
         model: model.to_string(),
-        messages,
+        messages: messages.clone(),
         tools: vec![tool.clone()],
         temperature: Some(0.2),
         max_tokens: Some(RESPONSE_RESERVE_TOKENS),
         stop_sequences: Vec::new(),
     };
-    let aggregated = drive_stream(llm, llm_request, sink).await?;
+    let mut aggregated = drive_stream(llm, llm_request, sink.as_deref_mut()).await?;
+
+    // Forced tool-call fallback. The primary request pins `tool_choice`
+    // to the one tool (see `openai_compat::build_request_payload`), which
+    // is the right call for tool-trained models. But some providers /
+    // routed models — notably OpenRouter's `:free` tier — return an
+    // HTTP-200 *empty* completion when forced to invoke a named function
+    // they will not emit: no tool-call args, no text. That can't be told
+    // apart from a real refusal downstream, so the user just sees
+    // "model returned an empty response". When the first pass comes back
+    // completely empty, retry once WITHOUT the tool, asking for the same
+    // payload as a raw JSON object via `response_format` (an empty
+    // `tools` list flips `build_request_payload` into that mode). The
+    // salvage path in `extract_raw_json` then recovers the JSON from the
+    // free-text body. This only fires on the otherwise-fatal empty case,
+    // so it cannot regress any path that already produces output.
+    if aggregated.tool_args.trim().is_empty() && aggregated.text.trim().is_empty() {
+        tracing::warn!(
+            model = %model,
+            "empty completion under forced tool call — retrying without tool, requesting raw JSON"
+        );
+        let fallback_request = GenerateRequest {
+            model: model.to_string(),
+            messages: with_json_fallback_instruction(messages, tool),
+            tools: Vec::new(),
+            temperature: Some(0.2),
+            max_tokens: Some(RESPONSE_RESERVE_TOKENS),
+            stop_sequences: Vec::new(),
+        };
+        let retry = drive_stream(llm, fallback_request, sink).await?;
+        // Carry the retry's recovered content, but keep token usage from
+        // both passes so accounting reflects the full cost.
+        aggregated = StreamAggregate {
+            input_tokens: aggregated.input_tokens.saturating_add(retry.input_tokens),
+            output_tokens: aggregated
+                .output_tokens
+                .saturating_add(retry.output_tokens),
+            ..retry
+        };
+    }
+
     let raw_json = extract_raw_json(&aggregated, tool, model)?;
     let mut payload: JsonValue = serde_json::from_str(&raw_json).map_err(AppError::Serde)?;
     normalize_missing_arrays(&mut payload, tool);
@@ -497,8 +579,26 @@ async fn stream_and_validate(
     Ok((payload, aggregated))
 }
 
+/// Append a hard instruction telling the model to emit the tool's
+/// payload as a single raw JSON object. Used for the no-tool retry when
+/// a model returns an empty completion under forced tool calling: the
+/// model never sees the `tools` schema on this pass, so the expected
+/// shape is inlined into the conversation instead. `salvage_tool_args`
+/// tolerates fences / `{"name","arguments"}` wrappers, so the model only
+/// has to get the object roughly right.
+fn with_json_fallback_instruction(mut messages: Vec<Message>, tool: &ToolSchema) -> Vec<Message> {
+    let schema = serde_json::to_string(&tool.parameters_schema)
+        .unwrap_or_else(|_| "{\"type\":\"object\"}".to_string());
+    messages.push(Message::user(format!(
+        "Tool calling is unavailable. Respond with ONLY a single JSON object \
+         (no prose, no markdown code fences) that conforms to this JSON Schema:\n{schema}"
+    )));
+    messages
+}
+
 /// Result of draining the LLM stream — extracted so [`generate`] stays
 /// inside the clippy `too_many_lines` budget.
+#[derive(Debug)]
 struct StreamAggregate {
     tool_args: String,
     /// Accumulated free-text response. Most prompts force a tool
@@ -1915,7 +2015,7 @@ mod tests {
     use crate::providers::embeddings::EmbeddingProvider as EmbeddingProviderTrait;
     use crate::providers::llm::error::LlmError;
     use crate::providers::llm::types::{
-        Chunk as LlmChunkOut, FinishReason, ProviderCapabilities, Usage,
+        Chunk as LlmChunkOut, Content, FinishReason, ProviderCapabilities, Usage,
     };
     use crate::providers::llm::{ChunkStream, LlmProvider as LlmProviderTrait};
     use async_trait::async_trait;
@@ -2101,6 +2201,136 @@ mod tests {
             id: "call_1".into(),
             json_fragment: s.into(),
         }
+    }
+
+    fn summary_tool() -> ToolSchema {
+        ToolSchema {
+            name: "emit_project_context".into(),
+            description: "Emit project context.".into(),
+            parameters_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "summary": { "type": "string" } },
+                "required": ["summary"],
+            }),
+        }
+    }
+
+    // A model that honors forced tool calling streams nothing on an
+    // OpenRouter `:free` endpoint (HTTP 200, empty completion). The
+    // service must retry without the tool and salvage the JSON the
+    // second pass emits as free text — not bubble "empty response".
+    #[tokio::test(flavor = "multi_thread")]
+    async fn empty_forced_tool_call_retries_without_tool_and_salvages_json() {
+        let llm = SequencedLlm::new(vec![
+            // Pass 1: forced tool call yields nothing but a Done frame.
+            vec![done_chunk(10, 0)],
+            // Pass 2 (no tool): model returns the payload as plain text.
+            vec![
+                LlmChunkOut::TextDelta("{\"summary\":\"recovered\"}".into()),
+                done_chunk(4, 8),
+            ],
+        ]);
+
+        let (payload, aggregate) = stream_and_validate(
+            &llm,
+            "nex-agi/nex-n2-pro:free",
+            vec![Message::user("generate context")],
+            &summary_tool(),
+            None,
+        )
+        .await
+        .expect("retry should salvage the JSON payload");
+
+        assert_eq!(payload["summary"], "recovered");
+        // Token usage is summed across both passes.
+        assert_eq!(aggregate.input_tokens, 14);
+        assert_eq!(aggregate.output_tokens, 8);
+    }
+
+    // When even the no-tool retry comes back empty, the original
+    // descriptive error must still surface — the fallback retries exactly
+    // once, never loops.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn empty_on_both_passes_surfaces_empty_response_error() {
+        let llm = SequencedLlm::new(vec![vec![done_chunk(3, 0)], vec![done_chunk(2, 0)]]);
+
+        let err = stream_and_validate(
+            &llm,
+            "some/empty-model:free",
+            vec![Message::user("generate context")],
+            &summary_tool(),
+            None,
+        )
+        .await
+        .expect_err("two empty passes must error");
+
+        assert!(
+            err.to_string().contains("empty response"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn guard_rejects_empty_test_cases_with_model_hint() {
+        let err = guard_non_empty_payload(
+            ArtifactType::TestCases,
+            &serde_json::json!({ "cases": [] }),
+            "nex-agi/nex-n2-pro:free",
+        )
+        .expect_err("empty cases must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("produced no test cases"), "got: {msg}");
+        assert!(msg.contains("tool-capable"), "must hint a better model: {msg}");
+    }
+
+    #[test]
+    fn guard_rejects_missing_cases_key() {
+        // `{}` after normalize-skip: absent array is treated as empty.
+        let err = guard_non_empty_payload(
+            ArtifactType::TestCases,
+            &serde_json::json!({}),
+            "m",
+        );
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn guard_allows_non_empty_test_cases() {
+        let ok = guard_non_empty_payload(
+            ArtifactType::TestCases,
+            &serde_json::json!({ "cases": [{ "id": "TC-1" }] }),
+            "m",
+        );
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn guard_ignores_other_artifact_types() {
+        // ContextMd has no `cases`; it must never be rejected by this guard.
+        let ok = guard_non_empty_payload(
+            ArtifactType::ContextMd,
+            &serde_json::json!({ "architecture_notes": "x" }),
+            "m",
+        );
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn json_fallback_instruction_appends_schema_message() {
+        let tool = summary_tool();
+        let out = with_json_fallback_instruction(vec![Message::user("hi")], &tool);
+        assert_eq!(out.len(), 2);
+        let last = &out[out.len() - 1];
+        let text: String = last
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                Content::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("ONLY a single JSON object"));
+        assert!(text.contains("\"summary\""), "schema must be inlined: {text}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
