@@ -69,6 +69,10 @@ CREATE TABLE heal_checks (
 CREATE INDEX idx_heal_checks_artifact_id ON heal_checks(artifact_id);
 CREATE INDEX idx_heal_checks_project_id ON heal_checks(project_id);
 CREATE INDEX idx_heal_checks_created_at ON heal_checks(created_at);
+-- Indexed so the `ON DELETE SET NULL` back-reference from test_runs nulls this
+-- column via an index lookup, not a full scan — honouring the header rule
+-- "every foreign key is indexed" (the sibling 0008/0009 run FKs predate this).
+CREATE INDEX idx_heal_checks_landed_run_id ON heal_checks(landed_run_id);
 
 -- ---------------------------------------------------------------------------
 -- heal_check_tests — one row per test involved in the heal. `HealResult` only

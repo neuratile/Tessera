@@ -151,8 +151,8 @@ pub struct HealCheckInsert {
 ///
 /// # Errors
 ///
-/// - [`AppError::InvalidInput`] when `artifact_id` or `project_id` is empty
-///   after trim.
+/// - [`AppError::InvalidInput`] when `artifact_id`, `project_id`, or
+///   `landed_version_id` is empty after trim.
 /// - [`AppError::Database`] for any SQLx-level failure (including a foreign-key
 ///   violation when the artifact / project / run does not exist).
 pub async fn insert_check(
@@ -165,6 +165,12 @@ pub async fn insert_check(
     }
     if check.project_id.trim().is_empty() {
         return Err(AppError::InvalidInput("heal check project_id is empty".into()));
+    }
+    // The read path enforces `landedVersionId` non-empty (Zod `.min(1)`); guard
+    // the write site too so a blank id can never be persisted (SQLite's NOT NULL
+    // permits the empty string).
+    if check.landed_version_id.trim().is_empty() {
+        return Err(AppError::InvalidInput("heal check landed_version_id is empty".into()));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -454,6 +460,31 @@ mod tests {
         )
         .await
         .expect_err("must reject empty artifact_id");
+        assert_eq!(err.code(), "INVALID_INPUT");
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn insert_rejects_blank_landed_version_id() {
+        let (pool, path) = open_pool().await;
+        let err = insert_check(
+            &pool,
+            HealCheckInsert {
+                artifact_id: "a1".into(),
+                project_id: "p1".into(),
+                landed_run_id: None,
+                landed_version_id: "   ".into(),
+                attempts: 1,
+                healed_count: 0,
+                still_failing_count: 0,
+                final_passing: 0,
+                final_total: 0,
+            },
+            &[],
+        )
+        .await
+        .expect_err("must reject blank landed_version_id");
         assert_eq!(err.code(), "INVALID_INPUT");
         pool.close().await;
         let _ = std::fs::remove_file(&path);
