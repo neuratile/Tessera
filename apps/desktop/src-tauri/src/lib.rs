@@ -110,6 +110,9 @@ pub fn run() {
             commands::generation::generate_artifact,
             // Self-healing loop (v2 P0 #1 — SELF_HEALING_LOOP.md)
             commands::healing::run_self_heal,
+            // Heal history (v2 hardening — V2_HARDENING.md §5.1)
+            commands::healing::list_heal_checks,
+            commands::healing::get_heal_check,
             // Provider config commands (Phase 4)
             commands::providers::save_provider_config,
             commands::providers::list_provider_configs,

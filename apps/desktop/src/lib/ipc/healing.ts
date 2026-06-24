@@ -1,5 +1,9 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
+  type HealCheckRecord,
+  HealCheckRecordSchema,
+  type HealCheckSummary,
+  HealCheckSummarySchema,
   type HealRequest,
   HealRequestSchema,
   type HealResult,
@@ -7,6 +11,7 @@ import {
   type HealStreamEvent,
   HealStreamEventSchema,
 } from '@testing-ide/shared';
+import { z } from 'zod';
 
 import { IpcError } from './error';
 import { invokeAndParse } from './invoke';
@@ -16,6 +21,9 @@ import { invokeAndParse } from './invoke';
  * `commands/healing.rs::HEAL_EVENT`.
  */
 const HEAL_EVENT_CHANNEL = 'heal://event';
+
+/** Default page size for heal history (mirrors the backend default). */
+const HEAL_HISTORY_LIMIT = 20;
 
 /**
  * Run the bounded self-healing loop over a test-cases artifact
@@ -34,6 +42,30 @@ export async function runSelfHeal(request: HealRequest): Promise<HealResult> {
     throw new IpcError('run_self_heal', `invalid arguments: ${parsed.error.message}`);
   }
   return invokeAndParse('run_self_heal', HealResultSchema, { request: parsed.data });
+}
+
+/**
+ * List an artifact's persisted self-heal history, newest first
+ * (plan/versions/v2/v2-feature-docs/V2_HARDENING.md §5.1). Returns header
+ * summaries; fetch a check's per-test detail with [`getHealCheck`]. `limit` is
+ * a hint — the backend re-clamps it to [1, 200].
+ */
+export async function listHealChecks(
+  artifactId: string,
+  limit: number = HEAL_HISTORY_LIMIT,
+): Promise<HealCheckSummary[]> {
+  return invokeAndParse('list_heal_checks', z.array(HealCheckSummarySchema), {
+    artifactId,
+    limit,
+  });
+}
+
+/**
+ * Fetch one persisted heal check with its per-test verdicts. Throws an
+ * `IpcError` when the id is unknown (`NOT_FOUND`).
+ */
+export async function getHealCheck(checkId: string): Promise<HealCheckRecord> {
+  return invokeAndParse('get_heal_check', HealCheckRecordSchema, { checkId });
 }
 
 /**

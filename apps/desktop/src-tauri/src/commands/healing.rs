@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::providers::factory;
 use crate::providers::runners::factory as runner_factory;
+use crate::repositories::heal_check_repo::{HealCheckRecord, HealCheckSummary};
 use crate::services::generation_service::GenerationDeps;
 use crate::services::healing_service::{self, HealEvent, HealRequest, HealResult, HealSink};
 use crate::services::sandbox_service::{RunRegistry, SandboxDeps};
@@ -135,6 +136,45 @@ pub async fn run_self_heal(
     let sink = build_event_sink(app.clone(), heal_id);
 
     healing_service::heal(heal_request, &gen_deps, &sandbox_deps, Some(sink))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// List an artifact's persisted self-heal history, newest first
+/// (`plan/versions/v2/v2-feature-docs/V2_HARDENING.md` §5.1). Thin handler;
+/// `limit` is re-clamped by the service/repository, so the UI value is only a
+/// hint. Returns header summaries — the per-test detail is fetched on demand
+/// via [`get_heal_check`].
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) for any
+/// database-level failure.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn list_heal_checks(
+    pool: State<'_, SqlitePool>,
+    artifact_id: String,
+    limit: u32,
+) -> Result<Vec<HealCheckSummary>, String> {
+    healing_service::list_heal_history(&pool, &artifact_id, limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Fetch one persisted heal check with its per-test verdicts.
+///
+/// # Errors
+///
+/// Returns the stringified [`AppError`](crate::error::AppError) when no check
+/// matches `check_id` (`NOT_FOUND`) or for any database-level failure.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri IPC requires owned argument types.
+pub async fn get_heal_check(
+    pool: State<'_, SqlitePool>,
+    check_id: String,
+) -> Result<HealCheckRecord, String> {
+    healing_service::get_heal_check(&pool, &check_id)
         .await
         .map_err(|e| e.to_string())
 }

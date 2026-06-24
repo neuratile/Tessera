@@ -31,11 +31,16 @@
 //! — exactly as `run_flaky` does. An `Err` is reserved for a pre-flight
 //! problem on the very first run (e.g. the artifact id is empty).
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::providers::runners::{RunRequest, RunResult, RunStatus, TestStatus};
 use crate::repositories::artifact_repo::ArtifactType;
+use crate::repositories::heal_check_repo::{
+    self, HealCheckInsert, HealCheckRecord, HealCheckSummary, HealTestRecord, HealTestStatus,
+};
 use crate::services::generation_service::{self, GenerationDeps, GenerationRequest};
 use crate::services::sandbox_service::{self, SandboxDeps};
 
@@ -217,12 +222,21 @@ fn truncate_chars(s: &str, max: usize) -> String {
     truncated
 }
 
-/// Run the bounded self-healing loop over `request.artifact_id` (design §2, §4).
+/// Run the bounded self-healing loop over `request.artifact_id` (design §2, §4)
+/// and persist the settled result as heal history (`V2_HARDENING.md` §5.1).
 ///
 /// Reuses [`sandbox_service::run`] and [`generation_service::generate`]
 /// verbatim — every iteration runs through the sandbox's existing opt-in gate
 /// and per-run cancel-token registration, so the existing `cancel_test_sandbox`
 /// Stop kills the in-flight container and the loop observes the cancelled run.
+///
+/// After the loop settles, a non-error outcome is persisted to the
+/// `heal_checks` history (one header row + one row per involved test) via
+/// [`heal_check_repo`]. Persistence is **best-effort**: a write failure is
+/// logged and swallowed, never discarding the in-memory [`HealResult`] the user
+/// is about to see — the same contract flaky / mutation history follow. An
+/// `error`-outcome heal (Docker down / cancelled / regen failure) did not
+/// complete its loop, so it writes no history row.
 ///
 /// # Errors
 ///
@@ -231,8 +245,185 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// regeneration error is surfaced as an `Ok(HealResult)` with
 /// `outcome == HealOutcome::Error` and an `error_message`, so the UI always
 /// receives the attempts made so far.
-#[allow(clippy::too_many_lines)] // The bounded loop + its stop conditions read clearest inline.
 pub async fn heal(
+    request: HealRequest,
+    gen_deps: &GenerationDeps<'_>,
+    sandbox_deps: &SandboxDeps<'_>,
+    on_event: Option<HealSink>,
+) -> AppResult<HealResult> {
+    // The suite the heal started from is its stable identity for the trend; the
+    // loop mutates its working copy of the id, so capture the original first.
+    let original_artifact_id = request.artifact_id.trim().to_string();
+    let project_id = request.project_id.clone();
+
+    let result = run_heal_loop(request, gen_deps, sandbox_deps, on_event).await?;
+
+    // Persist a completed heal as history (best-effort). An error outcome is not
+    // a completed heal, so it is not recorded.
+    if result.outcome != HealOutcome::Error {
+        persist_heal_history(sandbox_deps, &original_artifact_id, &project_id, &result).await;
+    }
+
+    Ok(result)
+}
+
+/// Build the per-test history rows from the settled result and persist them with
+/// their header row. Best-effort: any failure (an empty id, a DB error) is
+/// logged and swallowed so heal never fails because its audit trail could not
+/// be written.
+async fn persist_heal_history(
+    sandbox_deps: &SandboxDeps<'_>,
+    artifact_id: &str,
+    project_id: &str,
+    result: &HealResult,
+) {
+    let tests = summarize_heal_tests(&result.attempts, &result.final_artifact_id);
+    let healed_count = count_status(&tests, HealTestStatus::Healed);
+    let still_failing_count = count_status(&tests, HealTestStatus::StillFailing);
+    let landed_run_id = if result.final_run_id.is_empty() {
+        None
+    } else {
+        Some(result.final_run_id.clone())
+    };
+
+    if let Err(e) = heal_check_repo::insert_check(
+        sandbox_deps.pool,
+        HealCheckInsert {
+            artifact_id: artifact_id.to_string(),
+            project_id: project_id.to_string(),
+            landed_run_id,
+            landed_version_id: result.final_artifact_id.clone(),
+            attempts: result.attempts_used,
+            healed_count,
+            still_failing_count,
+            final_passing: result.passed_count,
+            final_total: result.passed_count + result.failed_count,
+        },
+        &tests,
+    )
+    .await
+    {
+        tracing::warn!(artifact_id, error = %e, "persisting heal-check history failed");
+    }
+}
+
+fn count_status(tests: &[HealTestRecord], status: HealTestStatus) -> u32 {
+    let n = tests.iter().filter(|t| t.status == status).count();
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// Derive the per-test history rows from a heal's attempt trail (design §5.1).
+/// **Pure** — the unit-testable core of the persistence path, and the exact
+/// mirror of the renderer's `deriveHealRows`.
+///
+/// A [`HealResult`] only carries the *failing* tests per attempt (not the
+/// always-passing ones), so this lists the tests that were involved in the
+/// heal: a test absent from the **landed** attempt's failures flipped to
+/// passing ([`HealTestStatus::Healed`], `healed_at_attempt` = the attempt it
+/// first passed); one still present is [`HealTestStatus::StillFailing`] (a
+/// likely real source bug). Tests that never failed are reflected only in the
+/// header's `final_passing` count, not as rows.
+///
+/// The "landed" attempt is the one the backend chose as final
+/// (`landed_artifact_id` = `HealResult::final_artifact_id`) — the healed
+/// attempt, or for `exhausted` / `no_progress` the *best* attempt by pass
+/// count, which is not necessarily the chronologically last one. A later
+/// attempt can regress, so deriving the failing set from the last attempt would
+/// mislabel a test that fails only in that worse, discarded run.
+#[must_use]
+pub fn summarize_heal_tests(
+    attempts: &[HealAttempt],
+    landed_artifact_id: &str,
+) -> Vec<HealTestRecord> {
+    let landed = attempts
+        .iter()
+        .find(|a| a.artifact_id == landed_artifact_id)
+        .or_else(|| attempts.last());
+    let Some(landed) = landed else {
+        return Vec::new();
+    };
+
+    let final_failing: HashSet<&str> =
+        landed.failures.iter().map(|f| f.name.as_str()).collect();
+
+    // Walk attempts up to and including the landed one, recording each involved
+    // test's most recent failure in first-seen order. Later (discarded)
+    // attempts that regressed must not contribute rows or messages.
+    let mut order: Vec<String> = Vec::new();
+    let mut last_fail: HashMap<String, (u32, Option<String>)> = HashMap::new();
+    for attempt in attempts {
+        if attempt.attempt > landed.attempt {
+            break;
+        }
+        for failure in &attempt.failures {
+            if !last_fail.contains_key(&failure.name) {
+                order.push(failure.name.clone());
+            }
+            last_fail.insert(
+                failure.name.clone(),
+                (attempt.attempt, failure.failure_message.clone()),
+            );
+        }
+    }
+
+    order
+        .into_iter()
+        .map(|name| {
+            let (last_fail_attempt, last_msg) =
+                last_fail.get(&name).cloned().unwrap_or((0, None));
+            let still_failing = final_failing.contains(name.as_str());
+            HealTestRecord {
+                status: if still_failing {
+                    HealTestStatus::StillFailing
+                } else {
+                    HealTestStatus::Healed
+                },
+                // A healed test first passed on the attempt after its last
+                // failure; a still-failing one has no heal attempt.
+                healed_at_attempt: if still_failing { None } else { Some(last_fail_attempt + 1) },
+                last_failure_message: last_msg,
+                name,
+            }
+        })
+        .collect()
+}
+
+/// List an artifact's persisted heal history, newest first (design §5.1). Thin
+/// pass-through so commands depend on the service, not the repository
+/// (rules §4.2). `limit` is re-clamped by the repository.
+///
+/// # Errors
+///
+/// [`AppError::Database`](crate::error::AppError::Database) for any SQLx-level
+/// failure.
+pub async fn list_heal_history(
+    pool: &sqlx::SqlitePool,
+    artifact_id: &str,
+    limit: u32,
+) -> AppResult<Vec<HealCheckSummary>> {
+    heal_check_repo::list_checks(pool, artifact_id, limit).await
+}
+
+/// Fetch one persisted heal check with its per-test verdicts (design §5.1).
+///
+/// # Errors
+///
+/// - [`AppError::NotFound`](crate::error::AppError::NotFound) when no check
+///   matches `check_id`.
+/// - [`AppError::Database`](crate::error::AppError::Database) for a corrupt
+///   status string or any `SQLx` failure.
+pub async fn get_heal_check(
+    pool: &sqlx::SqlitePool,
+    check_id: &str,
+) -> AppResult<HealCheckRecord> {
+    heal_check_repo::fetch_check(pool, check_id).await
+}
+
+/// The bounded self-healing loop itself (design §2, §4) — returns the in-memory
+/// [`HealResult`] without persisting it. [`heal`] wraps this to add best-effort
+/// history persistence.
+#[allow(clippy::too_many_lines)] // The bounded loop + its stop conditions read clearest inline.
+async fn run_heal_loop(
     request: HealRequest,
     gen_deps: &GenerationDeps<'_>,
     sandbox_deps: &SandboxDeps<'_>,
@@ -538,6 +729,70 @@ mod tests {
         // MAX folded failures + one overflow summary line.
         assert_eq!(bullets, MAX_FEEDBACK_FAILURES + 1);
         assert!(out.contains("…and 5 more failing tests."));
+    }
+
+    // ---- summarize_heal_tests (pure) -------------------------------------
+
+    fn attempt(n: u32, artifact: &str, passed: u32, failures: Vec<HealFailure>) -> HealAttempt {
+        HealAttempt {
+            attempt: n,
+            artifact_id: artifact.into(),
+            passed_count: passed,
+            failed_count: u32::try_from(failures.len()).unwrap_or(0),
+            failures,
+        }
+    }
+
+    #[test]
+    fn summarize_marks_a_fixed_test_as_healed() {
+        let attempts = vec![
+            attempt(1, "v1", 0, vec![failure("TC-A", Some("expected 3 to equal 4"))]),
+            attempt(2, "v2", 1, vec![]),
+        ];
+        let rows = summarize_heal_tests(&attempts, "v2");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "TC-A");
+        assert_eq!(rows[0].status, HealTestStatus::Healed);
+        // First passed on attempt 2 (the one after its last failure).
+        assert_eq!(rows[0].healed_at_attempt, Some(2));
+        assert_eq!(rows[0].last_failure_message.as_deref(), Some("expected 3 to equal 4"));
+    }
+
+    #[test]
+    fn summarize_marks_a_persistent_failure_as_still_failing() {
+        let attempts = vec![
+            attempt(1, "v1", 0, vec![failure("TC-A", Some("v1"))]),
+            attempt(2, "v2", 0, vec![failure("TC-A", Some("v2"))]),
+        ];
+        let rows = summarize_heal_tests(&attempts, "v2");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, HealTestStatus::StillFailing);
+        assert_eq!(rows[0].healed_at_attempt, None);
+        // Most recent failure message wins.
+        assert_eq!(rows[0].last_failure_message.as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn summarize_uses_the_landed_attempt_not_the_last() {
+        // Attempt 1 (v1) is the best/landed (2 pass, A failing); attempt 2 (v2)
+        // regressed (B also fails) and was discarded. Rows must describe v1: A
+        // still failing, and B (which only failed in the discarded run) absent.
+        let attempts = vec![
+            attempt(1, "v1", 2, vec![failure("A", Some("nope"))]),
+            attempt(2, "v2", 1, vec![failure("A", Some("still")), failure("B", Some("regressed"))]),
+        ];
+        let rows = summarize_heal_tests(&attempts, "v1");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "A");
+        assert_eq!(rows[0].status, HealTestStatus::StillFailing);
+        assert_eq!(rows[0].last_failure_message.as_deref(), Some("nope"));
+    }
+
+    #[test]
+    fn summarize_already_green_heal_has_no_rows() {
+        let attempts = vec![attempt(1, "v1", 3, vec![])];
+        let rows = summarize_heal_tests(&attempts, "v1");
+        assert!(rows.is_empty());
     }
 
     // ---- scripted test doubles -------------------------------------------
@@ -889,6 +1144,80 @@ mod tests {
         // The healed test flipped from failing (attempt 1) to passing (attempt 2).
         assert_eq!(result.attempts[0].failed_count, 1);
         assert_eq!(result.attempts[1].failed_count, 0);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn heal_persists_history_on_success() {
+        let (pool, path) = seed_pool().await;
+        seed_chunk(&pool).await;
+        let artifact_id = seed_artifact(&pool).await;
+
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(vec![
+            Scripted::Succeed(out(RunStatus::Failed, vec![tc("TC-ADD-POSITIVE", TestStatus::Failed, Some("expected 3 to equal 4"))])),
+            Scripted::Succeed(out(RunStatus::Passed, vec![tc("TC-ADD-POSITIVE", TestStatus::Passed, None)])),
+        ]));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let sandbox_deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let llm = Arc::new(SequencedLlm::new(vec![regen_script()]));
+        let embeddings: Arc<dyn EmbeddingProvider> = Arc::new(ScriptedEmbeddings { dim: 8 });
+        let gen_deps = GenerationDeps { pool: &pool, llm, embeddings };
+
+        let result = heal(heal_request(artifact_id.clone(), 3), &gen_deps, &sandbox_deps, None)
+            .await
+            .expect("heal runs");
+        assert_eq!(result.outcome, HealOutcome::Healed);
+
+        // The completed heal must be readable back as one history row, keyed by
+        // the *original* artifact (the suite's stable identity), with the healed
+        // test recorded.
+        let history = list_heal_history(&pool, &artifact_id, 20).await.expect("history");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].attempts, 2);
+        assert_eq!(history[0].healed_count, 1);
+        assert_eq!(history[0].still_failing_count, 0);
+        assert_eq!(history[0].landed_version_id, result.final_artifact_id);
+        assert_eq!(history[0].landed_run_id.as_deref(), Some(result.final_run_id.as_str()));
+
+        let record = get_heal_check(&pool, &history[0].id).await.expect("record");
+        assert_eq!(record.tests.len(), 1);
+        assert_eq!(record.tests[0].name, "TC-ADD-POSITIVE");
+        assert_eq!(record.tests[0].status, HealTestStatus::Healed);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn heal_error_outcome_persists_no_history() {
+        let (pool, path) = seed_pool().await;
+        seed_chunk(&pool).await;
+        let artifact_id = seed_artifact(&pool).await;
+
+        // The first run errors (Docker down) → Error outcome, which is not a
+        // completed heal and must write no history row.
+        let runner: Arc<dyn TestRunner> = Arc::new(MultiScriptedRunner::new(vec![
+            Scripted::Fail(RunnerError::DockerUnavailable("daemon down".into())),
+        ]));
+        let registry = RunRegistry::new();
+        let factory = fixed_factory(runner);
+        let sandbox_deps = SandboxDeps { pool: &pool, crypto: None, runner_factory: &factory, registry: &registry };
+
+        let llm = Arc::new(SequencedLlm::new(vec![]));
+        let embeddings: Arc<dyn EmbeddingProvider> = Arc::new(ScriptedEmbeddings { dim: 8 });
+        let gen_deps = GenerationDeps { pool: &pool, llm, embeddings };
+
+        let result = heal(heal_request(artifact_id.clone(), 3), &gen_deps, &sandbox_deps, None)
+            .await
+            .expect("heal returns a result");
+        assert_eq!(result.outcome, HealOutcome::Error);
+
+        let history = list_heal_history(&pool, &artifact_id, 20).await.expect("history");
+        assert!(history.is_empty(), "an errored heal records no history row");
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

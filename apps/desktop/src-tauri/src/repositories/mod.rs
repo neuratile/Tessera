@@ -22,6 +22,8 @@
 //!   verdicts) for the flaky-test trend UI.
 //! - [`mutation_check_repo`] — persisted mutation-score history (header +
 //!   per-mutant verdicts) for the mutation-score trend UI.
+//! - [`heal_check_repo`] — persisted self-heal history (header + per-test
+//!   verdicts) for the heal-history trend UI (`V2_HARDENING.md` §5.1).
 //! - [`test_case_result_repo`] (Test Case table) — per-case
 //!   execution-outcome sidecar (Actual output / Result + remarks).
 //! - [`health_repo`] — database liveness probe for the health check.
@@ -31,6 +33,7 @@ pub mod chunk_repo;
 pub mod embedding_config_repo;
 pub mod external_link_repo;
 pub mod flaky_check_repo;
+pub mod heal_check_repo;
 pub mod health_repo;
 pub mod mutation_check_repo;
 pub mod project_file_repo;
