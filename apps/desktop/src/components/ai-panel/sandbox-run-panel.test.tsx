@@ -34,6 +34,8 @@ vi.mock('@/lib/ipc', () => ({
   },
   healing: {
     runSelfHeal: vi.fn(),
+    listHealChecks: vi.fn().mockResolvedValue([]),
+    getHealCheck: vi.fn(),
     subscribeToHealEvents: vi.fn().mockResolvedValue(() => {}),
   },
   mutation: {
@@ -95,6 +97,7 @@ vi.mock('@/stores/sandbox-store', () => {
 import type { HealContext } from './sandbox-run-panel';
 import {
   FlakyHistorySection,
+  HealHistorySection,
   MutationHistorySection,
   SandboxRunPanel,
 } from './sandbox-run-panel';
@@ -610,6 +613,49 @@ describe('FlakyHistorySection — persisted history (design §7)', () => {
       <FlakyHistorySection artifactId={ARTIFACT_ID} history={[]} error={'boom'} />,
     );
     expect(html).toContain('Could not load flaky history');
+    expect(html).toContain('boom');
+  });
+});
+
+describe('HealHistorySection — persisted history (V2_HARDENING.md §5.1)', () => {
+  it('renders nothing when there is no history yet', () => {
+    const html = renderToStaticMarkup(
+      <HealHistorySection artifactId={ARTIFACT_ID} history={[]} error={null} />,
+    );
+    expect(html).toBe('');
+  });
+
+  it('lists past heals with their healed-count + pass ratio', () => {
+    const html = renderToStaticMarkup(
+      <HealHistorySection
+        artifactId={ARTIFACT_ID}
+        history={[
+          {
+            id: '00000000-0000-4000-8000-000000000ccc',
+            landedRunId: ARTIFACT_ID,
+            landedVersionId: 'a-2',
+            attempts: 2,
+            healedCount: 3,
+            stillFailingCount: 0,
+            finalPassing: 14,
+            finalTotal: 14,
+            createdAt: '2026-06-17T10:30:00+00:00',
+          },
+        ]}
+        error={null}
+      />,
+    );
+    expect(html).toContain('Heal history');
+    expect(html).toContain('14/14 passing');
+    expect(html).toContain('healed 3');
+    expect(html).toContain('2 attempts');
+  });
+
+  it('surfaces a load error instead of the trend', () => {
+    const html = renderToStaticMarkup(
+      <HealHistorySection artifactId={ARTIFACT_ID} history={[]} error={'boom'} />,
+    );
+    expect(html).toContain('Could not load heal history');
     expect(html).toContain('boom');
   });
 });

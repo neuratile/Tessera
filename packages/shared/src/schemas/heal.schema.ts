@@ -110,3 +110,77 @@ export const HealStreamEventSchema = z.object({
 });
 
 export type HealStreamEvent = z.infer<typeof HealStreamEventSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Heal history (v2 hardening — V2_HARDENING.md §5.1).                        */
+/*                                                                            */
+/* Mirrors the Rust DTOs + enum in                                            */
+/* `apps/desktop/src-tauri/src/repositories/heal_check_repo.rs`. Status       */
+/* literals must match the Rust `snake_case` serde output exactly, and the    */
+/* TEXT stored in the `heal_checks` / `heal_check_tests` tables (migration     */
+/* 0010).                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Verdict of one test within a persisted heal — mirrors the Rust
+ * `HealTestStatus` enum.
+ *
+ * - `healed`        — failed in an earlier attempt but passes in the landed one.
+ * - `still_failing` — still failing in the landed attempt (a likely real bug).
+ * - `passed`        — passed throughout. Reserved for forward-compat; no writer
+ *   emits it yet (a `HealResult` carries only the failing tests per attempt).
+ */
+export const HealTestStatusSchema = z.union([
+  z.literal('healed'),
+  z.literal('still_failing'),
+  z.literal('passed'),
+]);
+
+export type HealTestStatus = z.infer<typeof HealTestStatusSchema>;
+
+/**
+ * One test involved in a heal, paired with its verdict — mirrors the Rust
+ * `HealTestRecord`. `healedAtAttempt` is present only for a `healed` test (the
+ * attempt it first passed); both it and `lastFailureMessage` are omitted from
+ * the wire payload when absent (Rust `skip_serializing_if`).
+ */
+export const HealTestRecordSchema = z.object({
+  name: z.string().min(1),
+  status: HealTestStatusSchema,
+  healedAtAttempt: z.number().int().positive().optional(),
+  lastFailureMessage: z.string().optional(),
+});
+
+export type HealTestRecord = z.infer<typeof HealTestRecordSchema>;
+
+/**
+ * One entry in an artifact's persisted heal history — mirrors the Rust
+ * `HealCheckSummary`. A lightweight header for the "Heal history" trend; the
+ * per-test detail is fetched on demand as a `HealCheckRecord`. `landedRunId` is
+ * omitted (serde `None`) only if that run row was later purged. `createdAt` is
+ * RFC-3339.
+ */
+export const HealCheckSummarySchema = z.object({
+  id: z.string().uuid(),
+  landedRunId: z.string().uuid().optional(),
+  landedVersionId: z.string().min(1),
+  attempts: z.number().int().nonnegative(),
+  healedCount: z.number().int().nonnegative(),
+  stillFailingCount: z.number().int().nonnegative(),
+  finalPassing: z.number().int().nonnegative(),
+  finalTotal: z.number().int().nonnegative(),
+  createdAt: z.string().min(1),
+});
+
+export type HealCheckSummary = z.infer<typeof HealCheckSummarySchema>;
+
+/**
+ * A persisted heal check with its full per-test list — mirrors the Rust
+ * `HealCheckRecord`. The detail behind a `HealCheckSummary`, re-rendered with
+ * the same per-test trail the live result view derives.
+ */
+export const HealCheckRecordSchema = HealCheckSummarySchema.extend({
+  tests: z.array(HealTestRecordSchema),
+});
+
+export type HealCheckRecord = z.infer<typeof HealCheckRecordSchema>;

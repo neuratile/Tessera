@@ -4,7 +4,10 @@ import type {
   FlakyRunResult,
   FlakyTestResult,
   HealAttempt,
+  HealCheckRecord,
+  HealCheckSummary,
   HealResult,
+  HealTestRecord,
   ImproveAttempt,
   ImproveResult,
   MutantResult,
@@ -157,6 +160,11 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
   const [mutationHistory, setMutationHistory] = useState<MutationCheckSummary[]>([]);
   const [mutationHistoryError, setMutationHistoryError] = useState<string | null>(null);
 
+  // Persisted self-heal history (V2_HARDENING.md §5.1), kept separate from the
+  // flaky / mutation trends. Same read-only, panel-scoped lifecycle.
+  const [healHistory, setHealHistory] = useState<HealCheckSummary[]>([]);
+  const [healHistoryError, setHealHistoryError] = useState<string | null>(null);
+
   // Always-current artifact id, read by in-flight history fetches to detect a
   // switch. If the panel is reused with a new `artifactId` before a previous
   // `listFlakyChecks` settles, its resolution must not write the old artifact's
@@ -192,6 +200,20 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     })();
   }, [artifactId]);
 
+  const refreshHealHistory = useCallback(() => {
+    void (async () => {
+      try {
+        const checks = await healing.listHealChecks(artifactId);
+        if (artifactIdRef.current !== artifactId) return; // artifact switched mid-fetch
+        setHealHistory(checks);
+        setHealHistoryError(null);
+      } catch (err) {
+        if (artifactIdRef.current !== artifactId) return;
+        setHealHistoryError(getErrorMessage(err));
+      }
+    })();
+  }, [artifactId]);
+
   // Clear stale history immediately on an artifact switch so the previous
   // artifact's trends never linger while the new fetches are in flight.
   useEffect(() => {
@@ -199,9 +221,12 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
     setHistoryError(null);
     setMutationHistory([]);
     setMutationHistoryError(null);
+    setHealHistory([]);
+    setHealHistoryError(null);
     refreshHistory();
     refreshMutationHistory();
-  }, [refreshHistory, refreshMutationHistory]);
+    refreshHealHistory();
+  }, [refreshHistory, refreshMutationHistory, refreshHealHistory]);
 
   const running = runState.phase === 'running';
   const flakyRunning = flakyState.phase === 'running';
@@ -387,11 +412,25 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
           projectName: healContext.projectName,
         });
         finishHeal(artifactId, result);
+        // A completed heal (non-error outcome) is persisted to history — refresh
+        // so it appears at the top of the trend. An error result writes no row,
+        // so this is a harmless no-op there.
+        refreshHealHistory();
       } catch (err) {
         failHeal(artifactId, getErrorMessage(err));
       }
     })();
-  }, [healGated, busy, artifactId, maxAttempts, healContext, startHeal, finishHeal, failHeal]);
+  }, [
+    healGated,
+    busy,
+    artifactId,
+    maxAttempts,
+    healContext,
+    startHeal,
+    finishHeal,
+    failHeal,
+    refreshHealHistory,
+  ]);
 
   const handleMutationTest = useCallback(() => {
     if (gated || busy) return;
@@ -741,6 +780,8 @@ export function SandboxRunPanel({ artifactId, hasFiles, healContext }: Props) {
         history={mutationHistory}
         error={mutationHistoryError}
       />
+
+      <HealHistorySection artifactId={artifactId} history={healHistory} error={healHistoryError} />
     </div>
   );
 }
@@ -1468,6 +1509,186 @@ function ImproveAttemptRow({ attempt, isFinal }: { attempt: ImproveAttempt; isFi
  * detail. Hidden entirely until a check has been run. Mirrors
  * {@link FlakyHistorySection}.
  */
+/**
+ * Collapsible "Heal history" trend for an artifact (V2_HARDENING.md §5.1).
+ * Lists past heals newest-first; expanding a row lazily fetches that check's
+ * per-test verdicts. Hidden entirely when there is no history yet, so the panel
+ * stays quiet until a heal has actually been run. Mirrors {@link
+ * MutationHistorySection} / {@link FlakyHistorySection}.
+ */
+export function HealHistorySection({
+  artifactId,
+  history,
+  error,
+}: {
+  artifactId: string;
+  history: HealCheckSummary[];
+  error: string | null;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ checkId: string; record: HealCheckRecord } | null>(null);
+  const [detailError, setDetailError] = useState<{ checkId: string; message: string } | null>(null);
+
+  useEffect(() => {
+    setExpandedId(null);
+    setDetail(null);
+    setDetailError(null);
+  }, [artifactId]);
+
+  const handleToggle = useCallback(
+    (checkId: string) => {
+      if (expandedId === checkId) {
+        setExpandedId(null);
+        return;
+      }
+      setExpandedId(checkId);
+      setDetail(null);
+      setDetailError(null);
+      void (async () => {
+        try {
+          const record = await healing.getHealCheck(checkId);
+          setDetail({ checkId, record });
+        } catch (err) {
+          setDetailError({ checkId, message: getErrorMessage(err) });
+        }
+      })();
+    },
+    [expandedId],
+  );
+
+  if (error !== null) {
+    return (
+      <p className="text-muted-foreground text-[10px]" role="alert">
+        Could not load heal history: {error}
+      </p>
+    );
+  }
+  if (history.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 border-t border-border pt-2" data-testid="heal-history">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <History className="size-3" /> Heal history
+      </div>
+      <ul className="space-y-1">
+        {history.map((check) => (
+          <HealHistoryRow
+            key={check.id}
+            check={check}
+            expanded={expandedId === check.id}
+            detail={detail?.checkId === check.id ? detail.record : null}
+            detailError={detailError?.checkId === check.id ? detailError.message : null}
+            onToggle={handleToggle}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function HealHistoryRow({
+  check,
+  expanded,
+  detail,
+  detailError,
+  onToggle,
+}: {
+  check: HealCheckSummary;
+  expanded: boolean;
+  detail: HealCheckRecord | null;
+  detailError: string | null;
+  onToggle: (checkId: string) => void;
+}) {
+  const ok = check.stillFailingCount === 0;
+  return (
+    <li className="rounded border border-border bg-surface-3 text-[11px]">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-2"
+        onClick={() => onToggle(check.id)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className={`pill pill-${ok ? 'approved' : 'rejected'}`}>
+          {check.finalPassing}/{check.finalTotal} passing
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground font-mono text-[10px]">
+          healed {check.healedCount} · {check.attempts}{' '}
+          {check.attempts === 1 ? 'attempt' : 'attempts'}
+        </span>
+        <span className="text-muted-foreground text-[10px]">{formatCheckTime(check.createdAt)}</span>
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-border px-2 py-1.5">
+          {detailError !== null ? (
+            <p className="text-destructive text-[10px]" role="alert">
+              {detailError}
+            </p>
+          ) : detail === null ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-[10px]">
+              <Loader2 className="size-3 animate-spin" /> Loading…
+            </p>
+          ) : detail.tests.length > 0 ? (
+            <ul className="space-y-1">
+              {detail.tests.map((t, i) => (
+                <HealHistoryTestRow key={`${t.name}-${i}`} test={t} />
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-[10px]">
+              No tests needed healing — the suite was already green.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * One persisted heal verdict: `healed` (green, badged with the attempt it
+ * flipped on), `still_failing` (red, a likely real source bug), or `passed`
+ * (green). Mirrors {@link HealRow} but renders the single stored failure
+ * message rather than a per-attempt trail.
+ */
+function HealHistoryTestRow({ test }: { test: HealTestRecord }) {
+  const stillFailing = test.status === 'still_failing';
+  return (
+    <li className="rounded border border-border bg-surface-3 px-2 py-1.5 text-[11px]">
+      <div className="flex items-center gap-2">
+        {stillFailing ? (
+          <XCircle className="text-destructive size-3 shrink-0" />
+        ) : (
+          <CheckCircle2 className="size-3 shrink-0 text-success" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-foreground" title={test.name}>
+          {test.name}
+        </span>
+        {test.status === 'healed' ? (
+          <span className="border-success/35 bg-success/15 text-success inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide">
+            <Sparkles className="size-2.5" /> healed
+            {typeof test.healedAtAttempt === 'number' ? ` · attempt ${test.healedAtAttempt}` : ''}
+          </span>
+        ) : stillFailing ? (
+          <span className="pill pill-rejected">likely real bug</span>
+        ) : (
+          <span className="pill pill-approved">passed</span>
+        )}
+      </div>
+      {typeof test.lastFailureMessage === 'string' && test.lastFailureMessage.length > 0 ? (
+        <pre className="text-destructive/90 mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px]">
+          {test.lastFailureMessage}
+        </pre>
+      ) : null}
+    </li>
+  );
+}
+
 export function MutationHistorySection({
   artifactId,
   history,

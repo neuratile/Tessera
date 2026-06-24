@@ -2,11 +2,27 @@ import { describe, expect, it } from 'vitest';
 
 import {
   HealAttemptSchema,
+  HealCheckRecordSchema,
+  HealCheckSummarySchema,
   HealFailureSchema,
   HealOutcomeSchema,
   HealRequestSchema,
   HealResultSchema,
+  HealTestRecordSchema,
+  HealTestStatusSchema,
 } from './heal.schema';
+
+const SUMMARY = {
+  id: '11111111-1111-4111-8111-111111111111',
+  landedRunId: '22222222-2222-4222-8222-222222222222',
+  landedVersionId: 'a-2',
+  attempts: 2,
+  healedCount: 1,
+  stillFailingCount: 0,
+  finalPassing: 14,
+  finalTotal: 14,
+  createdAt: '2026-06-24T10:00:00Z',
+} as const;
 
 describe('HealOutcomeSchema', () => {
   it('accepts the four serde outcome literals', () => {
@@ -124,5 +140,73 @@ describe('HealRequestSchema', () => {
         projectName: 'demo',
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('HealTestStatusSchema', () => {
+  it('accepts the three serde status literals', () => {
+    for (const status of ['healed', 'still_failing', 'passed'] as const) {
+      expect(HealTestStatusSchema.parse(status)).toBe(status);
+    }
+  });
+
+  it('rejects an unknown status', () => {
+    expect(HealTestStatusSchema.safeParse('regressed').success).toBe(false);
+  });
+});
+
+describe('HealTestRecordSchema', () => {
+  it('round-trips a healed test carrying its heal attempt + last failure', () => {
+    const parsed = HealTestRecordSchema.parse({
+      name: 'TC-CART-09',
+      status: 'healed',
+      healedAtAttempt: 2,
+      lastFailureMessage: 'expected 19.99 to equal 20.00',
+    });
+    expect(parsed.status).toBe('healed');
+    expect(parsed.healedAtAttempt).toBe(2);
+  });
+
+  it('accepts a still-failing test with the optional fields omitted', () => {
+    const parsed = HealTestRecordSchema.parse({ name: 'TC-X', status: 'still_failing' });
+    expect(parsed.healedAtAttempt).toBeUndefined();
+    expect(parsed.lastFailureMessage).toBeUndefined();
+  });
+});
+
+describe('HealCheckSummarySchema', () => {
+  it('round-trips a history header', () => {
+    const parsed = HealCheckSummarySchema.parse(SUMMARY);
+    expect(parsed.attempts).toBe(2);
+    expect(parsed.healedCount).toBe(1);
+    expect(parsed.landedRunId).toBe(SUMMARY.landedRunId);
+  });
+
+  it('accepts a summary with landedRunId omitted (the run was purged)', () => {
+    const parsed = HealCheckSummarySchema.parse({
+      id: SUMMARY.id,
+      landedVersionId: SUMMARY.landedVersionId,
+      attempts: SUMMARY.attempts,
+      healedCount: SUMMARY.healedCount,
+      stillFailingCount: SUMMARY.stillFailingCount,
+      finalPassing: SUMMARY.finalPassing,
+      finalTotal: SUMMARY.finalTotal,
+      createdAt: SUMMARY.createdAt,
+    });
+    expect(parsed.landedRunId).toBeUndefined();
+  });
+});
+
+describe('HealCheckRecordSchema', () => {
+  it('round-trips a record with its per-test detail', () => {
+    const parsed = HealCheckRecordSchema.parse({
+      ...SUMMARY,
+      tests: [
+        { name: 'TC-A', status: 'healed', healedAtAttempt: 2, lastFailureMessage: 'boom' },
+        { name: 'TC-B', status: 'still_failing', lastFailureMessage: 'still red' },
+      ],
+    });
+    expect(parsed.tests).toHaveLength(2);
+    expect(parsed.tests[0]?.status).toBe('healed');
   });
 });
