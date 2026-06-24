@@ -110,6 +110,7 @@ the moat v2 builds on.
 | Phase | Scope | Items |
 |---|---|---|
 | **A — Quality loop** | Self-healing repair loop + mutation score | P0 #1, #2 |
+| **A→B — Hardening** | Pre-distribution hardening of the shipped loops (heal history, equivalence mutants, focused regen, machine-readable result contract) — [`V2_HARDENING.md`](./v2-feature-docs/V2_HARDENING.md) | gates B |
 | **B — Distribution** | CLI + GitHub Action + MCP server | P0 #3, P1 #4 |
 | **C — Maintenance + reach** | Diff-aware stale detection + Java/Go runners | P1 #5, #6 |
 

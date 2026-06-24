@@ -40,3 +40,6 @@ Conventions:
 |---|---|
 | [`V2_VISION.md`](./v2/V2_VISION.md) | v2 theme, research findings, and prioritized feature list |
 | [`v2-feature-docs/FLAKY_TEST_DETECTION.md`](./v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) | Flaky-test detection — run the suite N times, flag non-deterministic cases |
+| [`v2-feature-docs/SELF_HEALING_LOOP.md`](./v2/v2-feature-docs/SELF_HEALING_LOOP.md) | Agentic self-healing loop — run → diagnose → regenerate → rerun |
+| [`v2-feature-docs/MUTATION_TESTING.md`](./v2/v2-feature-docs/MUTATION_TESTING.md) | Mutation testing — mutation score (Stage 1) + auto-improve survivors (Stage 2) |
+| [`v2-feature-docs/V2_HARDENING.md`](./v2/v2-feature-docs/V2_HARDENING.md) | Quality-loop hardening before distribution — heal history, equivalence mutants, focused regen, result contract |
