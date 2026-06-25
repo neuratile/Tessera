@@ -165,6 +165,40 @@ impl LlmError {
             | Self::Unsupported { provider, .. } => provider,
         }
     }
+
+    /// Short, actionable recovery guidance for the user — one line per
+    /// variant. Unlike [`Self::code`] (a stable machine identifier the
+    /// frontend branches on) this is human-facing copy the UI can surface
+    /// next to the message. Contains no secrets and no raw provider
+    /// internals (`rules.md` §9).
+    #[must_use]
+    pub fn recovery_hint(&self) -> &'static str {
+        match self {
+            Self::ConnectionFailed { .. } => {
+                "Can't reach the provider — check the base URL in Settings → Providers and that the service is running."
+            }
+            Self::AuthFailed { .. } => "Check your API key in Settings → Providers.",
+            Self::RateLimited { .. } => "Rate limited — wait a moment and retry.",
+            Self::ContextExceeded { .. } => {
+                "Input exceeds the model's context window — shorten it or pick a model with a larger context."
+            }
+            Self::InvalidResponse { .. } => {
+                "The provider returned an unexpected response — retry, or switch providers if it persists."
+            }
+            Self::SchemaValidationFailed { .. } => {
+                "The model's tool output failed schema validation — retry, or use a model with stronger tool-use support."
+            }
+            Self::StreamInterrupted { .. } => {
+                "The stream dropped — retry; if it persists, check your network or the provider's status."
+            }
+            Self::ProviderUnavailable { .. } => {
+                "The provider reported a temporary failure — wait a moment and retry."
+            }
+            Self::Unsupported { .. } => {
+                "This model doesn't support that feature — choose a different model or provider."
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -213,6 +247,56 @@ mod tests {
         ];
         for (err, expected) in cases {
             assert_eq!(err.code(), expected);
+        }
+    }
+
+    #[test]
+    fn recovery_hint_is_nonempty_per_variant() {
+        let variants = [
+            LlmError::ConnectionFailed {
+                provider: "ollama",
+                message: "x".into(),
+            },
+            LlmError::AuthFailed {
+                provider: "openai",
+                message: "x".into(),
+            },
+            LlmError::RateLimited {
+                provider: "anthropic",
+                retry_after_seconds: Some(30),
+            },
+            LlmError::ContextExceeded {
+                provider: "openai",
+                requested_tokens: 250_000,
+                limit: 128_000,
+            },
+            LlmError::InvalidResponse {
+                provider: "ollama",
+                message: "x".into(),
+            },
+            LlmError::SchemaValidationFailed {
+                provider: "openai",
+                payload_preview: "x".into(),
+            },
+            LlmError::StreamInterrupted {
+                provider: "anthropic",
+                message: "x".into(),
+            },
+            LlmError::ProviderUnavailable {
+                provider: "ollama",
+                message: "x".into(),
+            },
+            LlmError::Unsupported {
+                provider: "ollama",
+                feature: "tool_use",
+            },
+        ];
+        for err in variants {
+            assert!(
+                !err.recovery_hint().is_empty(),
+                "empty recovery hint for {}",
+                err.code()
+            );
         }
     }
 
