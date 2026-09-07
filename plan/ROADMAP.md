@@ -7,6 +7,20 @@ the [README](../README.md).
 
 ---
 
+## Current priority: Review my changes (planned)
+
+The next release prioritizes one explicit staged-change review: index versus HEAD,
+code-linked findings, and optional sandbox evidence tied to immutable source and
+test versions. This workflow is **not shipped**. Unstaged/untracked review,
+automatic diff regeneration, and the multi-model consensus panel are deferred;
+the first release preserves the single explicitly active provider.
+
+The [staged-review contract](./versions/v2/AI_FIRST_REVIEW.md) and
+[roadmap #104](https://github.com/neuratile/Tessera/issues/104) take precedence over
+the older feature ordering below. Deliver desktop review and its evaluation
+fixtures first; extract the engine, CLI, and MCP integrations after that workflow
+is proven. A passing regenerated test alone never proves application code fixed.
+
 ## Known limitations & planned solutions
 
 | Limitation | Impact | Planned solution |
