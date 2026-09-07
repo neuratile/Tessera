@@ -1,40 +1,20 @@
 # @testing-ide/shared
 
-Shared **Zod-first** API contracts and inferred TypeScript types for the [Tessera](../../README.md) monorepo.
+Zod runtime validation and inferred TypeScript types for [Tessera](../../README.md).
 
-This package is the single source of truth for every IPC, form, and persisted-payload shape consumed by the React renderer. Schemas are authored in Zod; TypeScript types are inferred via `z.infer<typeof X>`. The Rust backend mirrors the same shapes through `serde` derives.
+Rust serde DTOs define backend wire behavior. Keep schemas aligned with actual
+serialization and validate IPC payloads at the renderer boundary. Frontend-only
+forms also use Zod; not every schema is a Rust DTO.
 
-## Usage
-
-Import from the package root:
-
-```ts
-import { UserSchema, type User, RegisterSchema } from '@testing-ide/shared';
-```
-
-- Schemas live in `src/schemas/`.
-- `src/types/` re-exports the same symbols for grouped imports.
-- `src/index.ts` exports the public surface from `src/types/*` only — no duplicate exports.
-
-## Layout
-
-```
-src/
-├── schemas/       # Zod schema definitions
-├── types/         # grouped re-exports (one file per domain)
-└── index.ts       # public entry — re-exports types/* only
-```
-
-## Scripts
-
-| Command | Purpose |
-|---------|---------|
-| `npm run typecheck` | `tsc --noEmit` — verify the public types compile cleanly |
-| `npm test` | Vitest contract tests (`schema-validity-catalog.test.ts` and friends) |
-
-When using pnpm at the repo root, prefer:
+Import public schemas/types from the package root. Definitions live in
+`src/schemas`, grouped re-exports in `src/types`, and `src/index.ts` exposes both
+schema and type modules. Inspect the public entry before adding exports.
 
 ```bash
 pnpm --filter @testing-ide/shared typecheck
 pnpm --filter @testing-ide/shared test
 ```
+
+Add malformed-input, optional-field, enum/casing, and model-specific tests when
+changing contracts. Planned review DTOs follow the
+[staged-review contract](../../plan/versions/v2/AI_FIRST_REVIEW.md).

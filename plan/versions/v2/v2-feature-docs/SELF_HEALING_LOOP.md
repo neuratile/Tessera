@@ -1,6 +1,8 @@
 # Agentic self-healing loop
 
-> Status: **draft** (v2, P0 #1) — design only, not yet built · Owner: core
+> Design record: implementation status varies by section. See [current status](../../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../../ROADMAP.md) before choosing new work.
+
+> Status: **implemented** — bounded healing and persisted history; this document preserves the original design · Owner: core
 > Depends on: `generation_service::generate` (LLM entry point) and
 > `sandbox_service::run` (execution entry point) — both v1, both reused verbatim.
 >
@@ -12,7 +14,7 @@
 ## 0. Where this sits in v2
 
 v2's theme (V2_VISION §1): **"from test generator to autonomous test-quality
-platform — still 100% local."** The three quality axes v2 adds:
+platform — local-first with optional cloud providers."** The three quality axes v2 adds:
 
 - **Self-healing** (P0 #1, *this doc*) — tests repair themselves on failure.
 - **Mutation score** (P0 #2) — does the suite actually catch bugs.
@@ -20,7 +22,8 @@ platform — still 100% local."** The three quality axes v2 adds:
 
 Self-healing is the **repair** axis and the anchor of Phase A. It directly attacks
 the #1 research pain (V2_VISION §2): "AI almost right but not quite." A generated
-suite proves and fixes itself *before the user ever sees a red test*.
+suite is rerun and regenerated within limits. Passing regenerated tests do not
+prove an application bug was fixed.
 
 ## 0.1 End state — what the user gets when this ships
 
@@ -54,12 +57,11 @@ Self-heal · stopped after 3 attempts · 13/14 passing
 The outcome: the artifact the engineer reviews is one that **already passes**, or
 the loop has narrowed the failure to a **probable real bug in the source** (the test
 couldn't be made to pass), which is itself high-value signal. Every attempt is a
-versioned artifact (`parent_id` chain), so the repair history is auditable. Still
-100% local — nothing leaves the machine.
+versioned artifact (`parent_id` chain), so the repair history is auditable. Sandbox execution stays local; cloud model selections send relevant context to that provider.
 
 This doc specs the **first shippable slice**: whole-artifact regeneration, bounded
-retries, in-app surface. Later slices (§7): focused per-case regen, CLI/Action
-surfacing, persisted heal history.
+retries, in-app surface. Persisted heal history is now implemented. Focused per-case regeneration and
+CLI/Action surfaces remain later design ideas.
 
 ## 1. Problem
 

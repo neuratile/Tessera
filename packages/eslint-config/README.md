@@ -1,22 +1,22 @@
 # @testing-ide/eslint-config
 
-Shared ESLint + Prettier configuration for the [Tessera](../../README.md) monorepo.
+Shared ESLint presets for [Tessera](../../README.md).
 
-## Exports
+| Export | Format |
+|---|---|
+| `@testing-ide/eslint-config/flat/base` | TypeScript flat-config factory |
+| `@testing-ide/eslint-config/flat/react` | React flat-config factory |
+| `@testing-ide/eslint-config/base`, `/react` | Legacy CommonJS configuration |
 
-| Entry | Use for |
-|-------|---------|
-| `@testing-ide/eslint-config/base` | Pure TypeScript / Node packages (e.g. `packages/shared`) |
-| `@testing-ide/eslint-config/react` | React + JSX packages (e.g. `apps/desktop`, `packages/ui`) |
-
-## Usage
-
-In a consuming workspace `eslint.config.js`:
+For an ESM `eslint.config.js`:
 
 ```js
-import config from '@testing-ide/eslint-config/react';
+import createReactConfig from "@testing-ide/eslint-config/flat/react";
 
-export default config;
+export default createReactConfig({ tsconfigRootDir: import.meta.dirname });
 ```
 
-The base preset enforces strict TypeScript rules and the import order convention used across the repo. The React preset extends base with `react-hooks`, `jsx-a11y`, and `react-refresh` rules tuned for Vite.
+The flat base combines ESLint recommendations and type-aware TypeScript rules.
+React adds hooks and Fast Refresh rules. These presets do not install an
+accessibility or import-order plugin. Check each workspace config for its actual
+rules and install dependencies imported by the preset.

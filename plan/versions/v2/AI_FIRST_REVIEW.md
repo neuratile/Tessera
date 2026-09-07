@@ -201,7 +201,7 @@ is inconclusive even if the process exited with a failure.
 
 ## Checkout examples
 
-The companion fixture is planned in [#113](https://github.com/neuratile/Tessera/issues/113):
+The companion fixture is implemented from [#113](https://github.com/neuratile/Tessera/issues/113):
 `evals/fixtures/checkout/{baseline,regression,clean}/src/checkout.mjs`, materialized
 in a temporary Git repository as `src/checkout.mjs`. Static fixture metadata and
 fixture test results are not real Tessera review/run records.

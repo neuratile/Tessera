@@ -1,39 +1,23 @@
-# Branch protection — admin runbook
+# Branch protection
 
-`master` is protected by a **repository ruleset** named **`Protect master`**
-(id `17259460`), not by a classic branch-protection rule. This is the canonical
-"how master stays green" reference for admins.
-
-> **Why this exists.** Master has been broken by direct merges and
-> conflict-marker commits. The ruleset makes those impossible: PR-only, squash-only,
-> linear history, and a set of required status checks that must pass before the
-> merge button unlocks.
-
----
-
-## 1. Current ruleset state
-
-GitHub UI path: **Settings → Rules → Rulesets → Protect master**.
-Inspect from the CLI:
+The `Protect master` repository ruleset (ID `17259460`) protects master.
+Inspect live settings before an authorized administrative change:
 
 ```bash
-gh api repos/Rajveerx11/Tessera/rulesets/17259460 \
-  --jq '{name, enforcement, conditions, rules: [.rules[].type]}'
+gh api repos/neuratile/Tessera/rulesets/17259460
+gh api repos/neuratile/Tessera --jq '{allow_squash_merge, allow_merge_commit, allow_rebase_merge, allow_auto_merge}'
 ```
 
-The active rules are:
+## Current policy
 
 | Rule | Effect |
-|------|--------|
-| `deletion` | `master` cannot be deleted |
-| `non_fast_forward` | linear history only — no force-push, no merge commits |
-| `pull_request` | PR required; **squash is the only allowed merge method**; `required_approving_review_count: 0` |
-| `required_status_checks` | the six checks below must pass; `strict` policy **off** |
+|---|---|
+| `deletion` | Prevents deletion of master |
+| `non_fast_forward` | Prevents force pushes; this alone does not prohibit merge commits |
+| `pull_request` | Requires PRs; squash-only merge method; zero required approvals |
+| `required_status_checks` | Six required checks; up-to-date/strict policy off |
 
-### Required status checks
-
-These six job names must report success before merge (type them exactly — they
-appear in the UI dropdown after the first CI run on a branch):
+Keep these names exactly aligned with the CI jobs:
 
 - `conflict-marker-check`
 - `frontend-checks`
@@ -42,81 +26,32 @@ appear in the UI dropdown after the first CI run on a branch):
 - `e2e-test`
 - `sandbox-runner-test`
 
-`integration-test (ubuntu)` is **intentionally excluded** — it is
-`continue-on-error` (live-Ollama smoke test, flaky on free runners) and must
-never block a merge. See [`docs/AGENT_WORKFLOW.md`](docs/AGENT_WORKFLOW.md) §3.5
-for what each job asserts and [`plan/versions/v1/CI_JOB_CONSOLIDATION.md`](plan/versions/v1/CI_JOB_CONSOLIDATION.md)
-for why `lint-and-test` / `frontend-checks` are merged jobs.
+Coverage and `integration-test (ubuntu)` are advisory. See
+[CI/CD](./docs/CI_CD.md) for each job's scope. Review is encouraged even though
+the configured approval count is zero. Squash-only policy preserves linear
+history for PR merges.
 
----
+## Change and verify
 
-## 2. Editing the ruleset
+Ruleset changes require maintainer authorization. Fetch the live ruleset,
+review a complete proposed payload, and preserve all unrelated rules; the API
+replaces the rules array. Required status context names must match workflow
+job names or merges can wait indefinitely.
 
-Prefer the UI for one-off toggles. For reproducible changes, `PUT` the full
-ruleset body (the API replaces the whole `rules` array — re-send every rule, not
-just the changed one):
+Verify read-only through the API, the Settings → Rules → Rulesets UI, and checks
+on an ordinary PR. Do not test protection by pushing directly to master or
+deliberately committing failing tests.
 
-```bash
-# 1. fetch current state first, diff your change against it
-gh api repos/Rajveerx11/Tessera/rulesets/17259460 > ruleset.json
-# 2. edit ruleset.json, then PUT it back
-gh api --method PUT repos/Rajveerx11/Tessera/rulesets/17259460 --input ruleset.json
-```
+Auto-merge is opt-in through the existing `auto-merge` label and respects current
+rules. It does not require approvals/up-to-date status beyond what the ruleset
+actually configures. Do not enable it on behalf of a user without authorization.
 
-**Common changes as the team grows:**
+## Hooks and releases
 
-- **Require reviews** — set `pull_request.parameters.required_approving_review_count`
-  to `1` (raise to `2` past ~5 people); optionally enable
-  `require_code_owner_review` and `required_review_thread_resolution`.
-- **Require up-to-date branches** — set
-  `required_status_checks.parameters.strict_required_status_checks_policy` to
-  `true`. (Off today to avoid serialized update-merge-rerun churn on a
-  solo-maintainer repo.)
-- **Add a new required check** — append `{ "context": "<job-name>" }` to
-  `required_status_checks.parameters.required_status_checks`. The context string
-  must match the job's `name:` in `ci.yml` exactly, or the check waits forever.
+`pnpm install` configures Husky hooks. Run `pnpm guard:pre-push` before pushing;
+CI independently enforces its required checks. Local checks are not full CI
+parity and must not be bypassed to hide failures.
 
-If a check context never appears in the UI dropdown, run CI once on a throwaway
-PR so GitHub indexes the job name, then refresh.
-
----
-
-## 3. Repository settings (one-time)
-
-GitHub UI path: **Settings → General → Pull Requests**:
-
-- [x] Allow squash merging — commit message **"Pull request title and description"**
-- [ ] Allow merge commits — **OFF** (linear history)
-- [ ] Allow rebase merging — **OFF** (squash is the only way in)
-- [x] Always suggest updating pull request branches
-- [x] Automatically delete head branches
-
-**Settings → Actions → General**:
-
-- [x] Allow GitHub Actions to create and approve pull requests
-      (required for the `auto-merge` workflow's `gh pr merge --auto`)
-
-No new secrets are required for the gating itself. `release.yml` already uses
-`GITHUB_TOKEN` and `TAURI_*` signing secrets; nothing here touches them.
-
----
-
-## 4. Verify
-
-Open a one-line throwaway PR and confirm:
-
-- The PR template auto-fills.
-- The "Merge" button is greyed out until the six required checks are green.
-- Direct `git push origin master` from the CLI is rejected (non-fast-forward /
-  ruleset violation).
-
-To prove the status-check gate actually bites, push a commit with a deliberately
-failing test and confirm the merge button stays locked until it is fixed.
-
----
-
-## 5. Local hooks
-
-Per-developer hook setup is automatic on `pnpm install` and is a contributor
-concern, not an admin one — see [`CONTRIBUTING.md`](./CONTRIBUTING.md). The
-ruleset makes a `--no-verify` bypass useless anyway: the PR is still gated by CI.
+Release jobs validate tags and run reusable CI before creating draft installers.
+The workflow uses `GITHUB_TOKEN` for release assets and does not configure
+platform signing secrets. See [Releasing](./docs/RELEASING.md).

@@ -9,6 +9,8 @@ on:
   # Manual re-runs without an empty commit — handy when a job failed on
   # runner flake (registry 429s, apt mirrors) rather than code.
   workflow_dispatch:
+  # Release builds reuse these same gates on the tagged source.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +29,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check release tooling and deterministic review fixtures
+        run: node --test tools/scripts/check-release.test.mjs evals/fixtures/checkout/fixture.test.mjs
       - name: Scan for unresolved Git conflict markers
         # Hard-fail when `<<<<<<<`, `=======`, or `>>>>>>>` lines slip into
         # tracked source. Master has been broken three times by merge

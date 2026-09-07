@@ -1,5 +1,7 @@
 # Plan: CI Job Consolidation + Branch-Protection Required Checks
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 ## Context
 
 **Goal.** Cut billed CI minutes by collapsing jobs that share an identical
@@ -117,7 +119,7 @@ on `master` — GitHub validates loosely, but matching reality avoids a stuck
 first PR):
 
 ```bash
-gh api --method PUT "repos/Rajveerx11/Tessera/rulesets/17259460" \
+gh api --method PUT "repos/neuratile/Tessera/rulesets/17259460" \
   --input - <<'JSON'
 {
   "name": "Protect master",
@@ -159,7 +161,7 @@ JSON
 ```
 
 Notes:
-- **First** fetch the live ruleset (`gh api repos/Rajveerx11/Tessera/rulesets/17259460`)
+- **First** fetch the live ruleset (`gh api repos/neuratile/Tessera/rulesets/17259460`)
   and diff against the payload above before PUT — the `conditions` block must
   match what's already there (the snapshot showed only the three rules, not the
   `conditions`; copy the real value rather than assuming `~DEFAULT_BRANCH`).

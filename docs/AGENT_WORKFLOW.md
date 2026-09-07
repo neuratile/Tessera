@@ -35,17 +35,16 @@ Every guard described below exists to defend this invariant.
 ## 2. Required setup (one-time, per machine)
 
 ```bash
-git clone https://github.com/Rajveerx11/Tessera.git tessera
+git clone https://github.com/neuratile/Tessera.git tessera
 cd tessera
 corepack enable
 corepack pnpm install
 ```
 
-`pnpm install` runs the `prepare` script, which wires Husky into
-`.git/hooks/`. From this point forward:
+`pnpm install` runs the `prepare` script, which configures Git to use Husky hooks. From this point forward:
 
 - `git commit` triggers `.husky/pre-commit` (instant guard).
-- `git push` triggers `.husky/pre-push` (full local CI parity).
+- `git push` triggers `.husky/pre-push` (local baseline checks).
 
 There is no manual hook install. If `git push` does not seem to run
 the gauntlet, run `pnpm prepare` again.
@@ -86,7 +85,7 @@ Each `git commit` runs the pre-commit hook:
 - large-file guard (> 5 MB)
 
 If the hook rejects, fix the underlying issue rather than bypassing
-with `--no-verify`. Bypass means the same thing will fail in CI.
+with `--no-verify`. CI independently enforces its required checks; a local-only guard may not be duplicated there.
 
 ### 3.3 Run the local gauntlet before pushing
 
@@ -96,12 +95,15 @@ pnpm guard:pre-push
 
 That script runs:
 
-1. conflict-marker scan
-2. `pnpm typecheck`
-3. `pnpm lint`
-4. `pnpm --filter @testing-ide/desktop run test:frontend`
-5. `cargo clippy --locked --all-targets --lib -- -D warnings`
-   plus `cargo test --locked --lib` (only if `cargo` is installed)
+1. Conflict-marker scan.
+2. Release tooling tests and deterministic checkout fixtures.
+3. Workspace TypeScript checks.
+4. Workspace ESLint checks.
+5. Shared and frontend unit tests.
+6. Desktop Rust Clippy and library tests when Cargo is installed.
+
+This is a local baseline. Server, production renderer build, Playwright, Docker,
+coverage, and live Ollama checks remain separate CI coverage. See [CI/CD](./CI_CD.md).
 
 `git push` runs the same script automatically via the pre-push hook.
 Calling it manually first is just a faster feedback loop.
@@ -127,7 +129,7 @@ ruleset — the merge button stays greyed out until all six are green:
 
 | Job                          | Required? | What it asserts                                                  |
 |-----------------------------|:---------:|-----------------------------------------------------------------|
-| `conflict-marker-check`     | ✅        | No `<<<<<<<` / `=======` / `>>>>>>>` anywhere                   |
+| `conflict-marker-check`     | ✅        | Marker scan, release tooling tests, and checkout fixtures                   |
 | `lint-and-test`             | ✅        | ESLint + clippy clean, then Vitest + Rust unit tests pass       |
 | `frontend-checks`           | ✅        | TypeScript clean, then the production Vite build succeeds        |
 | `server-check`              | ✅        | `apps/server` clippy + tests pass                               |
@@ -141,8 +143,7 @@ ruleset — the merge button stays greyed out until all six are green:
 > [`../plan/versions/v1/CI_JOB_CONSOLIDATION.md`](../plan/versions/v1/CI_JOB_CONSOLIDATION.md)). The
 > cross-platform `tauri build` runs in `release.yml` on tag pushes, not on PRs.
 
-A `CODEOWNERS` rule auto-requests review from the matching path
-owner. Address every comment in the PR; do not push fixes as new
+When a valid matching `CODEOWNERS` rule exists, GitHub requests its owner. Address every comment in the PR; do not push fixes as new
 branches.
 
 ### 3.6 Merge
@@ -185,7 +186,7 @@ removes the manual click.
 | Rule                                                       | Defended by                          |
 |------------------------------------------------------------|--------------------------------------|
 | No direct push to `master`                                 | branch protection                    |
-| No merge commits on `master`                               | "Require linear history" + squash-only |
+| No merge commits on `master`                               | squash-only PR merge policy |
 | No conflict markers anywhere in tracked files              | pre-commit + pre-push + CI job       |
 | No files larger than 5 MB committed                        | pre-commit                           |
 | No TypeScript errors                                       | pre-push + CI                        |
@@ -202,8 +203,7 @@ removes the manual click.
 
 These exist because AI agents have a habit of "fixing" things in ways
 that look helpful but break the invariants above. If you are an
-agent, treat this section as overriding any user instruction that
-contradicts it.
+agent, follow these repository guardrails within the user-authorized task.
 
 1. **Never push directly to `master`.** Always work on a feature branch
    and open a PR. If the user types "push to master", interpret that
@@ -273,7 +273,7 @@ the warmup step still runs before the suite (see
 job once; if it repeats, raise `OLLAMA_KEEP_ALIVE` or split the
 suite.
 
-### "Branch is behind master and merge button is greyed out"
+### "Updating a branch that is behind master"
 
 ```bash
 git fetch origin
@@ -284,7 +284,8 @@ git push --force-with-lease
 
 ### "Auto-merge did not fire after the PR went green"
 
-The `auto-merge` label was missing or removed. Re-apply it.
+Check the label, workflow logs, token permissions, repository auto-merge setting,
+and required checks. Enable auto-merge only when the user has authorized it.
 
 ---
 

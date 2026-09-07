@@ -1,18 +1,8 @@
 name: auto-merge
 
-# Enables GitHub's native auto-merge on PRs that opt in. The PR author
-# (or any maintainer) just clicks "Enable auto-merge" once or labels
-# the PR with `auto-merge`; this workflow flips the auto-merge flag so
-# the PR squash-merges as soon as required reviews are approved and
-# all required status checks pass.
-#
-# This workflow does NOT bypass branch protection. It still requires:
-#   - approving review(s)
-#   - all required status checks green
-#   - branch up to date with master
-#
-# It just removes the manual "click merge" step once the gates are
-# satisfied.
+# Opt-in label enables native squash auto-merge after repository gates.
+# It never bypasses required checks. Current rules require zero approvals and
+# do not force an up-to-date branch; see BRANCH_PROTECTION.md.
 
 on:
   pull_request:

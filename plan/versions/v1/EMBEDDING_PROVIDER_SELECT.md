@@ -1,5 +1,7 @@
 # Embedding Provider Selection — Ollama / OpenAI / Gemini / Hugging Face
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: **implemented** · Owner: core · Created: 2026-06-07 · Branch: `feat/embedding-provider-select`
 > Two phases. Phase 1 = backend (config + providers + resolver). Phase 2 = frontend (settings UI + re-index UX).
 > Decisions locked: HF **cloud Inference API only** (no local HF runtime), **Gemini included**, re-index is **manual** (button + stale banner, no auto-trigger).

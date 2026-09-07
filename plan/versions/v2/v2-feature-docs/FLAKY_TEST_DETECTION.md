@@ -1,5 +1,7 @@
 # Flaky-test detection
 
+> Design record: implementation status varies by section. See [current status](../../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../../ROADMAP.md) before choosing new work.
+
 > Status: **shipped** (v2, P2 #7) — first slice (§3) implemented · Owner: core
 > Depends on: the opt-in Docker sandbox runner (v1 — SANDBOX_TEST_RUNNER.md,
 > SANDBOX_PYTHON_RUNNER.md). Reuses its hardened harness verbatim.
@@ -25,7 +27,7 @@
 ## 0. Where this sits in v2
 
 v2's theme (V2_VISION §1) is **"from test generator to autonomous test-quality
-platform — still 100% local."** v1 closed the generate → run → measure loop; v2
+platform — local-first with optional cloud providers."** v1 closed the generate → run → measure loop; v2
 makes the suite *prove its own quality*. The quality signals v2 adds are:
 
 - **Self-healing** (P0 #1) — tests repair themselves on failure.
@@ -230,7 +232,7 @@ Flaky history
 So the engineer can see at a glance whether a suite is *getting* flakier or
 settling down, and expand any past check to see exactly which tests were
 unreliable then — the verdict is no longer thrown away when the panel closes.
-Still 100% local: nothing leaves the machine.
+Repeated sandbox execution stays local; cloud generation and embedding selections still send relevant context to those providers.
 
 ### Design
 

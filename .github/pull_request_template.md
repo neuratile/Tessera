@@ -27,6 +27,8 @@ in the diff itself.
 - [ ] `pnpm typecheck`
 - [ ] `pnpm lint`
 - [ ] `pnpm test`
+- [ ] `pnpm test:eval-fixtures` (if fixtures or review behavior changed)
+- [ ] `pnpm test:tooling` (if release validation or CI changed)
 - [ ] `pnpm --filter @testing-ide/desktop run test:e2e` (if UI changed)
 - [ ] `cargo clippy --locked --all-targets --lib -- -D warnings` (if Rust changed)
 - [ ] Manual smoke in the Tauri app (steps below)

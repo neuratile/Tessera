@@ -20,4 +20,6 @@ In a consuming workspace `tsconfig.json`:
 }
 ```
 
-Both presets emit no JS (`"noEmit": true`) — building is delegated to Vite (frontend) and `tauri build` (Rust + bundle). They exist purely to make `tsc --noEmit` and editor IntelliSense agree across the workspace.
+The presets share compiler options; they do not both set `noEmit`. Workspace
+`typecheck` scripts invoke `tsc --noEmit` explicitly. Production frontend output
+is built by Vite and packaged with Tauri.

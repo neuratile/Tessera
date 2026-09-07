@@ -1,5 +1,7 @@
 # Artifact Export — Excel / CSV / Google Sheets first, Jira next
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: **shipped** — Phases 1–2 merged (xlsx/csv/tsv #56, Markdown/JSON #59); Phase 3 (Jira) shipped via [`JIRA_INTEGRATION.md`](./JIRA_INTEGRATION.md) (#62) · Owner: core · Created: 2026-06-06
 
 ## 1. Why
