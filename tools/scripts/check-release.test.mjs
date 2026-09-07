@@ -38,6 +38,13 @@ test('reads actual manifests, ignores dependency versions, and fails CLI on bad 
     const cargoPath = join(backend, 'Cargo.toml');
     writeFileSync(cargoPath, '[package]\r\nname = "test"\r\nversion = "1.2.3"\r\n[dependencies.other]\r\nversion = "9.9.9"\r\n');
     assert.equal(checkRelease('refs/tags/v1.2.3', root), '1.2.3');
+    for (const version of ['"1.2.3" # release version', "'1.2.3' # literal string"]) {
+      writeFileSync(cargoPath, '[package] # desktop\nname = "test"\n  version = ' + version + '\n[dependencies.other]\nversion = "9.9.9"\n');
+      assert.equal(checkRelease('refs/tags/v1.2.3', root), '1.2.3');
+    }
+    writeFileSync(cargoPath, '[package]\nversion.workspace = true\n');
+    assert.throws(() => checkRelease('refs/tags/v1.2.3', root), /requires an explicit \[package\] version/);
+    writeFileSync(cargoPath, '[package]\nversion = "1.2.3"\n');
     const script = fileURLToPath(new URL('./check-release.mjs', import.meta.url));
     const child = spawnSync(process.execPath, [script, 'refs/heads/master'], { cwd: root, encoding: 'utf8' });
     assert.equal(child.status, 1);

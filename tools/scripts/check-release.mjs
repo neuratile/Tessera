@@ -17,11 +17,16 @@ export function validateRelease(ref, versions) {
 export function checkRelease(ref, root = process.cwd()) {
   const json = (path) => JSON.parse(readFileSync(resolve(root, path), 'utf8'));
   const cargo = readFileSync(resolve(root, 'apps/desktop/src-tauri/Cargo.toml'), 'utf8');
-  const packageSection = cargo.match(/^\[package\]\s*\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m)?.[1];
-  const rustVersion = packageSection?.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
+  // This standalone crate uses an explicit package version. Accept literal
+  // strings and trailing comments without reading dependency-table versions.
+  const packageSection = cargo.match(/^[ \t]*\[package\][ \t]*(?:#.*)?\r?\n([\s\S]*?)(?=^[ \t]*\[|(?![\s\S]))/m)?.[1];
+  if (/^[ \t]*version[ \t]*\.[ \t]*workspace[ \t]*=/m.test(packageSection ?? '')) {
+    throw new Error('Release policy requires an explicit [package] version; workspace inheritance is not supported.');
+  }
+  const rustVersion = packageSection?.match(/^[ \t]*version[ \t]*=[ \t]*(?:"([^"\r\n]+)"|'([^'\r\n]+)')[ \t]*(?:#.*)?$/m);
   return validateRelease(ref, {
     'Desktop package': json('apps/desktop/package.json').version,
-    'Rust crate': rustVersion,
+    'Rust crate': rustVersion?.[1] ?? rustVersion?.[2],
     'Tauri config': json('apps/desktop/src-tauri/tauri.conf.json').version,
   });
 }

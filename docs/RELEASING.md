@@ -9,6 +9,8 @@ Releases are a maintainer action. Normal contribution work ends with a PR.
    `apps/desktop/src-tauri/Cargo.toml`, and
    `apps/desktop/src-tauri/tauri.conf.json`. Refresh the desktop Cargo lockfile
    when its package version changes. The private root workspace version is separate.
+   The standalone desktop crate must keep an explicit literal `[package]` version;
+   workspace-inherited Cargo versions are not supported by this release policy.
 3. Update the changelog, run `pnpm guard:pre-push`, and merge the preparation PR.
 
 ## Tag and build

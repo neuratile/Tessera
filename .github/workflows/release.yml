@@ -29,12 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
       - name: Validate stable tag and desktop versions
         env:
           RELEASE_REF: ${{ github.ref }}
@@ -64,7 +65,7 @@ jobs:
     # per platform; 90 keeps a wedged runner from burning the 6 h default.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux WebKit deps
         if: matrix.platform.runner == 'ubuntu-latest'
@@ -86,7 +87,7 @@ jobs:
           run_install: false
 
       - name: Install Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm

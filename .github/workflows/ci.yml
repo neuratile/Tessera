@@ -28,10 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
       - name: Check release tooling and deterministic review fixtures
         run: node --test tools/scripts/check-release.test.mjs evals/fixtures/checkout/fixture.test.mjs
       - name: Scan for unresolved Git conflict markers
@@ -61,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux Tauri deps
         uses: ./.github/actions/linux-tauri-deps
@@ -70,7 +71,7 @@ jobs:
         with:
           run_install: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -114,13 +115,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -144,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -170,13 +171,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -217,7 +218,7 @@ jobs:
       # this blocking gate would stall PRs for reasons unrelated to the code.
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux Tauri deps
         uses: ./.github/actions/linux-tauri-deps
@@ -321,7 +322,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux Tauri deps
         uses: ./.github/actions/linux-tauri-deps
@@ -330,7 +331,7 @@ jobs:
         with:
           run_install: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -410,7 +411,7 @@ jobs:
           # 7 GB runner.
           OLLAMA_CONTEXT_LENGTH: "16384"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux Tauri deps
         uses: ./.github/actions/linux-tauri-deps
@@ -419,7 +420,7 @@ jobs:
         with:
           run_install: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
