@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "checkout-quantity",
+  "language": "javascript",
+  "scope": "staged",
+  "baselineSource": "baseline/src/checkout.mjs",
+  "stagedPath": "src/checkout.mjs",
+  "behaviorTest": "tests/checkout.test.mjs",
+  "testVersion": "checkout-quantity-v1",
+  "testCommand": ["node", "--test", "tests/checkout.test.mjs"],
+  "sandboxFiles": ["src/checkout.mjs", "tests/checkout.test.mjs"],
+  "scenarios": [
+    {
+      "scenarioId": "negative-quantity-regression",
+      "changedSource": "regression/src/checkout.mjs",
+      "expectedTestExitCode": 1,
+      "expectedFindings": [
+        {
+          "ruleId": "checkout-positive-quantity",
+          "symbol": "checkoutTotal",
+          "source": { "path": "src/checkout.mjs", "side": "new", "lineStart": 7, "lineEnd": 7 },
+          "failingInput": { "quantity": -1 },
+          "expectedBehavior": "Throw RangeError before calculating a total.",
+          "observedFixtureBehavior": { "totalCents": -1200 },
+          "evidenceState": "suspected",
+          "acceptableEvidence": {
+            "suspected": "Cite the staged guard replacing quantity < 1 with quantity === 0 and explain how -1 reaches multiplication.",
+            "reproduced": "Run the unchanged negative-quantity behavior test against the exact reviewed source snapshot and preserve the assertion failure plus snapshot and test provenance."
+          }
+        }
+      ]
+    },
+    {
+      "scenarioId": "clean-multiplication-reorder",
+      "changedSource": "clean/src/checkout.mjs",
+      "expectedTestExitCode": 0,
+      "expectedFindings": [],
+      "falsePositiveExpectation": "The operand reorder preserves quantity validation and total calculation. Report no checkout regression; do not count style suggestions as defects."
+    }
+  ]
+}
