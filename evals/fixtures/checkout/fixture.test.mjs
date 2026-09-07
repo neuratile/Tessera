@@ -56,6 +56,7 @@ for (const scenario of cases) {
     // The child is a separate test run, not a worker of this outer node:test run.
     const childEnvironment = { ...process.env };
     delete childEnvironment.NODE_TEST_CONTEXT;
+    assert.deepEqual(manifest.testCommand, ['node', '--test', manifest.behaviorTest]);
     const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', manifest.behaviorTest], {
       cwd: projectRoot,
       env: childEnvironment,
