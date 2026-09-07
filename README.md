@@ -28,6 +28,14 @@ Tessera is a desktop IDE that runs **static-only** analysis on a codebase and us
 
 Open a folder → Tessera parses it with Tree-sitter, embeds chunks via the configured embedding provider (local Ollama by default; OpenAI, Google Gemini, or Hugging Face Inference optional), and indexes them in SQLite (`sqlite-vec`). Click an artifact button → the active LLM provider runs a versioned, JSON-Schema-constrained prompt over RAG-retrieved context. Output is validated against a Zod schema, then you approve, reject, regenerate-with-feedback, or export to Markdown. **Source never leaves the machine on the default Ollama provider.** Choosing a cloud embedding provider sends code snippets to that provider for embedding — the Settings UI says so explicitly.
 
+### Planned next: Review my changes
+
+The next workflow will review **staged changes against HEAD**, explain risks with
+source references, and optionally run proposed tests against the reviewed snapshot.
+It is **planned, not shipped**; unstaged and untracked files are outside its first
+release. See the [scope and evidence contract](./plan/versions/v2/AI_FIRST_REVIEW.md)
+and [implementation roadmap](https://github.com/neuratile/Tessera/issues/104).
+
 ### Why it's different
 
 | Tool | Generates code? | Generates QA docs? | Static analysis? | Closed-source? |

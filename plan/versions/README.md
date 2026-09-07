@@ -36,7 +36,11 @@ Conventions:
 
 ## v2 (planned)
 
+Current delivery priority is the staged-review contract below; earlier vision
+documents retain historical shipped work and deferred ideas.
+
 | Doc | Feature |
 |---|---|
+| [`AI_FIRST_REVIEW.md`](./v2/AI_FIRST_REVIEW.md) | Planned first staged-review workflow: immutable source, evidence states, limits, wire contract, and delivery dependencies |
 | [`V2_VISION.md`](./v2/V2_VISION.md) | v2 theme, research findings, and prioritized feature list |
 | [`v2-feature-docs/FLAKY_TEST_DETECTION.md`](./v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) | Flaky-test detection — run the suite N times, flag non-deterministic cases |

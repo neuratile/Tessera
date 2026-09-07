@@ -8,6 +8,13 @@
 
 ## 1. Theme
 
+**Priority update (2026-09-07):** the planned
+[AI-first staged-review contract](./AI_FIRST_REVIEW.md) now governs the next
+workflow and its delivery order. Earlier shipped features remain available;
+CLI/MCP follow a proven desktop review. Automatic regeneration and multi-model
+consensus are deferred. In review evidence, passing or "healed" tests never by
+themselves establish that application code was fixed.
+
 **From test generator to autonomous test quality platform — still 100% local.**
 
 v1 closed the generate → run → measure loop (the only AI testing tool that
