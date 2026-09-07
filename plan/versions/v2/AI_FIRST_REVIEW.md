@@ -75,6 +75,13 @@ A source reference is `{ snapshotId, path, side, lineStart, lineEnd }`:
 path. File-level metadata findings omit both line fields. No invented locations.
 Unchanged supporting files use their index blob and `side: "new"`.
 
+Model-facing transformations must preserve raw-source line numbers: redact secret
+characters in place without adding/removing line breaks; CRLF-to-LF conversion
+may change bytes but must preserve logical lines. Label context excerpts with their
+original starting line, never renumber them from one. If safe redaction cannot
+preserve line layout, exclude that file with `redaction_unmappable`; do not send
+the secret or accept references in transformed coordinates.
+
 Compare HEAD identity and the index fingerprint before and after capture; if either
 changes, reject with `INVALID_INPUT` and ask for a new review. Once captured,
 later edits never rewrite the record. Recheck before display refresh and before
