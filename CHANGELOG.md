@@ -10,6 +10,16 @@ commit messages and [Semantic Versioning](https://semver.org/) for releases.
 
 ## [Unreleased]
 
+### Documentation and delivery
+
+- Align README, contributor guides, status, and design indexes with the planned
+  staged-review workflow; distinguish implemented foundations from runtime work.
+- Run deterministic checkout fixtures and release-validator tests in local
+  pre-push checks and the existing required CI jobs.
+- Validate stable release tags against desktop versions and master ancestry;
+  reuse full CI before building draft installers. Publishing stays manual.
+- Pass the configured pnpm script shell through Turbo for Windows contributors.
+
 ### 🚀 Added
 
 - **Persisted flaky history** — a completed flaky check is now saved so a suite's
@@ -216,7 +226,7 @@ and line-level coverage painted directly onto the Monaco editor gutters.
 - **Prompt versioning** with JSON-Schema tool calls and insta snapshots.
 - **AES-256-GCM** encrypted API key storage.
 - **First-run wizard** with hardware probe, Ollama connectivity test, model-pull.
-- **Cross-platform** signed releases (Windows, macOS, Linux) via GitHub Actions.
+- **Cross-platform** draft installer workflow (Windows, macOS, Linux) via GitHub Actions; signing is not configured.
 - **339+ tests**: 218 Rust unit, 43 TS unit, 78 Zod schema, 2 integration, 6 snapshot.
 - **CI/CD**: 5-gate CI, pre-push gauntlet, Husky hooks, branch protection.
 - MIT licensed.
@@ -233,6 +243,6 @@ and line-level coverage painted directly onto the Monaco editor gutters.
 
 ---
 
-[Unreleased]: https://github.com/Rajveerx11/Tessera/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/Rajveerx11/Tessera/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/Rajveerx11/Tessera/releases/tag/v0.1.0
+[Unreleased]: https://github.com/neuratile/Tessera/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/neuratile/Tessera/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/neuratile/Tessera/releases/tag/v0.1.0

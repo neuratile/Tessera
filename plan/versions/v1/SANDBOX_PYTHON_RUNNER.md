@@ -1,5 +1,7 @@
 # Plan — Python Sandbox Runner (`docker_py`)
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: Implemented (PR pending review) | Owner: TBD | Created: 2026-06-10
 >
 > Implementation notes (2026-06-10):

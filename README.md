@@ -1,257 +1,98 @@
-<div align="center">
-
-<img src="apps/desktop/public/tessera-logo.png" alt="Tessera Logo" width="180" />
-
 # Tessera
 
-**Local-first AI testing IDE — turn any codebase into a full QA dossier without sending source to the cloud.**
+Local-first AI testing for your codebase.
 
-**🌐 Live: [tesseraide.vercel.app](https://tesseraide.vercel.app/)**
+[![CI](https://github.com/neuratile/Tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/neuratile/Tessera/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE.md)
 
-[![Website](https://img.shields.io/badge/website-tesseraide.vercel.app-000000?logo=vercel&logoColor=white)](https://tesseraide.vercel.app/)
-[![CI](https://github.com/Rajveerx11/Tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/Rajveerx11/Tessera/actions/workflows/ci.yml)
-[![Release](https://github.com/Rajveerx11/Tessera/actions/workflows/release.yml/badge.svg)](https://github.com/Rajveerx11/Tessera/actions/workflows/release.yml)
-[![Tauri 2](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.81+-CE422B?logo=rust)](https://www.rust-lang.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.md)
+Tessera is a Tauri desktop app that reads a local project, retrieves relevant
+code, and uses your selected model to generate test plans, test cases, and bug
+reports. Run generated JS/TS or Python tests in an opt-in Docker sandbox,
+inspect coverage, and export results.
 
-</div>
+**Next: Review my changes.** We are building a staged Git review with code-linked
+findings and evidence tied to exact source/test versions. The
+[contract](./plan/versions/v2/AI_FIRST_REVIEW.md) and
+[checkout fixture](./evals/README.md) are available. The review engine and UI
+are **not implemented yet**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
 
-> A **tessera** is one tile of a mosaic. Tessera the IDE assembles thousands of code chunks, AST nodes, and test cases into a single, reviewable picture of your software's quality.
+## What works today
 
----
+- Import a local project and build context using AST analysis and embeddings.
+- Generate Context, Test Plan, Test Cases, Defect Report, and Bug Report artifacts.
+- Select one active LLM: Ollama, OpenAI, OpenRouter, Anthropic, or Gemini.
+  Select embeddings independently: Ollama, OpenAI, Gemini, or Hugging Face.
+- Execute supported tests with explicit Docker sandbox opt-in; inspect coverage.
+- Repeat runs for flaky checks, refine generated tests with a bounded healing
+  loop, and score/improve JS/TS tests against mutations.
+- Export Markdown, JSON, spreadsheet/tabular data, or push artifacts to Jira Cloud.
 
-## What it is
+A passing regenerated test does not establish that application code was repaired.
+The planned review workflow will preserve that distinction in its evidence.
 
-Tessera is a desktop IDE that runs **static-only** analysis on a codebase and uses an LLM to generate structured QA artifacts — test plans, test cases, defect reports, bug reports. Everything runs on your machine (local LLM, local SQLite, local AST parsing), so it works on closed-source, regulated, and offline codebases.
+## Start locally
 
-Open a folder → Tessera parses it with Tree-sitter, embeds chunks via the configured embedding provider (local Ollama by default; OpenAI, Google Gemini, or Hugging Face Inference optional), and indexes them in SQLite (`sqlite-vec`). Click an artifact button → the active LLM provider runs a versioned, JSON-Schema-constrained prompt over RAG-retrieved context. Output is validated against a Zod schema, then you approve, reject, regenerate-with-feedback, or export to Markdown. **Source never leaves the machine on the default Ollama provider.** Choosing a cloud embedding provider sends code snippets to that provider for embedding — the Settings UI says so explicitly.
-
-### Planned next: Review my changes
-
-The next workflow will review **staged changes against HEAD**, explain risks with
-source references, and optionally run proposed tests against the reviewed snapshot.
-It is **planned, not shipped**; unstaged and untracked files are outside its first
-release. See the [scope and evidence contract](./plan/versions/v2/AI_FIRST_REVIEW.md)
-and [implementation roadmap](https://github.com/neuratile/Tessera/issues/104).
-
-### Why it's different
-
-| Tool | Generates code? | Generates QA docs? | Static analysis? | Closed-source? |
-|------|:---:|:---:|:---:|:---:|
-| Cursor / Copilot | Yes | No | Partial | Yes |
-| Mabl / TestRigor | No | Limited | Runtime only | No |
-| SonarQube | No | No | Rule-based | Yes |
-| **Tessera** | **No (by design)** | **Yes** | **Tree-sitter + RAG** | **Yes (local LLM)** |
-
-Three guarantees: **architecture-aware** (RAG retrieves symbols across the whole project, not just the open file) · **static by default** (analysis never executes your code; an *optional* local Docker sandbox runs **generated** tests opt-in, off by default, with no network — safe for production / regulated repos) · **structured** (every artifact is validated JSON that exports cleanly to JIRA / Notion / GitHub Issues).
-
----
-
-## Artifacts
-
-| Type | Output |
-|------|--------|
-| **Context** | Architectural summary — the project memory for downstream artifacts |
-| **Test Plan** | Scope, objectives, strategy, environments, risk matrix, entry/exit criteria |
-| **Test Cases** | Steps, expected results, priority, traceability back to a source symbol |
-| **Defect Report** | Static findings: severity, category, location, suggested fix, confidence |
-| **Bug Report** | Potential runtime issues, formatted for ticket trackers |
-
-Each artifact is versioned; regenerating with reviewer feedback bumps the version and links to its parent.
-
-### Run generated tests (optional)
-
-Opt-in, off by default. With the sandbox enabled in settings and Docker present, **Run** on a Test Cases artifact executes the generated JS/TS tests inside a hardened, network-less Docker container and paints pass/fail + line coverage onto the Monaco gutters (green = covered, amber = uncovered). Code never leaves the machine: the container runs with `--network none`, drops all capabilities, runs non-root on a read-only rootfs under cpu/mem/pids/file-size caps, and is killed on timeout or Stop. The backend refuses any run unless opt-in is confirmed. See [`plan/versions/v1/SANDBOX_TEST_RUNNER.md`](./plan/versions/v1/SANDBOX_TEST_RUNNER.md) and [ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md).
-
----
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                    Tessera Desktop (Tauri)                     │
-│                                                                │
-│   React 19 + TS + Tailwind + shadcn/ui    ◀── Renderer         │
-│            │  typed IPC (Zod-validated, kebab-case wire)       │
-│            ▼                                                   │
-│   Rust commands ─▶ services ─▶ repositories ─▶ SQLite + vec0   │
-│            ├─▶ Tree-sitter (JS / TS / Python)                  │
-│            ├─▶ Ollama embeddings (nomic-embed-text)            │
-│            ├─▶ LLM provider trait (Ollama / OpenAI /           │
-│            │             OpenRouter / Anthropic / Gemini)      │
-│            └─▶ TestRunner trait (opt-in Docker sandbox,        │
-│                                  JS/TS + Python)               │
-└────────────────────────────────────────────────────────────────┘
-```
-
-Layered backend (see [`rules/rules.md`](./rules/rules.md) §4.2): **commands** are thin Tauri IPC, **services** orchestrate RAG + prompts + validation, **repositories** are the only place that touches SQL, **providers** are LLM/embedding implementations behind a trait. API keys at rest are encrypted with AES-256-GCM derived from `JWT_SECRET`.
-
----
-
-## Stack & providers
-
-| Layer | Choice |
-|-------|--------|
-| Shell / backend | Tauri 2.0 · Rust 1.81+ (Tokio, sqlx, reqwest/rustls) |
-| Storage | SQLite 3 + `sqlite-vec` (embedded, no daemon) |
-| AST | `tree-sitter` — JS / TS / Python (more on the roadmap) |
-| Frontend | React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui + Monaco |
-| Observability | `tracing` logs · Sentry (opt-in, both sides) |
-| Test sandbox | Docker (opt-in, off by default) — `vitest` + istanbul (JS/TS) and `pytest` + coverage.py (Python) in a hardened container |
-
-| LLM provider | Auth | Local | Notes |
-|----------|------|:-----:|-------|
-| **Ollama Local** | none | ✅ | Default — ships `qwen2.5-coder:7b` + `nomic-embed-text` |
-| Ollama Cloud | API key | ❌ | Same wire format, hosted |
-| OpenAI | API key | ❌ | Custom base URL (Azure / proxies) |
-| OpenRouter | API key | ❌ | Gateway to many models |
-| Anthropic | API key | ❌ | Claude family |
-| Google Gemini | API key | ❌ | Google AI Studio key; OpenAI-compatible endpoint |
-
-Embeddings are pluggable; the default `nomic-embed-text` (768-dim, Apache-2.0) ships with Ollama.
-
----
-
-## Quick start
-
-| Tool | Version | Notes |
-|------|---------|-------|
-| Rust | 1.81+ | [rustup.rs](https://rustup.rs/) + `clippy` + `rustfmt` |
-| Node.js | 20+ | LTS |
-| pnpm | 10+ | `corepack enable` |
-| Ollama | latest | [ollama.com](https://ollama.com/) — local provider only |
+Install Git, pnpm 10.9.0, stable Rust, and the native
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+CI uses Node 20; the optional TypeScript bootstrap helper needs Node 22.6+.
+Docker is required only for sandbox execution or containerized services.
 
 ```bash
-git clone https://github.com/Rajveerx11/Tessera.git tessera
+git clone https://github.com/neuratile/Tessera.git tessera
 cd tessera
-corepack enable && corepack pnpm install
-cp .env.example .env
-pnpm bootstrap:ollama                          # starts Ollama, pulls chat + embedding models
-pnpm --filter @testing-ide/desktop run dev     # boots Vite + Tauri; the desktop window opens
+corepack enable
+pnpm install --frozen-lockfile
+cp apps/desktop/.env.example apps/desktop/.env
+pnpm --filter @testing-ide/desktop dev
 ```
 
-- **macOS** — `xcode-select --install`.
-- **Linux** — install Tauri's system deps: `libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file`.
-- **Optional shared stack** — `pnpm services:up` / `services:down` runs Ollama via [`docker-compose.yml`](./docker-compose.yml).
+Follow [Getting started](./docs/GETTING_STARTED.md) to configure Ollama and
+generate your first artifact. Models are downloaded separately.
 
----
+**Generation stays local when you select local providers.** Cloud LLM and
+embedding selections send relevant prompts/code context to those providers.
+Jira and the optional Boards server also use network services. Sandbox containers
+run without network access. See [Architecture](./docs/ARCHITECTURE.md).
 
-## Configuration
+## Contribute to the AI-first workflow
 
-The desktop app reads `apps/desktop/.env` (copy from [`apps/desktop/.env.example`](./apps/desktop/.env.example)); the root [`.env.example`](./.env.example) covers the optional Docker stack. Key variables:
+Read [CONTRIBUTING](./CONTRIBUTING.md) and the [delivery order](./plan/ROADMAP.md).
+Pick one scoped issue and include a reproducible acceptance check.
 
-- `OLLAMA_BASE_URL` — Ollama endpoint, default `http://localhost:11434`
-- `JWT_SECRET` — required for auth paths; also derives the AES key for stored API keys
-- `LOG_LEVEL` — `tracing` filter (`info`, `debug`, `tessera=trace`)
-- `SENTRY_DSN` / `VITE_SENTRY_DSN` — error reporting (off when unset)
-
----
-
-## Testing
+The smallest starting point needs only Node and Git:
 
 ```bash
-pnpm test          # frontend Vitest + Rust unit tests
-pnpm typecheck     # TypeScript across the monorepo
-pnpm lint          # ESLint + clippy in CI
-
-pnpm --filter @testing-ide/desktop run test:integration   # live Ollama suite
-pnpm --filter @testing-ide/desktop run test:e2e           # Playwright desktop flow
+node --test evals/fixtures/checkout/fixture.test.mjs
 ```
 
-Clippy runs clean under `-W clippy::pedantic`; release builds are green on Windows, macOS, and Linux via `tauri-action`.
+This checks a seeded checkout bug and a clean control without an LLM, Docker,
+or the desktop app. It is a fixture check, not a working review or model accuracy
+score. Git capture, contracts, context, and findings come next; core extraction,
+CLI, and MCP follow a proven desktop workflow.
 
----
+## Repository map
 
-## Repo layout
+| Location | Purpose |
+|---|---|
+| `apps/desktop/src` | React renderer, stores, frontend tests |
+| `apps/desktop/src-tauri/src` | Rust commands, services, repositories, providers, runners |
+| `apps/server` | Optional Boards API, checked separately in CI |
+| `packages/shared` | Zod validation and TypeScript contracts |
+| `packages/eslint-config`, `packages/tsconfig` | Shared tooling presets |
+| `evals` | Deterministic fixtures; review evaluation harness planned |
+| `docs`, `plan` | Current guides and feature design records |
+| `tools/scripts`, `.github/workflows` | Local checks and CI/CD |
 
-```
-apps/desktop/        Tauri shell — React frontend (src/) + Rust backend (src-tauri/)
-packages/
-  shared/            Zod schemas + inferred TS types (the FE/BE contract)
-  eslint-config/     base + React presets
-  tsconfig/          base + desktop presets
-rules/               engineering rulebook (rules.md)
-docs/                workflow + process docs
-tools/scripts/       deploy + release automation
-.github/workflows/   CI + release pipelines
-```
+## Documentation and delivery
 
-Architecture Decision Records live in [`apps/desktop/src-tauri/docs/adr/`](./apps/desktop/src-tauri/docs/adr/).
+- [Documentation index](./docs/README.md): setup, architecture, testing, and releases.
+- [Project status](./docs/PROJECT_STATUS.md): implemented features and known limits.
+- [Roadmap](./plan/ROADMAP.md): staged review first, integrations later.
+- [CI/CD](./docs/CI_CD.md): local checks and six required PR jobs.
+- [Release guide](./docs/RELEASING.md): checked tags produce draft installers.
 
----
+Release automation targets Windows, macOS, and Linux. A draft build is not a
+published release or proof of signing. Check the
+[Releases page](https://github.com/neuratile/Tessera/releases) for public assets.
 
-## Documentation
-
-Stay up to date with what's happening in the project:
-
-| Document | What you'll find |
-|----------|------------------|
-| [`CHANGELOG.md`](./CHANGELOG.md) | Version history — every change, grouped by release |
-| [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) | Living project context — architecture, status, roadmap, quality grades |
-| [`docs/FEATURE_REVIEW.md`](./docs/FEATURE_REVIEW.md) | Feature scorecard — 22 features rated with gaps and priorities |
-| [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) | Change-management contract for humans + AI agents |
-| [`plan/ROADMAP.md`](./plan/ROADMAP.md) | Feature roadmap and known limitations |
-| [`rules/rules.md`](./rules/rules.md) | Engineering rules (layering, IPC, security, testing) |
-
----
-
-## Roadmap
-
-**v0.1 (shipped)** — feature-complete: 5 artifact types, 5 LLM providers, RAG pipeline, streaming generation, first-run wizard, cross-platform signed releases.
-
-**Sandbox test runner (shipped, JS/TS + Python)** — opt-in Docker sandbox runs generated test cases and overlays pass/fail + line coverage on the editor, closing the generate → run → measure loop ([ADR-0004](./apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md)). The Python slice (`docker_py`: pytest + coverage.py, stdlib-only image) landed on the same `TestRunner` trait with the Docker hardening extracted into a shared harness — adding Java/Go is one `docker_<lang>.rs` + one Dockerfile ([plan](./plan/versions/v1/SANDBOX_PYTHON_RUNNER.md)). Cloud runners are next.
-
-**Autonomous test quality (shipped, v2)** — three quality axes built on top of the sandbox loop, all 100% local: **self-healing** ([plan](./plan/versions/v2/v2-feature-docs/SELF_HEALING_LOOP.md)) runs the suite and feeds failures back to the model until the tests pass; **flaky-test detection** ([plan](./plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md)) reruns the suite N times to flag non-deterministic cases, with persisted history; and **mutation testing** ([plan](./plan/versions/v2/v2-feature-docs/MUTATION_TESTING.md)) proves what coverage cannot — it seeds bugs into the source (JS/TS), reruns your tests, and reports a **mutation score** plus the survivors your tests miss, then **Improve coverage** auto-generates tests that kill those survivors and re-scores to prove the lift.
-
-**Next** — more AST languages (Go, Java, C#, Ruby, Rust) · `sqlite-vec` virtual-table search for projects > 50K chunks ([ADR-0002](./apps/desktop/src-tauri/docs/adr/0002-vec0-migration-trigger.md)) · cloud embedding providers · export to JIRA / Linear / GitHub Issues · team-mode collaboration.
-
-Full roadmap + known limitations: [`plan/ROADMAP.md`](./plan/ROADMAP.md).
-
----
-
-## Releases
-
-Tag a commit to trigger the matrix build (Windows / macOS / Linux) via [`release.yml`](./.github/workflows/release.yml):
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-For a local bundle, run `bash tools/scripts/deploy.sh` (Git Bash on Windows).
-
----
-
-## Contributing
-
-Master is kept **green and linear** — PR-only, squash merge, branch protection. Husky hooks (conflict-marker + large-file guard on commit; typecheck + lint + shared/frontend tests + cargo checks on push) auto-wire on `pnpm install`, and CI still runs the full workspace test suite.
-
-```bash
-git checkout -b feat/<short-slug>
-# work, commit, then:
-pnpm guard:pre-push        # optional — runs the full local gauntlet up front
-git push -u origin HEAD
-gh pr create --fill        # template + CODEOWNERS take it from here
-```
-
-Read before opening a PR:
-
-- [`CHANGELOG.md`](./CHANGELOG.md) — what changed and when
-- [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) — full project context and current state
-- [`docs/AGENT_WORKFLOW.md`](./docs/AGENT_WORKFLOW.md) — the change-management contract (humans + AI agents)
-- [`rules/rules.md`](./rules/rules.md) — engineering rules (layering, IPC, schema validation, security)
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — quick-start pointer · [`BRANCH_PROTECTION.md`](./BRANCH_PROTECTION.md) — admin runbook
-
----
-
-## License
-
-[MIT](./LICENSE.md). Use it, fork it, ship it.
-
-<div align="center">
-
-Built locally. Runs locally. Reviews locally.<br/>
-**Tessera** — the mosaic of your software's quality.
-
-</div>
+[MIT licensed](./LICENSE.md).

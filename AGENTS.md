@@ -2,7 +2,9 @@
 
 ## Project Structure & Module Organization
 
-Tessera is a local-first AI testing IDE built as a Tauri desktop app. The React/TypeScript renderer lives in `apps/desktop/src`, with UI components, stores, utilities, assets, and frontend tests colocated there. The Rust backend lives in `apps/desktop/src-tauri/src`; keep commands thin, put orchestration in `services`, data access in `repositories`, provider integrations in `providers`, and prompt logic in `prompts`. Shared schemas and types are in `packages/shared/src`; shared UI primitives are in `packages/ui/src`. Supporting material lives in `docs/`, `plan/`, `rules/`, and `tools/scripts/`.
+Tessera is a local-first AI testing IDE built as a Tauri desktop app. The React/TypeScript renderer lives in `apps/desktop/src`, with UI components, stores, utilities, assets, and frontend tests colocated there. The Rust backend lives in `apps/desktop/src-tauri/src`; keep commands thin, put orchestration in `services`, data access in `repositories`, provider integrations in `providers`, and prompt logic in `prompts`. Shared schemas and types are in `packages/shared/src`; tooling presets live in `packages/eslint-config` and `packages/tsconfig`. Supporting material lives in `docs/`, `plan/`, `rules/`, and `tools/scripts/`.
+
+The staged-review contract and checkout fixture are available; the review runtime, CLI, and MCP are planned. See [current status](docs/PROJECT_STATUS.md) and [documentation index](docs/README.md).
 
 ## Build, Test, and Development Commands
 
@@ -11,7 +13,9 @@ Tessera is a local-first AI testing IDE built as a Tauri desktop app. The React/
 - `pnpm build`: build all workspace packages and apps.
 - `pnpm lint`: run lint checks across the workspace.
 - `pnpm typecheck`: run TypeScript type checks.
-- `pnpm test`: run the workspace test suite.
+- `pnpm test`: run release tooling, review fixtures, and workspace tests.
+- `pnpm test:eval-fixtures`: check the seeded checkout regression and clean control.
+- `pnpm test:tooling`: check release tag/version validation.
 - `pnpm --filter @testing-ide/desktop test:rust`: run Rust tests for the Tauri backend.
 - `pnpm services:up` / `pnpm services:down`: start or stop local support services.
 - `pnpm bootstrap:ollama`: prepare the default local Ollama setup.

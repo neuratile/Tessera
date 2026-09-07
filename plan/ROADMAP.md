@@ -1,79 +1,46 @@
-# Tessera Roadmap
+# Tessera roadmap
 
-Forward-looking view: known limitations of the shipped **v0.1** and the
-features planned to address them. v0.1 itself is feature-complete (5 artifact
-types, 5 LLM providers, RAG pipeline, streaming, cross-platform releases) — see
-the [README](../README.md).
+Priority: **Review my changes**, a staged Git review with code-linked findings
+and evidence tied to exact source/test versions. See
+[epic #104](https://github.com/neuratile/Tessera/issues/104) and the
+[contract](./versions/v2/AI_FIRST_REVIEW.md).
 
----
+Existing generation, provider selection, exports, sandbox, flaky checks, healing,
+and mutation features remain available. [Project status](../docs/PROJECT_STATUS.md)
+records capabilities; a plan folder does not imply a published release.
 
-## Current priority: Review my changes (planned)
+## Foundations available
 
-The next release prioritizes one explicit staged-change review: index versus HEAD,
-code-linked findings, and optional sandbox evidence tied to immutable source and
-test versions. This workflow is **not shipped**. Unstaged/untracked review,
-automatic diff regeneration, and the multi-model consensus panel are deferred;
-the first release preserves the single explicitly active provider.
+- [#105](https://github.com/neuratile/Tessera/issues/105): staged-review contract.
+- [#113](https://github.com/neuratile/Tessera/issues/113):
+  [checkout fixture](../evals/README.md), seeded regression and clean control.
+- [#95](https://github.com/neuratile/Tessera/issues/95): expanded sandbox boundary tests.
 
-The [staged-review contract](./versions/v2/AI_FIRST_REVIEW.md) and
-[roadmap #104](https://github.com/neuratile/Tessera/issues/104) take precedence over
-the older feature ordering below. Deliver desktop review and its evaluation
-fixtures first; extract the engine, CLI, and MCP integrations after that workflow
-is proven. A passing regenerated test alone never proves application code fixed.
+The new review runtime is not implemented yet.
 
-## Known limitations & planned solutions
+## Delivery order
 
-| Limitation | Impact | Planned solution |
+| Stage | Work | Issues |
 |---|---|---|
-| **Single-user only** — no team collaboration, sharing, or multi-user workspace | Limits enterprise adoption | Workspace sync via CRDTs (Yjs/Automerge) + optional cloud relay, keeping the local-first core |
-| ~~**No test execution**~~ — **shipped for JS/TS + Python:** opt-in Docker sandbox runs generated cases and reports pass/fail + coverage | Closed the generate→run→measure loop | Python shipped (`docker_py`, [`SANDBOX_PYTHON_RUNNER.md`](./versions/v1/SANDBOX_PYTHON_RUNNER.md)); Java/Go + cloud runners next, behind the same `TestRunner` trait + shared Docker harness |
-| ~~**Embedding provider lock-in**~~ — **shipped:** selectable embedding provider — local Ollama (default) or OpenAI / Gemini / Hugging Face cloud | RAG no longer gated on a local GPU | Done — see [`EMBEDDING_PROVIDER_SELECT.md`](./versions/v1/EMBEDDING_PROVIDER_SELECT.md). Possible future additions: Voyage AI / Cohere |
-| **Minimal E2E coverage** — one Playwright spec, no error-path tests | UI-flow regressions go undetected | Expand to 10–15 specs: generation flow, provider switching, error states, export |
-| ~~**No export integrations**~~ — **shipped:** Excel/CSV/TSV + copy-as-TSV, Markdown + JSON export, and Jira Cloud push v1 (idempotent, per-artifact) | Artifacts flow to spreadsheets and Jira | Remaining: Jira v2 — epic/child bulk push, sandbox-run comments, status refresh, severity-map editor — Phase 3 in [`JIRA_INTEGRATION.md`](./versions/v1/JIRA_INTEGRATION.md). Linear / GitHub Issues adapters behind the same `IssueTracker` trait |
-| **No observability** — no coverage reports, perf metrics, or usage analytics | Hard to track quality over time | LCOV in CI, opt-in telemetry (PostHog/Plausible), bundle-size tracking |
-| **Static prompts** — v1 prompts are hardcoded | Power users can't tune generation | User-editable prompt templates with variable substitution + prompt A/B testing |
-| **Basic artifact schemas** — *mostly closed:* v2 IEEE 829 / ISO 29119-3 schemas shipped for all four artifacts (Phases 1–2 of [`ARTIFACT_QUALITY_V2.md`](./versions/v1/ARTIFACT_QUALITY_V2.md)) | Artifacts now carry repro steps, severity/priority split, scope + entry/exit criteria | Remaining: Phase 3 — few-shot exemplars in prompts, technique mandates (BVA / equivalence partitioning), golden integration tests vs live Ollama, token-budget re-check |
+| 1 | Read-only Git capture; contracts/persistence | [#106](https://github.com/neuratile/Tessera/issues/106), [#107](https://github.com/neuratile/Tessera/issues/107) |
+| 2 | Bounded context; code-linked findings | [#108](https://github.com/neuratile/Tessera/issues/108), [#109](https://github.com/neuratile/Tessera/issues/109) |
+| 3 | Workflow/IPC; desktop UI | [#110](https://github.com/neuratile/Tessera/issues/110), [#111](https://github.com/neuratile/Tessera/issues/111) |
+| 4 | Execution evidence bound to captured source/tests | [#112](https://github.com/neuratile/Tessera/issues/112) |
+| 5 | Evaluation harness; first-review walkthrough | [#114](https://github.com/neuratile/Tessera/issues/114), [#115](https://github.com/neuratile/Tessera/issues/115) |
+| Later | Reusable core, CLI, MCP | [#116](https://github.com/neuratile/Tessera/issues/116), [#117](https://github.com/neuratile/Tessera/issues/117), [#118](https://github.com/neuratile/Tessera/issues/118) |
 
----
+The contract defines dependencies and acceptance details. Contributor setup can
+improve now; a real review walkthrough depends on runtime delivery.
 
-## Planned standout features
+## Acceptance principles
 
-### 1. Live test runner with coverage overlay — **shipped (JS/TS + Python)**
-Generate test cases → execute them in a sandboxed Docker container → show pass/fail +
-line coverage directly on the Monaco editor.
-**Edge:** closes the full generate → run → measure loop in one tool — no other AI
-testing tool does.
-**Status:** JS/TS slice shipped (opt-in, off by default) — see
-[`SANDBOX_TEST_RUNNER.md`](./versions/v1/SANDBOX_TEST_RUNNER.md) and
-[ADR-0004](../apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md). Python
-slice shipped (`docker_py`: pytest + coverage.py) with the Docker hardening
-extracted into a shared harness — see
-[`SANDBOX_PYTHON_RUNNER.md`](./versions/v1/SANDBOX_PYTHON_RUNNER.md). Java/Go + cloud
-runners reuse the same `TestRunner` trait next.
+- Capture index versus HEAD without modifying Git or working files.
+- Preserve the selected provider, original line locations, and context/cost limits.
+- Separate suspected findings, reproduced evidence, and inconclusive execution.
+- Never equate regenerated passing tests with application repair.
+- Measure bug recall, clean-control false positives, test validity, time, and cost.
 
-### 2. Mutation testing integration — **shipped (JS/TS)**
-After generating tests, mutate the source (flip operators, drop conditions) and check
-whether the tests catch the mutations, reporting a **mutation score** alongside coverage.
-**Edge:** proves test quality objectively, not just a coverage percentage.
-**Status:** both stages shipped (v2 P0 #2) — Stage 1 scores the suite and lists
-survivors; Stage 2 ("Improve coverage") feeds survivors back to the LLM to
-auto-write tests that kill them and re-scores to prove the lift. See
-[`MUTATION_TESTING.md`](./versions/v2/v2-feature-docs/MUTATION_TESTING.md).
-
-### 3. Diff-aware incremental generation
-Watch git diffs (pre-commit hook or file watcher); when code changes, regenerate only
-the affected test cases and flag a "stale tests" badge on cases that reference modified
-functions. **Edge:** keeps test artifacts in sync with live code — the biggest manual-
-testing pain point.
-
-### 4. Multi-model consensus panel
-Run the same prompt against 2–3 models simultaneously (e.g. Ollama + OpenAI + Anthropic),
-show artifacts side by side, let the user cherry-pick the best sections, and highlight
-where models disagree (likely edge cases worth extra attention). **Edge:** no competitor
-offers multi-model consensus for test generation.
-
-### 5. Test impact graph
-Build a call graph from the AST (tree-sitter is already in place), visualize which test
-cases cover which functions, and highlight the tests that need re-review when a function
-changes — rendered as an interactive force-directed graph. **Edge:** turns Tessera from a
-"test generator" into a "test intelligence platform."
+Automatic regeneration, multi-model consensus, broad collaboration, more trackers
+and runners, and vector-index migration are deferred. Accessibility, E2E, and
+artifact freshness remain relevant supporting work. Earlier
+[vision notes](./versions/v2/V2_VISION.md) are history; this roadmap sets priority.

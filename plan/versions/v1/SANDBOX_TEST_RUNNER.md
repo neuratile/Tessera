@@ -1,5 +1,7 @@
 # Plan — Closed-Loop Sandboxed Test Runner (Docker, JS/TS first)
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: Shipped (JS/TS) — merged to master 2026-06-05 (PRs #31, #41) | Owner: TBD | Created: 2026-06-04
 > Feature #1 from [FEATURE_REVIEW.md](../../../docs/FEATURE_REVIEW.md) · ROADMAP "Live test runner with coverage overlay".
 

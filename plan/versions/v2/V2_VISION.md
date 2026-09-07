@@ -1,5 +1,7 @@
 # Tessera v2 — Vision & Prioritized Feature List
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: **draft** — research + prioritization done (2026-06-10); individual
 > feature design docs land under [`v2-feature-docs/`](./v2-feature-docs/) as they
 > are specced (flaky-test detection P2 #7 — shipped; self-healing loop P0 #1 —
@@ -15,15 +17,14 @@ CLI/MCP follow a proven desktop review. Automatic regeneration and multi-model
 consensus are deferred. In review evidence, passing or "healed" tests never by
 themselves establish that application code was fixed.
 
-**From test generator to autonomous test quality platform — still 100% local.**
+**From test generator to autonomous test quality platform — local-first with optional cloud providers.**
 
-v1 closed the generate → run → measure loop (the only AI testing tool that
-does, locally). v2 weaponizes that loop: tests that prove and repair
-themselves, an objective quality score beyond coverage, and distribution
+v1 closed the generate → run → measure loop. v2 extends it with generated-test refinement,
+mutation scoring, and distribution
 channels (CLI / CI / MCP) that put Tessera inside open-source pipelines and
 agent workflows instead of only behind a desktop GUI.
 
-Tagline candidate: *"CI-grade AI tests, zero code leaves your machine."*
+Local-provider operation keeps generation context local; cloud selections do not.
 
 ## 2. Market context (research, June 2026)
 

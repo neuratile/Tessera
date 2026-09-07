@@ -1,5 +1,7 @@
 # Mutation testing + mutation score
 
+> Design record: implementation status varies by section. See [current status](../../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../../ROADMAP.md) before choosing new work.
+
 > Status: **shipped** (v2, P0 #2) — Stage 1 (score) + Stage 2 (improve) both
 > built · Owner: core
 > Depends on: `sandbox_service::run` (execution entry point, v1, reused
@@ -31,7 +33,7 @@
 ## 0. Where this sits in v2
 
 v2's theme (V2_VISION §1): **"from test generator to autonomous test-quality
-platform — still 100% local."** The three quality axes v2 adds:
+platform — local-first with optional cloud providers."** The three quality axes v2 adds:
 
 - **Self-healing** (P0 #1, *shipped*) — tests repair themselves on failure.
 - **Mutation score** (P0 #2, *this doc*) — does the suite actually catch bugs.
@@ -83,7 +85,7 @@ The outcome: an objective quality number the user can act on, and a one-click
 path to a **measurably stronger** suite whose new tests are *proven* to catch
 bugs the old suite missed. Every improve attempt is a versioned artifact
 (`parent_id` chain, exactly like self-heal), and every score is persisted so the
-trend is visible over time. Still 100% local — nothing leaves the machine.
+trend is visible over time. Sandbox execution stays local; cloud model selections send relevant context to that provider.
 
 ## 1. Problem
 

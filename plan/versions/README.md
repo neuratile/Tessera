@@ -34,7 +34,7 @@ Conventions:
 | [`CONNECTION_SELECT.md`](./v1/CONNECTION_SELECT.md) | Explicit active-LLM-connection selection (singleton config) |
 | [`CI_JOB_CONSOLIDATION.md`](./v1/CI_JOB_CONSOLIDATION.md) | CI pipeline consolidation |
 
-## v2 (planned)
+## v2 (mixed implementation status)
 
 Current delivery priority is the staged-review contract below; earlier vision
 documents retain historical shipped work and deferred ideas.
@@ -42,5 +42,7 @@ documents retain historical shipped work and deferred ideas.
 | Doc | Feature |
 |---|---|
 | [`AI_FIRST_REVIEW.md`](./v2/AI_FIRST_REVIEW.md) | Planned first staged-review workflow: immutable source, evidence states, limits, wire contract, and delivery dependencies |
-| [`V2_VISION.md`](./v2/V2_VISION.md) | v2 theme, research findings, and prioritized feature list |
-| [`v2-feature-docs/FLAKY_TEST_DETECTION.md`](./v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) | Flaky-test detection — run the suite N times, flag non-deterministic cases |
+| [`V2_VISION.md`](./v2/V2_VISION.md) | Earlier research and priorities; current delivery follows the review contract |
+| [`v2-feature-docs/FLAKY_TEST_DETECTION.md`](./v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) | Implemented: repeated-run flaky detection and persisted history |
+| [Self-healing](./v2/v2-feature-docs/SELF_HEALING_LOOP.md) | Implemented: bounded generated-test healing and history |
+| [Mutation testing](./v2/v2-feature-docs/MUTATION_TESTING.md) | Implemented: JS/TS scoring and improvement |

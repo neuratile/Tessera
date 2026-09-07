@@ -1,5 +1,7 @@
 # Artifact Quality v2 — industry-grade generated artifacts
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 > Status: Phases 1–2 shipped (#48, #49, #51) — Phase 3 (prompt quality + verification) remaining | Owner: TBD | Created: 2026-06-06
 
 Upgrade the four generated artifact schemas (Test Cases, Bug Report, Test Plan,

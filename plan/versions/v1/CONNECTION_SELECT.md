@@ -1,5 +1,7 @@
 # Plan: Explicit Connection Selection (no auto-switching)
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 ## Context
 
 **Problem.** When generating an artifact, the app silently decides which LLM

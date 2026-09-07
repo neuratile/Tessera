@@ -1,5 +1,7 @@
 # Test Case Table — fixed 9-column tabular view
 
+> Design record: implementation status varies by section. See [current status](../../../docs/PROJECT_STATUS.md) and the [active roadmap](../../ROADMAP.md) before choosing new work.
+
 **Status:** proposed
 **Owner:** TBD
 **Created:** 2026-06-08
