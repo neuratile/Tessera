@@ -807,6 +807,16 @@ mod tests {
         }
     }
 
+    fn assert_invalid_input(input: &RunInput, expected_reason: &str) {
+        let error = input
+            .validate()
+            .expect_err("invalid workspace must be rejected");
+        match error {
+            RunnerError::InvalidInput(reason) => assert_eq!(reason, expected_reason),
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+    }
+
     #[test]
     fn run_input_validate_accepts_safe_workspace() {
         let input = RunInput {
@@ -831,7 +841,7 @@ mod tests {
             files: vec![],
             limits: ResourceLimits::default(),
         };
-        assert_eq!(empty.validate().unwrap_err().code(), "INVALID_INPUT");
+        assert_invalid_input(&empty, "no workspace files supplied");
 
         let no_test = RunInput {
             language: RunnerLanguage::JavaScript,
@@ -842,16 +852,27 @@ mod tests {
             }],
             limits: ResourceLimits::default(),
         };
-        assert_eq!(no_test.validate().unwrap_err().code(), "INVALID_INPUT");
+        assert_invalid_input(
+            &no_test,
+            "no test file in workspace (expected at least one is_test file)",
+        );
     }
 
     #[test]
-    fn run_input_validate_rejects_path_traversal() {
+    fn run_input_validate_rejects_unsafe_paths() {
         for bad in [
+            "",
+            " \t\n ",
+            "a//b.test.ts",
+            r"a\\b.test.ts",
             "../escape.test.ts",
             "/etc/passwd.test.ts",
             "nested/../../escape.test.ts",
+            r"nested\..\escape.test.ts",
+            r"nested/..\escape.test.ts",
             "C:\\windows\\evil.test.ts",
+            "C:evil.test.ts",
+            r"\\server\share\evil.test.ts",
             "\\absolute.test.ts",
         ] {
             let input = RunInput {
@@ -859,11 +880,7 @@ mod tests {
                 files: vec![test_file(bad)],
                 limits: ResourceLimits::default(),
             };
-            assert_eq!(
-                input.validate().unwrap_err().code(),
-                "INVALID_INPUT",
-                "path `{bad}` must be rejected"
-            );
+            assert_invalid_input(&input, &format!("unsafe workspace path `{bad}`"));
         }
     }
 
@@ -909,6 +926,20 @@ mod tests {
     }
 
     #[test]
+    fn run_input_validate_accepts_maximum_file_count() {
+        let input = RunInput {
+            language: RunnerLanguage::TypeScript,
+            files: (0..MAX_WORKSPACE_FILES)
+                .map(|i| test_file(&format!("f{i}.test.ts")))
+                .collect(),
+            limits: ResourceLimits::default(),
+        };
+        input
+            .validate()
+            .expect("exact file-count limit must be accepted");
+    }
+
+    #[test]
     fn run_input_validate_rejects_too_many_files() {
         let files = (0..=MAX_WORKSPACE_FILES)
             .map(|i| WorkspaceFile {
@@ -922,7 +953,48 @@ mod tests {
             files,
             limits: ResourceLimits::default(),
         };
-        assert_eq!(input.validate().unwrap_err().code(), "INVALID_INPUT");
+        assert_invalid_input(
+            &input,
+            &format!(
+                "too many workspace files: {} (max {MAX_WORKSPACE_FILES})",
+                MAX_WORKSPACE_FILES + 1
+            ),
+        );
+    }
+
+    #[test]
+    fn run_input_validate_enforces_aggregate_utf8_byte_limit() {
+        let multibyte_contents = "\u{00e9}".repeat(MAX_WORKSPACE_BYTES / 4);
+        let ascii_contents = "a".repeat(MAX_WORKSPACE_BYTES - multibyte_contents.len());
+        let mut input = RunInput {
+            language: RunnerLanguage::TypeScript,
+            files: vec![
+                WorkspaceFile {
+                    contents: multibyte_contents,
+                    ..test_file("unicode.test.ts")
+                },
+                WorkspaceFile {
+                    relative_path: "src/ascii.ts".into(),
+                    contents: ascii_contents,
+                    is_test: false,
+                },
+            ],
+            limits: ResourceLimits::default(),
+        };
+        input
+            .validate()
+            .expect("exact aggregate byte limit must be accepted");
+
+        // Each file and the total character count remain below the byte cap.
+        // Only summing UTF-8 bytes across test and source files rejects this.
+        input.files[0].contents.push('\u{00e9}');
+        assert_invalid_input(
+            &input,
+            &format!(
+                "workspace too large: {} bytes (max {MAX_WORKSPACE_BYTES})",
+                MAX_WORKSPACE_BYTES + 2
+            ),
+        );
     }
 
     #[test]
@@ -936,7 +1008,13 @@ mod tests {
             }],
             limits: ResourceLimits::default(),
         };
-        assert_eq!(input.validate().unwrap_err().code(), "INVALID_INPUT");
+        assert_invalid_input(
+            &input,
+            &format!(
+                "workspace too large: {} bytes (max {MAX_WORKSPACE_BYTES})",
+                MAX_WORKSPACE_BYTES + 1
+            ),
+        );
     }
 
     #[tokio::test]
