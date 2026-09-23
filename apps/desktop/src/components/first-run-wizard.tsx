@@ -57,6 +57,9 @@ export function FirstRunWizard({ onComplete }: Props) {
   const [step, setStep] = useState<Step>(1);
   const [status, setStatus] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [modelReady, setModelReady] = useState(false);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [savedModel, setSavedModel] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,15 +87,15 @@ export function FirstRunWizard({ onComplete }: Props) {
   return (
     <div className="bg-background relative flex h-screen w-screen items-center justify-center p-4">
       <div className="bg-mosaic" aria-hidden="true" />
-      <div className="bg-card relative z-10 flex h-[540px] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border shadow-2xl">
+      <div className="bg-card relative z-10 flex h-[540px] max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border shadow-2xl">
         <Header step={step} />
         <div className="flex-1 overflow-y-auto p-8">
           {step === 1 && <StepOne />}
           {step === 2 && <StepTwo status={status} error={healthError} tier={tier} />}
           {step === 3 && <StepThree />}
-          {step === 4 && <StepFour tier={tier} />}
+          {step === 4 && <StepFour tier={tier} savedModel={savedModel} onSaved={setSavedModel} onReadyChange={setModelReady} onSavingChange={setModelSaving} />}
         </div>
-        <Footer step={step} setStep={setStep} finish={finish} />
+        <Footer step={step} setStep={setStep} finish={finish} modelReady={modelReady} modelSaving={modelSaving} />
       </div>
     </div>
   );
@@ -139,10 +142,14 @@ function Footer({
   step,
   setStep,
   finish,
+  modelReady,
+  modelSaving,
 }: {
   step: Step;
   setStep: (s: Step) => void;
   finish: () => void;
+  modelReady: boolean;
+  modelSaving: boolean;
 }) {
   return (
     <div className="bg-surface-3 flex shrink-0 items-center justify-between border-t border-border px-6 py-4">
@@ -151,7 +158,7 @@ function Footer({
         variant="ghost"
         size="sm"
         onClick={() => setStep(previousStep(step))}
-        disabled={step === 1}
+        disabled={step === 1 || modelSaving}
       >
         Back
       </Button>
@@ -172,8 +179,8 @@ function Footer({
           </Button>
         </div>
       ) : (
-        <Button type="button" size="sm" onClick={finish}>
-          Start using Tessera
+        <Button type="button" size="sm" onClick={finish} disabled={modelSaving}>
+          {modelReady ? 'Start using Tessera' : 'Continue without AI'}
           <Check className="size-4" />
         </Button>
       )}
@@ -316,18 +323,24 @@ function StepThree() {
   );
 }
 
-function StepFour({ tier }: { tier: HardwareTier | null }) {
+function StepFour({ tier, savedModel, onSaved, onReadyChange, onSavingChange }: {
+  tier: HardwareTier | null;
+  savedModel: string | null;
+  onSaved: (model: string) => void;
+  onReadyChange: (ready: boolean) => void;
+  onSavingChange: (saving: boolean) => void;
+}) {
   const recommended = tier?.recommendedModel ?? 'qwen2.5-coder:7b';
-  const [model, setModel] = useState<string>(recommended);
+  const [model, setModel] = useState<string>(savedModel ?? recommended);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<string | null>(null);
+  const saved = savedModel;
   const [error, setError] = useState<string | null>(null);
   const [installedModels, setInstalledModels] = useState<string[] | null>(null);
 
   // Stay in sync if the tier loads after this step renders.
   useEffect(() => {
-    setModel(recommended);
-  }, [recommended]);
+    if (savedModel === null) setModel(recommended);
+  }, [recommended, savedModel]);
 
   // Probe Ollama for the locally-pulled model list so we can warn
   // when the user picks something they have not pulled yet.
@@ -349,6 +362,11 @@ function StepFour({ tier }: { tier: HardwareTier | null }) {
   const isInstalled = installedModels !== null && installedModels.includes(model);
   const probeFailed = installedModels !== null && installedModels.length === 0;
 
+  useEffect(() => {
+    onReadyChange(saved === model && !saving);
+    onSavingChange(saving);
+  }, [saved, model, saving, onReadyChange, onSavingChange]);
+
   const save = useCallback(() => {
     setSaving(true);
     setError(null);
@@ -360,20 +378,20 @@ function StepFour({ tier }: { tier: HardwareTier | null }) {
           defaultModel: model,
           isActive: true,
         });
-        setSaved(model);
+        onSaved(model);
       } catch (err) {
         setError(getErrorMessage(err));
       } finally {
         setSaving(false);
       }
     })();
-  }, [model]);
+  }, [model, onSaved]);
 
   return (
     <Section title="Choose your AI model">
       <p className="text-muted-foreground text-sm">
-        We've highlighted the best fit for your hardware. You can switch models anytime in
-        Settings.
+        We've highlighted the best fit for your hardware. Select Use this model to save it,
+        or continue without AI and configure it later in Settings.
       </p>
       <div className="mt-4 space-y-3">
         <ModelOption

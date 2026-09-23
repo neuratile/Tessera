@@ -73,6 +73,56 @@ describe('Dialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('cycles Tab within the sheet and restores focus on close', () => {
+    const { rerender } = render(
+      <>
+        <button type="button">Opener</button>
+        <Dialog open={false} onClose={vi.fn()} ariaLabel="Settings">
+          <button type="button">First</button>
+          <button type="button">Last</button>
+        </Dialog>
+      </>,
+    );
+    screen.getByRole('button', { name: 'Opener' }).focus();
+    rerender(
+      <>
+        <button type="button">Opener</button>
+        <Dialog open onClose={vi.fn()} ariaLabel="Settings">
+          <button type="button">First</button>
+          <button type="button">Last</button>
+        </Dialog>
+      </>,
+    );
+    const first = screen.getByRole('button', { name: 'First' });
+    const last = screen.getByRole('button', { name: 'Last' });
+    last.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    screen.getByRole('button', { name: 'Opener' }).focus();
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+    rerender(<button type="button">Opener</button>);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Opener' }));
+  });
+
+  it('keeps focus on the sheet when no controls exist', () => {
+    render(<Dialog open onClose={vi.fn()} ariaLabel="Empty"><p>No controls</p></Dialog>);
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+  });
+
+  it('only closes the topmost nested dialog on Escape', () => {
+    const outer = vi.fn();
+    const inner = vi.fn();
+    render(<Dialog open onClose={outer} ariaLabel="Outer">
+      <Dialog open onClose={inner} ariaLabel="Inner"><button type="button">Close</button></Dialog>
+    </Dialog>);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
   it('does not wire the Escape listener while closed', () => {
     const onClose = vi.fn();
     render(

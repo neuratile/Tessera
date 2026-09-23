@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
 import { IssueCard } from '@/components/boards/issue-card';
@@ -204,7 +204,7 @@ export function KanbanColumn({
 
       {/* Issues list */}
       <div className="custom-scrollbar flex flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
-        {sortedIssues.map((issue) => (
+        {sortedIssues.map((issue, index) => (
           <div
             key={issue.id}
             draggable={true}
@@ -213,7 +213,7 @@ export function KanbanColumn({
             onDragOver={(e) => handleDragOverCard(e, issue.id)}
             onDragLeave={() => handleDragLeaveCard(issue.id)}
             onDrop={(e) => handleDropOnCard(e, issue.id, issue.position)}
-            className="relative select-none"
+            className="group/issue relative select-none"
             style={{ userSelect: 'none' }}
           >
             {hoveredCardId === issue.id && hoveredCardSide === 'top' && (
@@ -225,7 +225,24 @@ export function KanbanColumn({
               onClick={() => onIssueClick(issue.id)}
               isDragging={draggedIssueId === issue.id}
             />
-            
+            <div className="pointer-events-none absolute right-1 top-1 flex rounded bg-card/95 opacity-0 shadow-sm transition-opacity group-hover/issue:pointer-events-auto group-hover/issue:opacity-100 group-focus-within/issue:pointer-events-auto group-focus-within/issue:opacity-100">
+              <button type="button" disabled={index === 0}
+                aria-label={`Move ${issue.issueKey} up in ${column.name}`}
+                onClick={() => {
+                  const previous = sortedIssues[index - 1];
+                  if (previous) onDrop(issue.id, column.id, previous.position);
+                }}
+                className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              ><ChevronUp className="size-3.5" /></button>
+              <button type="button" disabled={index === sortedIssues.length - 1}
+                aria-label={`Move ${issue.issueKey} down in ${column.name}`}
+                onClick={() => {
+                  const next = sortedIssues[index + 1];
+                  if (next) onDrop(issue.id, column.id, next.position);
+                }}
+                className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              ><ChevronDown className="size-3.5" /></button>
+            </div>
             {hoveredCardId === issue.id && hoveredCardSide === 'bottom' && (
               <div className="absolute -bottom-1 left-0 right-0 h-0.5 bg-primary rounded-full z-10 animate-pulse" />
             )}

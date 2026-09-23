@@ -13,14 +13,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
  *   3. Initial focus moves into the dialog when it opens, and the
  *      previously-focused element is restored on close.
  *
- * Focus trapping (Tab cycling inside the dialog) is intentionally
- * **not** implemented here — the side-drawer use case has the user
- * tab through a small linear stack of controls and reach the editor
- * panel behind the backdrop, where they cannot interact anyway
- * thanks to the backdrop's pointer-events. If a future flow needs
- * hard focus containment, swap to `@radix-ui/react-dialog` — the
- * prop surface here is intentionally a subset of theirs so the swap
- * is mechanical.
+ * Keyboard focus stays inside the topmost open sheet, including when
+ * no controls are available.
  *
  * `aria-labelledby` is wired automatically: `<DialogHeader title>`
  * generates a stable id and the surrounding `role="dialog"` host
@@ -79,14 +73,40 @@ export function Dialog({
 
   useEffect(() => {
     if (!open) return;
+    const isTopmost = () =>
+      [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1) === dialogRef.current;
+    const keepFocus = (event: FocusEvent) => {
+      if (isTopmost() && event.target instanceof Node && !dialogRef.current?.contains(event.target)) {
+        dialogRef.current?.focus();
+      }
+    };
     const handler = (event: KeyboardEvent) => {
+      if (!isTopmost()) return;
       if (event.key === 'Escape') {
         event.stopPropagation();
         onClose();
+      } else if (event.key === 'Tab') {
+        const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [])].filter((element) => !element.closest('[hidden], [inert]'));
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (!first || !last) {
+          event.preventDefault();
+          dialogRef.current?.focus();
+        } else if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current?.contains(document.activeElement))) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
+    document.addEventListener('focusin', keepFocus);
     window.addEventListener('keydown', handler);
     return () => {
+      document.removeEventListener('focusin', keepFocus);
       window.removeEventListener('keydown', handler);
     };
   }, [open, onClose]);
