@@ -15,14 +15,13 @@ const scenarios = [
     id: 'login-missing-fields',
     input: /\blogin\b/i,
     detail: /\b(missing|empty|blank|required|omit(?:ted)?|no password|no email)\b/i,
-    observation: /\b400\b/i,
+    observation: /(?=.*\b400\b)(?=.*\b(?:required|missing|empty)\b)/i,
   },
   {
     id: 'login-invalid-credentials',
     input: /\blogin\b/i,
     detail: /\b(invalid|wrong|incorrect|unknown)\b/i,
-    observation: /\b400\b/i,
-    excluded: /\b(missing|empty|blank|required|omit(?:ted)?|no password|no email)\b/i,
+    observation: /(?=.*\b400\b)(?=.*\b(?:invalid credentials|incorrect credentials|bad credentials)\b)/i,
   },
   {
     id: 'logout-known-token',

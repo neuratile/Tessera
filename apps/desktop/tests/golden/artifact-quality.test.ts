@@ -55,6 +55,18 @@ describe('express auth artifact design score', () => {
     expect(result.matches.find(({ scenario }) => scenario === 'login-invalid-credentials')?.caseIds).toEqual([]);
   });
 
+  test('keeps a wrong-password case even when preconditions mention non-empty fields', () => {
+    const invalid = example('TC-wrong', 'invalid login', 'POST login with wrong password', '400 invalid credentials');
+    invalid.preconditions = ['The email field must be non-empty'];
+    expect(scoreExpressAuthCases([invalid]).matches.find(({ scenario }) => scenario === 'login-invalid-credentials')?.caseIds).toEqual(['TC-wrong']);
+  });
+
+  test('a 400 alone does not distinguish required fields from invalid credentials', () => {
+    expect(scoreExpressAuthCases([
+      example('TC-ambiguous', 'invalid login with empty email', 'POST login with empty email', '400 response'),
+    ]).covered).toBe(0);
+  });
+
   test('empty generated cases cannot be counted as coverage', () => {
     expect(scoreExpressAuthCases([]).covered).toBe(0);
   });
