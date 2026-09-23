@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Stub only the side-effecting `dispatchCommand` — keep the real
@@ -12,6 +12,7 @@ vi.mock('@/lib/command-bus', async (importOriginal) => {
 
 import { dispatchCommand } from '@/lib/command-bus';
 
+import { Dialog } from './ui/dialog';
 import { CommandPalette } from './command-palette';
 
 const dispatchMock = vi.mocked(dispatchCommand);
@@ -77,6 +78,20 @@ describe('CommandPalette', () => {
     // highlight without throwing.
     expect(dispatchMock).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps focus in the palette when opened above a settings dialog', async () => {
+    render(<><button type="button">Background</button><Dialog open onClose={vi.fn()} ariaLabel="Settings"><button type="button">Sheet control</button></Dialog><CommandPalette open onClose={vi.fn()} /></>);
+    const input = screen.getByRole('textbox', { name: 'Command query' });
+    const palette = screen.getByRole('dialog', { name: 'Command palette' });
+    const last = screen.getByRole('option', { name: /Open GitHub Repository/ });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(input);
+    screen.getByRole('button', { name: 'Background' }).focus();
+    expect(palette.contains(document.activeElement)).toBe(true);
   });
 
   it('closes without dispatching on Escape', () => {

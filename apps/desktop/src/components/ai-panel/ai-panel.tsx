@@ -330,7 +330,9 @@ export function AiPanel() {
             upsertArtifact({ ...artifact, status: 'approved' });
           }
         } catch (err) {
-          setArtifactsError(getErrorMessage(err));
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            setArtifactsError(getErrorMessage(err));
+          }
         }
       })();
     },
@@ -346,7 +348,9 @@ export function AiPanel() {
             upsertArtifact({ ...artifact, status: 'rejected' });
           }
         } catch (err) {
-          setArtifactsError(getErrorMessage(err));
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            setArtifactsError(getErrorMessage(err));
+          }
         }
       })();
     },

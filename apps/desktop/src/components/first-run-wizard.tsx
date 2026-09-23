@@ -57,7 +57,6 @@ export function FirstRunWizard({ onComplete }: Props) {
   const [step, setStep] = useState<Step>(1);
   const [status, setStatus] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
-  const [modelReady, setModelReady] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [savedModel, setSavedModel] = useState<string | null>(null);
 
@@ -93,9 +92,9 @@ export function FirstRunWizard({ onComplete }: Props) {
           {step === 1 && <StepOne />}
           {step === 2 && <StepTwo status={status} error={healthError} tier={tier} />}
           {step === 3 && <StepThree />}
-          {step === 4 && <StepFour tier={tier} savedModel={savedModel} onSaved={setSavedModel} onReadyChange={setModelReady} onSavingChange={setModelSaving} />}
+          {step === 4 && <StepFour tier={tier} savedModel={savedModel} onSaved={setSavedModel} onSavingChange={setModelSaving} />}
         </div>
-        <Footer step={step} setStep={setStep} finish={finish} modelReady={modelReady} modelSaving={modelSaving} />
+        <Footer step={step} setStep={setStep} finish={finish} modelReady={savedModel !== null} modelSaving={modelSaving} />
       </div>
     </div>
   );
@@ -323,11 +322,10 @@ function StepThree() {
   );
 }
 
-function StepFour({ tier, savedModel, onSaved, onReadyChange, onSavingChange }: {
+function StepFour({ tier, savedModel, onSaved, onSavingChange }: {
   tier: HardwareTier | null;
   savedModel: string | null;
   onSaved: (model: string) => void;
-  onReadyChange: (ready: boolean) => void;
   onSavingChange: (saving: boolean) => void;
 }) {
   const recommended = tier?.recommendedModel ?? 'qwen2.5-coder:7b';
@@ -363,9 +361,8 @@ function StepFour({ tier, savedModel, onSaved, onReadyChange, onSavingChange }: 
   const probeFailed = installedModels !== null && installedModels.length === 0;
 
   useEffect(() => {
-    onReadyChange(saved === model && !saving);
     onSavingChange(saving);
-  }, [saved, model, saving, onReadyChange, onSavingChange]);
+  }, [saving, onSavingChange]);
 
   const save = useCallback(() => {
     setSaving(true);

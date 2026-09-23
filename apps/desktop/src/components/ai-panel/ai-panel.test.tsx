@@ -4,11 +4,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  listArtifacts: vi.fn(), approveArtifact: vi.fn(), listExternalLinks: vi.fn(),
+  listArtifacts: vi.fn(), approveArtifact: vi.fn(), rejectArtifact: vi.fn(), listExternalLinks: vi.fn(),
   bulkPushArtifactsToJira: vi.fn(), listProviderConfigs: vi.fn(),
 }));
 vi.mock('@/lib/ipc', () => ({
-  artifacts: { listArtifacts: mocks.listArtifacts, approveArtifact: mocks.approveArtifact },
+  artifacts: { listArtifacts: mocks.listArtifacts, approveArtifact: mocks.approveArtifact, rejectArtifact: mocks.rejectArtifact },
   trackers: { listExternalLinks: mocks.listExternalLinks, bulkPushArtifactsToJira: mocks.bulkPushArtifactsToJira },
   providers: { listProviderConfigs: mocks.listProviderConfigs },
   streaming: { subscribeToGenerationEvents: vi.fn().mockResolvedValue(() => {}) },
@@ -36,6 +36,7 @@ beforeEach(() => {
   mocks.listProviderConfigs.mockResolvedValue([]);
   mocks.listExternalLinks.mockResolvedValue([]);
   mocks.approveArtifact.mockResolvedValue(undefined);
+  mocks.rejectArtifact.mockResolvedValue(undefined);
   mocks.bulkPushArtifactsToJira.mockResolvedValue([]);
 });
 afterEach(cleanup);
@@ -91,6 +92,19 @@ describe('AiPanel project-scoped queue', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select B' }));
     await act(async () => { old.resolve(); await old.promise; });
     expect(screen.getByText('1 selected')).not.toBeNull();
+  });
+
+  it('does not show an earlier project approval error in the new project', async () => {
+    let fail!: (error: Error) => void;
+    mocks.listArtifacts.mockImplementation((id: string) => Promise.resolve([artifact(id)]));
+    mocks.approveArtifact.mockReturnValue(new Promise<void>((_, reject) => { fail = reject; }));
+    render(<AiPanel />);
+    await screen.findByRole('checkbox', { name: 'Select A' });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    act(() => useWorkspaceStore.setState({ project: project('B') }));
+    await screen.findByRole('checkbox', { name: 'Select B' });
+    await act(async () => { fail(new Error('A failed')); await Promise.resolve(); });
+    expect(screen.queryByText('A failed')).toBeNull();
   });
 
   it('ignores an old project response after the new project queue has loaded', async () => {

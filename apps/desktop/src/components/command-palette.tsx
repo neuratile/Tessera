@@ -197,6 +197,7 @@ export function CommandPalette({ open, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const paletteRef = useRef<HTMLDivElement | null>(null);
 
   // Scope: when the palette opens, reset the query and focus the
   // input. Restore focus to the previously-focused element on close
@@ -212,6 +213,18 @@ export function CommandPalette({ open, onClose }: Props) {
     return () => {
       previouslyFocused?.focus();
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const keepFocus = (event: FocusEvent) => {
+      const topmost = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1);
+      if (topmost === paletteRef.current && event.target instanceof Node && !paletteRef.current?.contains(event.target)) {
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener('focusin', keepFocus);
+    return () => document.removeEventListener('focusin', keepFocus);
   }, [open]);
 
   const matches = useMemo(() => {
@@ -256,11 +269,25 @@ export function CommandPalette({ open, onClose }: Props) {
         aria-hidden="true"
       />
       <div
+        ref={paletteRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
         className="fixed inset-x-0 top-[14vh] z-50 mx-auto flex w-full max-w-xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
         onKeyDown={(event) => {
+          if (event.key === 'Tab') {
+            const controls = [inputRef.current, ...(paletteRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])].filter((item): item is HTMLInputElement | HTMLButtonElement => item !== null);
+            const first = controls[0];
+            const last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault();
+              last?.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault();
+              first?.focus();
+            }
+            return;
+          }
           if (event.key === 'Escape') {
             event.stopPropagation();
             onClose();

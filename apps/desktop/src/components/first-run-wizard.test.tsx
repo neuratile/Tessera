@@ -48,6 +48,7 @@ describe('FirstRunWizard completion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use this model' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start using Tessera' })).not.toBeNull());
     expect(mocks.saveProviderConfig).toHaveBeenCalledWith(expect.objectContaining({ defaultModel: 'qwen2.5-coder:7b', isActive: true }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start using Tessera' })).toHaveProperty('disabled', false));
     fireEvent.click(screen.getByRole('button', { name: 'Start using Tessera' }));
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
@@ -57,11 +58,21 @@ describe('FirstRunWizard completion', () => {
     goToModel();
     fireEvent.click(screen.getByRole('radio', { name: /Light/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Use this model' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start using Tessera' })).not.toBeNull());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back' })).toHaveProperty('disabled', false));
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
     expect(await screen.findByRole('button', { name: 'Start using Tessera' })).not.toBeNull();
     expect(screen.getByText(/All set — qwen2.5-coder:1.5b/)).not.toBeNull();
+  });
+
+  it('still shows AI as configured when a different unsaved model is selected', async () => {
+    render(<FirstRunWizard onComplete={vi.fn()} />);
+    goToModel();
+    fireEvent.click(screen.getByRole('button', { name: 'Use this model' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start using Tessera' })).not.toBeNull());
+    fireEvent.click(screen.getByRole('radio', { name: /Light/ }));
+    expect(screen.getByRole('button', { name: 'Start using Tessera' })).not.toBeNull();
+    expect(screen.getByText(/All set — qwen2.5-coder:7b/)).not.toBeNull();
   });
 
   it('shows save failures and never claims the unsaved model is ready', async () => {
