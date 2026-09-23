@@ -22,6 +22,7 @@ const scenarios = [
     input: /\blogin\b/i,
     detail: /\b(invalid|wrong|incorrect|unknown)\b/i,
     observation: /\b400\b/i,
+    excluded: /\b(missing|empty|blank|required|omit(?:ted)?|no password|no email)\b/i,
   },
   {
     id: 'logout-known-token',

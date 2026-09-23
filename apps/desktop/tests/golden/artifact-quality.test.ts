@@ -47,6 +47,14 @@ describe('express auth artifact design score', () => {
     expect(result.covered).toBe(0);
   });
 
+  test('does not double count missing fields as invalid credentials', () => {
+    const result = scoreExpressAuthCases([
+      example('TC-empty', 'invalid login with missing email', 'POST login with empty email', '400 required'),
+    ]);
+    expect(result.matches.find(({ scenario }) => scenario === 'login-missing-fields')?.caseIds).toEqual(['TC-empty']);
+    expect(result.matches.find(({ scenario }) => scenario === 'login-invalid-credentials')?.caseIds).toEqual([]);
+  });
+
   test('empty generated cases cannot be counted as coverage', () => {
     expect(scoreExpressAuthCases([]).covered).toBe(0);
   });
