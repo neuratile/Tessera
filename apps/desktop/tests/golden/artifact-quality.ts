@@ -7,8 +7,9 @@ const scenarios = [
   {
     id: 'login-success',
     input: /\blogin\b/i,
-    detail: /\b(valid|correct|qa@example\.com|admin@example\.com|success)\b/i,
+    detail: /\b(valid|correct|success)\b/i,
     observation: /(?=.*\b200\b)(?=.*\b(?:sessionToken|session token)\b)/i,
+    excluded: /\b(invalid|wrong|incorrect|unknown|missing|empty|blank)\b/i,
   },
   {
     id: 'login-missing-fields',
@@ -25,8 +26,9 @@ const scenarios = [
   {
     id: 'logout-known-token',
     input: /\blogout\b/i,
-    detail: /\b(valid|existing|active|known|current|session token|x-session-token)\b/i,
+    detail: /\b(valid|existing|active|known|current)\b/i,
     observation: /\b(204|no content)\b/i,
+    excluded: /\b(invalid|unknown|nonexistent|non-existent|expired|revoked|missing|empty)\b/i,
   },
   {
     id: 'logout-unknown-token',
@@ -37,15 +39,16 @@ const scenarios = [
 ] as const;
 
 export function scoreExpressAuthCases(cases: TestCase['cases']) {
-  const matches = scenarios.map(({ id, input, detail, observation }) => ({
-    scenario: id,
+  const matches = scenarios.map((scenario) => ({
+    scenario: scenario.id,
     caseIds: cases
-      .filter((testCase) => {
-        const actions = testCase.steps.map((step) => step.action).join(' ');
-        const inputs = [testCase.title, testCase.testData ?? '', ...(testCase.preconditions ?? []), actions].join(' ');
-        const expected = testCase.steps.map((step) => step.expectedResult).join(' ');
-        return input.test(actions) && detail.test(inputs) && observation.test(expected);
-      })
+      .filter((testCase) => testCase.steps.some((step) => {
+        const inputs = [testCase.title, testCase.testData ?? '', ...(testCase.preconditions ?? []), step.action].join(' ');
+        return scenario.input.test(step.action)
+          && scenario.detail.test(inputs)
+          && (!('excluded' in scenario) || !scenario.excluded.test(inputs))
+          && scenario.observation.test(step.expectedResult);
+      }))
       .map((testCase) => testCase.id),
   }));
 

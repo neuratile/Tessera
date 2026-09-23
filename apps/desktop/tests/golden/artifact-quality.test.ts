@@ -33,6 +33,20 @@ describe('express auth artifact design score', () => {
     expect(result.covered).toBe(0);
   });
 
+  test('does not combine an action with a different step’s expected result', () => {
+    const mixed = example('TC-mixed', 'login', 'POST login with empty email', '200 with sessionToken');
+    mixed.steps.push({ action: 'POST login with correct password', expectedResult: '400 required' });
+    expect(scoreExpressAuthCases([mixed]).covered).toBe(0);
+  });
+
+  test('does not count contradictory positive login or known-token logout cases', () => {
+    const result = scoreExpressAuthCases([
+      example('TC-bad-login', 'valid login with wrong password', 'POST login with wrong password for qa@example.com', '200 with sessionToken'),
+      example('TC-bad-logout', 'logout with unknown token', 'POST logout with unknown session token', '204 No Content'),
+    ]);
+    expect(result.covered).toBe(0);
+  });
+
   test('empty generated cases cannot be counted as coverage', () => {
     expect(scoreExpressAuthCases([]).covered).toBe(0);
   });
