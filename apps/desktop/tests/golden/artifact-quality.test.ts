@@ -1,0 +1,39 @@
+import type { TestCase } from '@testing-ide/shared';
+import { describe, expect, test } from 'vitest';
+
+import { scoreExpressAuthCases } from './artifact-quality';
+
+function example(id: string, title: string, action: string, expectedResult: string): TestCase['cases'][number] {
+  return { id, title, type: 'positive', priority: 'p1', steps: [{ action, expectedResult }] };
+}
+
+describe('express auth artifact design score', () => {
+  test('counts independently specified actions and expected observations', () => {
+    const result = scoreExpressAuthCases([
+      example('TC-1', 'valid login', 'POST login with qa@example.com and correct password', '200 with sessionToken and public user'),
+      example('TC-2', 'missing email login', 'POST login with empty email', '400 required'),
+      example('TC-3', 'invalid login', 'POST login with wrong password', '400 invalid credentials'),
+      example('TC-4', 'logout', 'POST logout using current session token', '204 No Content'),
+      example('TC-5', 'unknown logout', 'POST logout with unknown token', '404 not found'),
+    ]);
+    expect(result.covered).toBe(5);
+    expect(result.total).toBe(5);
+    expect(result.matches.map(({ caseIds }) => caseIds)).toEqual([['TC-1'], ['TC-2'], ['TC-3'], ['TC-4'], ['TC-5']]);
+  });
+
+  test('does not infer assertions from a title or from a different case', () => {
+    const result = scoreExpressAuthCases([
+      example('TC-1', 'valid login returns 200 and sessionToken', 'POST login with correct password', 'Response is successful'),
+      example('TC-2', 'other request', 'GET health endpoint', '200 and sessionToken'),
+      example('TC-3', 'unknown logout', 'POST logout with unknown token', '204 No Content'),
+      example('TC-4', 'valid login', 'POST login with correct password', '200 OK without a specified token'),
+      example('TC-5', 'missing email login', 'POST login with empty email', 'email is required'),
+      example('TC-6', 'valid login', 'GET health with valid token', '200 with sessionToken'),
+    ]);
+    expect(result.covered).toBe(0);
+  });
+
+  test('empty generated cases cannot be counted as coverage', () => {
+    expect(scoreExpressAuthCases([]).covered).toBe(0);
+  });
+});
