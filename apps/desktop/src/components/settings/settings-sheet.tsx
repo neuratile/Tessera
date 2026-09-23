@@ -313,6 +313,10 @@ export function SettingsSheet() {
 
   const handleDelete = useCallback(
     (id: string) => {
+      const connection = list.find((item) => item.id === id);
+      if (!connection || !window.confirm(
+        `Delete ${connection.provider}${connection.isActive ? ' (your active connection)' : ''}? You will need to configure it again to use it.`,
+      )) return;
       void (async () => {
         try {
           await providers.deleteProviderConfig(id);
@@ -322,7 +326,7 @@ export function SettingsSheet() {
         }
       })();
     },
-    [refresh],
+    [list, refresh],
   );
 
   const requiresKey =

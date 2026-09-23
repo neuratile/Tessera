@@ -81,6 +81,20 @@ export function AiPanel() {
   const [openArtifact, setOpenArtifact] = useState<ArtifactSummary | null>(null);
   const [queueFilter, setQueueFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionProjectId, setSelectionProjectId] = useState<string | null>(null);
+  const currentSelection = useMemo(
+    () => selectionProjectId === project?.id ? selectedIds : new Set<string>(),
+    [selectionProjectId, project?.id, selectedIds],
+  );
+  const refreshRequest = useRef(0);
+  const generationRequest = useRef(0);
+  const selectionEpoch = useRef(0);
+  const queueProjectRef = useRef<string | null>(null);
+  const [queueProjectId, setQueueProjectId] = useState<string | null>(null);
+  const visibleQueue = useMemo(
+    () => queueProjectId === project?.id ? reviewQueue : [],
+    [queueProjectId, project?.id, reviewQueue],
+  );
   const [externalLinks, setExternalLinks] = useState<Record<string, ExternalLink[]>>({});
   const [bulkPushing, setBulkPushing] = useState(false);
 
@@ -89,12 +103,12 @@ export function AiPanel() {
   // every render of the streaming preview / partial buffer.
   const filteredQueue = useMemo(() => {
     const needle = queueFilter.trim().toLowerCase();
-    if (needle.length === 0) return reviewQueue;
-    return reviewQueue.filter((a) => {
+    if (needle.length === 0) return visibleQueue;
+    return visibleQueue.filter((a) => {
       const hay = `${a.title} ${a.artifactType} ${a.model}`.toLowerCase();
       return hay.includes(needle);
     });
-  }, [reviewQueue, queueFilter]);
+  }, [visibleQueue, queueFilter]);
 
   // Subscribe to streaming events on mount. Backend emits on every
   // `generate_artifact` invocation; the listener filters via the
@@ -152,30 +166,54 @@ export function AiPanel() {
 
   // Refresh the review queue whenever the project changes.
   const refreshArtifacts = useCallback(() => {
-    if (project === null) {
+    const request = ++refreshRequest.current;
+    if (queueProjectRef.current !== project?.id) {
+      queueProjectRef.current = project?.id ?? null;
+      setQueueProjectId(null);
       setArtifacts([]);
       setExternalLinks({});
+    }
+    setArtifactsError(null);
+    if (project === null) {
+      setLoadingArtifacts(false);
       return;
     }
     setLoadingArtifacts(true);
     void (async () => {
       try {
-        const [list, linksList] = await Promise.all([
+        const [artifactsResult, linksResult] = await Promise.allSettled([
           artifactsIpc.listArtifacts(project.id),
           trackers.listExternalLinks(),
         ]);
-        setArtifacts(list);
-        setExternalLinks(groupLinksByArtifact(linksList));
+        if (request !== refreshRequest.current || useWorkspaceStore.getState().project?.id !== project.id) return;
+        if (artifactsResult.status === 'rejected') throw artifactsResult.reason;
+        setArtifacts(artifactsResult.value);
+        setQueueProjectId(project.id);
+        if (linksResult.status === 'fulfilled') {
+          setExternalLinks(groupLinksByArtifact(linksResult.value));
+        } else {
+          setArtifactsError(getErrorMessage(linksResult.reason));
+        }
       } catch (err) {
-        setArtifactsError(getErrorMessage(err));
+        if (request === refreshRequest.current && useWorkspaceStore.getState().project?.id === project.id) {
+          setArtifactsError(getErrorMessage(err));
+        }
       } finally {
-        setLoadingArtifacts(false);
+        if (request === refreshRequest.current && useWorkspaceStore.getState().project?.id === project.id) {
+          setLoadingArtifacts(false);
+        }
       }
     })();
   }, [project, setArtifacts, setArtifactsError, setLoadingArtifacts]);
 
   useEffect(() => {
+    const requestRef = refreshRequest;
+    selectionEpoch.current++;
+    setSelectedIds(new Set());
+    setSelectionProjectId(null);
+    setOpenArtifact(null);
     refreshArtifacts();
+    return () => { requestRef.current++; };
   }, [refreshArtifacts]);
 
   const canGenerate = useMemo(
@@ -196,10 +234,13 @@ export function AiPanel() {
 
   const handleGenerate = useCallback(
     (artifactType: GenerationArtifactType, parentId?: string) => {
-      if (project === null || activeProvider === null) return;
+      // Only one stream at a time: the backend event payload cannot be matched
+      // to a request until its result returns, so concurrent runs would mix previews.
+      if (project === null || activeProvider === null || useAiStore.getState().generation.status === 'pending') return;
       const model = activeProvider.defaultModel;
       if (typeof model !== 'string' || model.length === 0) return;
       lastGeneratedTypeRef.current = artifactType;
+      const request = ++generationRequest.current;
       setGeneration({ status: 'pending', artifactType, partial: '' });
       void (async () => {
         try {
@@ -215,13 +256,19 @@ export function AiPanel() {
           // (status, version, parent chain) rather than reconstructing
           // a partial summary in JS.
           const detail = await artifactsIpc.getArtifact(result.artifactId);
-          upsertArtifact(toArtifactSummary(detail));
-          setGeneration({ status: 'idle' });
+          if (request === generationRequest.current) {
+            if (useWorkspaceStore.getState().project?.id === project.id) {
+              upsertArtifact(toArtifactSummary(detail));
+              setQueueProjectId(project.id);
+            }
+            setGeneration({ status: 'idle' });
+          }
         } catch (err) {
-          setGeneration({
-            status: 'error',
-            message: getErrorMessage(err),
-          });
+          if (request === generationRequest.current) {
+            setGeneration(useWorkspaceStore.getState().project?.id === project.id
+              ? { status: 'error', message: getErrorMessage(err) }
+              : { status: 'idle' });
+          }
         }
       })();
     },
@@ -279,13 +326,17 @@ export function AiPanel() {
       void (async () => {
         try {
           await artifactsIpc.approveArtifact(artifact.id);
-          upsertArtifact({ ...artifact, status: 'approved' });
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            upsertArtifact({ ...artifact, status: 'approved' });
+          }
         } catch (err) {
-          setArtifactsError(getErrorMessage(err));
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            setArtifactsError(getErrorMessage(err));
+          }
         }
       })();
     },
-    [setArtifactsError, upsertArtifact],
+    [project?.id, setArtifactsError, upsertArtifact],
   );
 
   const handleReject = useCallback(
@@ -293,18 +344,25 @@ export function AiPanel() {
       void (async () => {
         try {
           await artifactsIpc.rejectArtifact(artifact.id);
-          upsertArtifact({ ...artifact, status: 'rejected' });
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            upsertArtifact({ ...artifact, status: 'rejected' });
+          }
         } catch (err) {
-          setArtifactsError(getErrorMessage(err));
+          if (useWorkspaceStore.getState().project?.id === project?.id) {
+            setArtifactsError(getErrorMessage(err));
+          }
         }
       })();
     },
-    [setArtifactsError, upsertArtifact],
+    [project?.id, setArtifactsError, upsertArtifact],
   );
 
   const toggleSelect = useCallback((id: string) => {
+    if (project === null || !visibleQueue.some((artifact) => artifact.id === id)) return;
+    selectionEpoch.current++;
+    setSelectionProjectId(project.id);
     setSelectedIds((prev) => {
-      const next = new Set(prev);
+      const next = new Set(selectionProjectId === project.id ? prev : []);
       if (next.has(id)) {
         next.delete(id);
       } else {
@@ -312,15 +370,24 @@ export function AiPanel() {
       }
       return next;
     });
-  }, []);
+  }, [project, visibleQueue, selectionProjectId]);
 
   const clearSelection = useCallback(() => {
+    selectionEpoch.current++;
     setSelectedIds(new Set());
+    setSelectionProjectId(null);
   }, []);
 
+  const selectedCurrentIds = useCallback(() => {
+    if (project === null || useWorkspaceStore.getState().project?.id !== project.id) return [];
+    const inQueue = new Set(visibleQueue.map((artifact) => artifact.id));
+    return Array.from(currentSelection).filter((id) => inQueue.has(id));
+  }, [project, visibleQueue, currentSelection]);
+
   const handleBulkPush = useCallback(() => {
-    const ids = Array.from(selectedIds);
+    const ids = selectedCurrentIds();
     if (ids.length === 0) return;
+    const epoch = selectionEpoch.current;
     setBulkPushing(true);
     void (async () => {
       try {
@@ -337,36 +404,39 @@ export function AiPanel() {
         }
         
         const linksList = await trackers.listExternalLinks();
-        setExternalLinks(groupLinksByArtifact(linksList));
-        clearSelection();
+        if (useWorkspaceStore.getState().project?.id === project?.id) {
+          setExternalLinks(groupLinksByArtifact(linksList));
+          if (epoch === selectionEpoch.current) clearSelection();
+        }
       } catch (err) {
         toast.err(`Bulk push failed: ${getErrorMessage(err)}`, { title: 'Bulk Push' });
       } finally {
         setBulkPushing(false);
       }
     })();
-  }, [selectedIds, clearSelection]);
+  }, [project?.id, selectedCurrentIds, clearSelection]);
 
   const handleBulkApprove = useCallback(() => {
-    const ids = Array.from(selectedIds);
+    const ids = selectedCurrentIds();
     if (ids.length === 0) return;
+    const epoch = selectionEpoch.current;
     void (async () => {
       try {
         await Promise.all(ids.map((id) => artifactsIpc.approveArtifact(id)));
         
-        for (const id of ids) {
-          const artifact = reviewQueue.find((a) => a.id === id);
-          if (artifact) {
-            upsertArtifact({ ...artifact, status: 'approved' });
+        if (useWorkspaceStore.getState().project?.id === project?.id) {
+          for (const id of ids) {
+            const artifact = visibleQueue.find((a) => a.id === id);
+            if (artifact) upsertArtifact({ ...artifact, status: 'approved' });
           }
         }
         toast.ok(`Approved ${ids.length} artifact(s).`, { title: 'Bulk Approval' });
-        clearSelection();
+        if (epoch === selectionEpoch.current && useWorkspaceStore.getState().project?.id === project?.id) clearSelection();
       } catch (err) {
         toast.err(`Bulk approval failed: ${getErrorMessage(err)}`, { title: 'Bulk Approval' });
       }
     })();
-  }, [selectedIds, reviewQueue, upsertArtifact, clearSelection]);
+  }, [project?.id, selectedCurrentIds, visibleQueue, upsertArtifact, clearSelection]);
 
   const handleRefreshLinkStatus = useCallback(async (linkId: string) => {
     try {
@@ -384,7 +454,7 @@ export function AiPanel() {
     }
   }, []);
 
-  const hasSelection = selectedIds.size > 0;
+  const hasSelection = currentSelection.size > 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -492,15 +562,15 @@ export function AiPanel() {
           </p>
           <span className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
             {filteredQueue.length}
-            {queueFilter.length > 0 ? ` / ${reviewQueue.length}` : ''}{' '}
-            {reviewQueue.length === 1 ? 'item' : 'items'}
+            {queueFilter.length > 0 ? ` / ${visibleQueue.length}` : ''}{' '}
+            {visibleQueue.length === 1 ? 'item' : 'items'}
           </span>
         </div>
 
         {hasSelection ? (
           <div className="mb-3 flex items-center justify-between gap-2 bg-muted/60 border border-border p-2 rounded-md">
             <span className="text-xs font-semibold text-foreground font-mono">
-              {selectedIds.size} selected
+              {currentSelection.size} selected
             </span>
             <div className="flex items-center gap-1.5">
               <Button
@@ -538,7 +608,7 @@ export function AiPanel() {
           </div>
         ) : null}
 
-        {reviewQueue.length > 0 ? (
+        {visibleQueue.length > 0 ? (
           <div className="relative mb-2">
             <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
             <input
@@ -559,7 +629,7 @@ export function AiPanel() {
         ) : null}
         {project === null ? (
           <p className="text-muted-foreground text-xs">Open a project to see artifacts.</p>
-        ) : reviewQueue.length === 0 ? (
+        ) : visibleQueue.length === 0 ? (
           <p className="text-muted-foreground text-xs">
             No artifacts yet. Pick a generator above.
           </p>
@@ -576,7 +646,7 @@ export function AiPanel() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onOpen={setOpenArtifact}
-                isSelected={selectedIds.has(a.id)}
+                isSelected={currentSelection.has(a.id)}
                 onToggleSelect={toggleSelect}
                 links={externalLinks[a.id] ?? []}
                 onRefreshLinkStatus={handleRefreshLinkStatus}
