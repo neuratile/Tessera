@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { resolveIntegrationContext, runCargoJsonProbeTest } from '../support/ollama';
+import { scoreExpressAuthCases } from './artifact-quality';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/express-api', import.meta.url));
 const GoldenProbeOutputSchema = z.object({
@@ -71,6 +72,33 @@ describe('Ollama golden prompt coverage', () => {
       // richness is a model quality concern, not a pipeline correctness
       // test.
       expect(Array.isArray(parsed.data.objectives)).toBe(true);
+    },
+  );
+
+  (process.env.TESSERA_GOLDEN_QUALITY_REPORT === '1' ? test : test.skip)(
+    'reports express auth test-case design quality (opt-in, no threshold)',
+    async () => {
+      if (!context.ready) {
+        throw new Error(`Cannot evaluate artifact quality: ${context.reason}`);
+      }
+      const result = await generateFixtureArtifact('test-cases');
+      const parsed = TestCaseSchema.safeParse(result.structuredData);
+      const score = parsed.success ? scoreExpressAuthCases(parsed.data.cases) : null;
+      // One attempt, no cherry-picking/retry. A valid schema is distinct from
+      // scenario coverage; neither is proof that a generated test executes.
+      console.log(`ARTIFACT_QUALITY_REPORT:${JSON.stringify({
+        fixture: 'express-api',
+        artifactType: result.artifactType,
+        model: result.model,
+        promptVersion: result.promptVersion,
+        scopeHint: result.scopeHint,
+        chunkCount: result.chunkCount,
+        schemaValid: parsed.success,
+        schemaIssues: parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+        caseCount: parsed.success ? parsed.data.cases.length : null,
+        textualScenarioCoverage: score,
+        generatedFilesExecuted: false,
+      })}`);
     },
   );
 

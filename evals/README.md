@@ -1,5 +1,21 @@
 # Review evaluation fixtures
 
+## Existing artifact-generation quality (opt-in)
+
+The separate `express-api` golden probe in `apps/desktop/tests/golden` uses Tessera's **existing test-case prompt and Ollama generation path**, not the planned staged-review engine. With pnpm dependencies, Rust/Cargo, a reachable local Ollama server and an installed supported chat model, run a single scored probe from the repository root:
+
+```sh
+TESSERA_GOLDEN_QUALITY_REPORT=1 pnpm --filter @testing-ide/desktop test:integration tests/golden/ollama-golden.integration.test.ts -t 'reports express auth'
+```
+
+PowerShell: set `$env:TESSERA_GOLDEN_QUALITY_REPORT='1'` before running the `pnpm ...` command. Set `OLLAMA_TEST_CHAT_MODEL` to select an installed model (otherwise the probe selects an installed supported qwen2.5-coder model); Ollama credentials are not required. The opt-in test is skipped without the flag; when requested but Ollama/Cargo is unavailable it fails instead of silently passing without a score. A successful run emits one `ARTIFACT_QUALITY_REPORT:` JSON line (save your terminal output if you need a persistent record). If generation fails, the test fails rather than inventing a score. Record the model, promptVersion and result for each run: model output is nondeterministic, even at the probe's temperature of 0.1. The scored test has no quality retries; the existing Rust probe can retry once on a transient stream interruption. This is **not** a CI gate or an aggregate provider benchmark.
+
+`schemaValid` reports whether the emitted payload passes `TestCaseSchema`; `caseCount` and `textualScenarioCoverage` are reported separately. Five fixture-anchored scenarios are checked: successful login (token), missing login fields (400), bad credentials (400), logout of a known token (204), and logout of an unknown token (404). A scenario counts only when **one case** names a relevant input/action and puts the expected observation in that same step's `expectedResult`; the two 400-login scenarios also require the fixture's distinct error meaning (required fields vs invalid credentials), so a bare `400` is not counted. `matches[].caseIds` makes each hit auditable; misses are visible as empty arrays. Zero cases yields zero coverage. This lexical score is deliberately conservative and may miss semantically equivalent wording or count a plausible but unexecutable case. No generated `files[]` are executed, so the report makes **no assertion of runnable tests, source/line coverage, defect detection, or staged-review quality**. The scored auth behavior comes from `apps/desktop/tests/golden/fixtures/express-api/src`; health is outside the probe's `auth module` scope. The deterministic scorer regression check needs no model:
+
+```sh
+pnpm --filter @testing-ide/desktop test:frontend tests/golden/artifact-quality.test.ts
+```
+
 These synthetic fixtures define expected behavior for a future change-review
 evaluator (#114). They do **not** show that Tessera's planned review engine detects
 the seeded bugs. No evaluator, LLM calls, cloud credentials, Docker, or additional

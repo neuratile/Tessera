@@ -9,7 +9,7 @@ export default mergeConfig(
     test: {
       environment: 'node',
       passWithNoTests: true,
-      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      include: ['src/**/*.{test,spec}.{ts,tsx}', 'tests/golden/artifact-quality.test.ts'],
       exclude: [...configDefaults.exclude, 'src-tauri/**', 'src/**/*.integration.test.ts'],
       coverage: {
         // v8 provider — no Babel instrumentation, fast, ships with the
