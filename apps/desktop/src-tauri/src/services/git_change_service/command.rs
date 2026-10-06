@@ -43,11 +43,11 @@ pub(super) struct Git<'a> {
 }
 
 impl<'a> Git<'a> {
-    pub fn new(root: &'a Path) -> Self {
-        Self {
+    pub fn new(root: &'a Path) -> AppResult<Self> {
+        Ok(Self {
             root,
-            executable: "git".into(),
-        }
+            executable: super::executable::resolve(root)?.into_os_string(),
+        })
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -246,7 +246,8 @@ mod tests {
 
     #[test]
     fn helpers_and_network_are_disabled_without_shell() {
-        let git = Git::new(Path::new("."));
+        let root = Path::new(".").canonicalize().unwrap();
+        let git = Git::new(&root).unwrap();
         let command = git.command(&["diff", "--no-ext-diff", "--no-textconv", "a", "b"]);
         let args: Vec<_> = command
             .as_std()

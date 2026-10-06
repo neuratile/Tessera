@@ -85,6 +85,40 @@ async fn inherited_index_repository_and_config_overrides_cannot_redirect_capture
     assert_eq!(state(&alternate.0), alternate_before);
 }
 
+#[tokio::test]
+async fn repository_git_cannot_shadow_host_git_through_path_or_child_cwd() {
+    let repo = Repo::new();
+    repo.write("main.js", "base\n");
+    repo.commit();
+    repo.write("main.js", "staged\n");
+    repo.stage();
+    let name = if cfg!(windows) { "git.exe" } else { "git" };
+    let fake = repo.0.join(name);
+    #[cfg(windows)]
+    fs::copy(std::env::current_exe().unwrap(), &fake).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(&fake, "#!/bin/sh\necho invoked > .git/shadow-ran\nexit 1\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fs::create_dir(repo.0.join("bin")).unwrap();
+    fs::copy(&fake, repo.0.join("bin").join(name)).unwrap();
+    let snapshot = repo.capture().await;
+    let before = state(&repo.0);
+    let mut paths = vec![".".into(), repo.0.join("bin")];
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let mut command = child(&repo);
+    command
+        .current_dir(&repo.0)
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("TESSERA_106_EXPECT_INDEX", snapshot.index_fingerprint)
+        .env("TESSERA_106_EXPECT_HEAD", snapshot.base_commit.unwrap());
+    run_child(command);
+    assert!(!repo.0.join(".git/shadow-ran").exists());
+    assert_eq!(state(&repo.0), before);
+}
+
 #[test]
 fn missing_promisor_blob_cannot_invoke_transport_or_modify_repository() {
     let repo = Repo::new();

@@ -4,6 +4,7 @@
 mod blobs;
 mod changes;
 mod command;
+mod executable;
 mod hunks;
 mod manifest;
 mod policy;
@@ -122,7 +123,8 @@ pub async fn capture(root: &Path) -> AppResult<StagedChangeSet> {
     {
         return Err(invalid("Open a valid Git repository root"));
     }
-    tokio::time::timeout(Duration::from_secs(60), capture_with(&Git::new(&root)))
+    let git = Git::new(&root)?;
+    tokio::time::timeout(Duration::from_secs(60), capture_with(&git))
         .await
         .map_err(|_| limit_error("Git capture timed out; start a new review"))?
 }
