@@ -25,6 +25,7 @@ pub mod embedding_config_service;
 pub mod export;
 pub mod file_discovery_service;
 pub mod generation_service;
+pub mod git_change_service;
 pub mod hardware_service;
 pub mod healing_service;
 pub mod health_service;
