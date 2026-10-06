@@ -104,6 +104,10 @@ jobs:
         if: always()
         run: pnpm test
 
+      - name: Run staged Git capture integration tests
+        if: always()
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --test git_change_service
+
   frontend-checks:
     name: frontend-checks
     # Merged node-only job (was `typecheck` + `build-check`): TypeScript

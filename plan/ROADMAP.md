@@ -16,7 +16,9 @@ records capabilities; a plan folder does not imply a published release.
   [checkout fixture](../evals/README.md), seeded regression and clean control.
 - [#95](https://github.com/neuratile/Tessera/issues/95): expanded sandbox boundary tests.
 
-The new review runtime is not implemented yet.
+Read-only staged Git capture ([#106](https://github.com/neuratile/Tessera/issues/106))
+is implemented as a Tauri-independent service with focused repository tests.
+The end-to-end review runtime, persistence/IPC, and review UI remain planned.
 
 ## Delivery order
 
