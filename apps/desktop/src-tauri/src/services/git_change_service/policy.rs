@@ -161,7 +161,7 @@ impl Policies {
 // Bound the synchronous prefix expansion as well as Git's manifest output.
 // A deeply nested raw Git path otherwise causes quadratic string allocation.
 fn ancestor_directories(paths: &[&[u8]]) -> AppResult<BTreeSet<String>> {
-    let mut directories = BTreeSet::from([String::new()]);
+    let mut directories = BTreeSet::new();
     let mut bytes = 0;
     for raw in paths {
         if path_reason(raw).is_some() {
@@ -171,6 +171,7 @@ fn ancestor_directories(paths: &[&[u8]]) -> AppResult<BTreeSet<String>> {
         if path.len() > 4096 || path.split('/').count() > 64 {
             return Err(limit_error("Git path exceeds capture safety limits"));
         }
+        directories.insert(String::new());
         for (i, _) in path.match_indices('/') {
             let prefix = &path[..i];
             if !directories.contains(prefix) {
@@ -218,6 +219,7 @@ mod tests {
 
     #[test]
     fn ancestor_allocations_are_bounded_before_copying_paths() {
+        assert!(ancestor_directories(&[]).unwrap().is_empty());
         let deep = format!("{}a.js", "x/".repeat(32_766));
         assert_eq!(
             ancestor_directories(&[deep.as_bytes()]).unwrap_err().code(),

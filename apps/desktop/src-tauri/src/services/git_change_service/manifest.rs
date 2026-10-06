@@ -206,6 +206,9 @@ pub(super) fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+// Contract v1 fixes the tuple to path/mode/stage/blob ID, without index flags.
+// Intent-to-add races are checked separately via full Entry equality in
+// ensure_current; changing this format requires a versioned contract migration.
 pub(super) fn fingerprint(format: &str, entries: &[Entry]) -> AppResult<String> {
     let entries: Vec<_> = entries
         .iter()

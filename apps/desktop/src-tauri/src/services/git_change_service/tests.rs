@@ -15,6 +15,7 @@ enum Scenario {
     Stable,
     HeadRace,
     ExcludedModeRace,
+    IntentRace,
     MissingBlob,
     MissingPolicy,
     IntermediateIndex,
@@ -73,6 +74,9 @@ impl Runner for Fixture {
                     "100644"
                 };
                 let mut data = index_record("main.js", "100644", &id('2'));
+                if call > 0 && matches!(self.scenario, Scenario::IntentRace) {
+                    data = data.replace("flags: 0\n", "flags: 20004000\n");
+                }
                 data.push_str(&index_record("omitted.txt", mode, &id('3')));
                 if matches!(self.scenario, Scenario::MissingPolicy) {
                     data.push_str(&index_record(".ignore", "100644", &id('4')));
@@ -119,8 +123,12 @@ impl Runner for Fixture {
 }
 
 #[tokio::test]
-async fn deterministic_head_and_excluded_mode_races_require_new_review() {
-    for scenario in [Scenario::HeadRace, Scenario::ExcludedModeRace] {
+async fn deterministic_head_mode_and_intent_races_require_new_review() {
+    for scenario in [
+        Scenario::HeadRace,
+        Scenario::ExcludedModeRace,
+        Scenario::IntentRace,
+    ] {
         let error = capture_with(&Fixture::new(scenario)).await.unwrap_err();
         assert_eq!(error.code(), "INVALID_INPUT");
         assert!(error.to_string().contains("capture_changed"));
@@ -201,11 +209,34 @@ impl Repo {
         repo
     }
     fn git(&self, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(&self.0)
-            .args(args)
-            .output()
-            .unwrap();
+        let mut command = Command::new("git");
+        command.current_dir(&self.0);
+        // Fixture setup must not inherit the user's repository or signing hooks.
+        for (key, _) in std::env::vars_os() {
+            if key
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                command.env_remove(key);
+            }
+        }
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=",
+                "-c",
+                "core.fsmonitor=false",
+            ])
+            .args(args);
+        let output = command.output().unwrap();
         assert!(
             output.status.success(),
             "fixture Git failed: {}",

@@ -81,8 +81,11 @@ async fn clean_and_unborn_repositories_do_not_write_an_empty_tree() {
     assert!(matches!(added.files[0].change_kind, ChangeKind::Added));
     assert!(added.files[0].old.is_none());
     assert!(added.files[0].new.as_ref().unwrap().content.is_empty());
+    repo.write(".ignore", b"\xff");
     repo.commit();
+    let before = state(&repo.0);
     let clean = repo.capture().await;
+    assert_eq!(before, state(&repo.0));
     assert!(clean.base_commit.is_some());
     assert!(clean.files.is_empty());
     assert!(clean.excluded_files.is_empty());
