@@ -103,6 +103,8 @@ pub struct ExcludedFile {
 /// at most 50 changed manifest paths (before rename pairing), 128 KiB per blob,
 /// and 1 MiB of distinct included source/required ignore-policy bytes. Policies
 /// come only from applicable ancestor `.gitignore`/`.ignore` blobs on each side.
+/// Reviewable paths are bounded to 4096 bytes and 64 components; distinct
+/// ignore-ancestor prefix strings are bounded to 256 KiB per side.
 ///
 /// # Errors
 /// Returns `INVALID_INPUT` for invalid repositories, unmerged/missing objects,

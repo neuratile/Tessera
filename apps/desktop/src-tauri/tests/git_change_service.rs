@@ -1,4 +1,6 @@
 //! Real Git repositories exercise the staged-capture contract, not working-tree discovery.
+#[path = "support/git_capture_process.rs"]
+mod process_tests;
 #[path = "support/git_change_service.rs"]
 mod support;
 

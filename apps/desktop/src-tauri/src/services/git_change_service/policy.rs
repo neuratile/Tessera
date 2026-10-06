@@ -8,7 +8,7 @@ use std::{
 
 use super::{
     blobs::{content_reason, Blobs},
-    command::{invalid, Runner},
+    command::{invalid, limit_error, Runner},
     manifest::{base64, Entry},
 };
 use crate::error::AppResult;
@@ -82,17 +82,7 @@ impl Policies {
         blobs: &mut Blobs,
     ) -> AppResult<Self> {
         let entries: BTreeMap<_, _> = manifest.iter().map(|e| (e.path.as_slice(), e)).collect();
-        let mut directories = BTreeSet::new();
-        for raw in paths {
-            if path_reason(raw).is_some() {
-                continue;
-            }
-            let path = display_path(raw);
-            directories.insert(String::new());
-            for (i, _) in path.match_indices('/') {
-                directories.insert(path[..i].to_owned());
-            }
-        }
+        let directories = ancestor_directories(paths)?;
         let mut policies = BTreeMap::new();
         for directory in directories {
             let mut builder = GitignoreBuilder::new(Path::new(&directory));
@@ -168,6 +158,33 @@ impl Policies {
     }
 }
 
+// Bound the synchronous prefix expansion as well as Git's manifest output.
+// A deeply nested raw Git path otherwise causes quadratic string allocation.
+fn ancestor_directories(paths: &[&[u8]]) -> AppResult<BTreeSet<String>> {
+    let mut directories = BTreeSet::from([String::new()]);
+    let mut bytes = 0;
+    for raw in paths {
+        if path_reason(raw).is_some() {
+            continue;
+        }
+        let path = std::str::from_utf8(raw).map_err(|_| invalid("Invalid Git path"))?;
+        if path.len() > 4096 || path.split('/').count() > 64 {
+            return Err(limit_error("Git path exceeds capture safety limits"));
+        }
+        for (i, _) in path.match_indices('/') {
+            let prefix = &path[..i];
+            if !directories.contains(prefix) {
+                if bytes + prefix.len() > 256 * 1024 {
+                    return Err(limit_error("Ignore ancestors exceed capture safety limits"));
+                }
+                bytes += prefix.len();
+                directories.insert(prefix.to_owned());
+            }
+        }
+    }
+    Ok(directories)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +214,33 @@ mod tests {
         ] {
             assert!(sensitive(path));
         }
+    }
+
+    #[test]
+    fn ancestor_allocations_are_bounded_before_copying_paths() {
+        let deep = format!("{}a.js", "x/".repeat(32_766));
+        assert_eq!(
+            ancestor_directories(&[deep.as_bytes()]).unwrap_err().code(),
+            "LIMIT_EXCEEDED"
+        );
+        let long = "a".repeat(4097);
+        assert_eq!(
+            ancestor_directories(&[long.as_bytes()]).unwrap_err().code(),
+            "LIMIT_EXCEEDED"
+        );
+        let boundary = format!("{}a.js", "x/".repeat(63));
+        assert_eq!(
+            ancestor_directories(&[boundary.as_bytes()]).unwrap().len(),
+            64
+        );
+        let large: Vec<_> = (0..50)
+            .map(|i| format!("{i:02}/{}a.js", format!("{}/", "x".repeat(60)).repeat(60)))
+            .collect();
+        let paths: Vec<_> = large.iter().map(String::as_bytes).collect();
+        assert_eq!(
+            ancestor_directories(&paths).unwrap_err().code(),
+            "LIMIT_EXCEEDED"
+        );
     }
 
     #[test]
