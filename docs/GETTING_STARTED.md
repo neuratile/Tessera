@@ -38,7 +38,8 @@ pnpm typecheck
 
 Adjust the path to your Git installation. Turbo passes this setting through
 while retaining its normal environment filtering. Git Bash and Cargo must also
-be on PATH for the local pre-push guard.
+be on PATH for the local pre-push guard. Repository attributes keep shell
+scripts and hooks LF-terminated across Windows and Linux checkouts.
 
 ## Configure Ollama
 
