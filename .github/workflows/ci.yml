@@ -33,8 +33,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
-      - name: Check release tooling and deterministic review fixtures
-        run: node --test tools/scripts/check-release.test.mjs tools/scripts/read-rust-toolchain.test.mjs evals/fixtures/checkout/fixture.test.mjs
+      - name: Check release/toolchain/guard tooling and review fixtures
+        run: node --test tools/scripts/check-release.test.mjs tools/scripts/read-rust-toolchain.test.mjs tools/scripts/pre-push.test.mjs evals/fixtures/checkout/fixture.test.mjs
       - name: Scan for unresolved Git conflict markers
         # Hard-fail when `<<<<<<<`, `=======`, or `>>>>>>>` lines slip into
         # tracked source. Master has been broken three times by merge

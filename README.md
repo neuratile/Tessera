@@ -12,8 +12,8 @@ inspect coverage, and export results.
 
 **Next: Review my changes.** We are building a staged Git review with code-linked
 findings and evidence tied to exact source/test versions. The
-[contract](./plan/versions/v2/AI_FIRST_REVIEW.md) and
-[checkout fixture](./evals/README.md), and read-only staged Git capture service
+[contract](./plan/versions/v2/AI_FIRST_REVIEW.md),
+[checkout fixture](./evals/README.md), and the read-only staged Git capture service
 are available. The full review engine and UI are **not implemented yet**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
 
 ## What works today

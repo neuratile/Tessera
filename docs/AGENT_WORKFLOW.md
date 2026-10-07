@@ -97,7 +97,7 @@ pnpm guard:pre-push
 That script runs:
 
 1. Conflict-marker scan.
-2. Release tooling/Rust-pin reader tests and deterministic checkout fixtures.
+2. Release/Rust-pin/guard tooling tests and deterministic checkout fixtures.
 3. Workspace TypeScript checks.
 4. Workspace ESLint checks.
 5. Shared and frontend unit tests.
@@ -131,7 +131,7 @@ ruleset — the merge button stays greyed out until all six are green:
 
 | Job                          | Required? | What it asserts                                                  |
 |-----------------------------|:---------:|-----------------------------------------------------------------|
-| `conflict-marker-check`     | ✅        | Marker scan, release tooling tests, and checkout fixtures                   |
+| `conflict-marker-check`     | ✅        | Marker scan, release/Rust-pin/guard tooling tests, and checkout fixtures                   |
 | `lint-and-test`             | ✅        | ESLint + clippy clean, then Vitest, Rust unit, and Git capture repository tests pass |
 | `frontend-checks`           | ✅        | TypeScript clean, then the production Vite build succeeds        |
 | `server-check`              | ✅        | `apps/server` clippy + tests pass                               |

@@ -21,7 +21,7 @@ Missing Cargo skips local Rust checks; CI still requires them.
 
 | Command | Coverage |
 |---|---|
-| `pnpm test:tooling` | Release-ref/version validator and Rust-pin reader regression tests |
+| `pnpm test:tooling` | Release-ref/version, Rust-pin reader, and pre-push failure-propagation regression tests |
 | `pnpm test:eval-fixtures` | Checkout baseline, seeded regression, clean control |
 | `pnpm typecheck`, `pnpm lint` | Workspace TypeScript and ESLint |
 | `pnpm test` | Tooling, fixtures, workspace tests including desktop Rust |

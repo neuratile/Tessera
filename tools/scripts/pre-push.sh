@@ -54,10 +54,10 @@ ok   "unit tests passed"
 if command -v cargo >/dev/null 2>&1; then
   step "6/6  cargo clippy + library and capture repository tests"
   (
-    cd apps/desktop/src-tauri
-    rustc --version
-    cargo clippy --locked --all-targets --lib -- -D warnings
-    cargo test --locked --lib --quiet
+    cd apps/desktop/src-tauri &&
+    rustc --version &&
+    cargo clippy --locked --all-targets --lib -- -D warnings &&
+    cargo test --locked --lib --quiet &&
     cargo test --locked --test git_change_service --quiet
   ) || fail "Rust checks failed"
   ok   "Rust checks passed"
