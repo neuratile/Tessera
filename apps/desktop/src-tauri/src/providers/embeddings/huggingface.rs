@@ -312,7 +312,7 @@ mod tests {
             .expect("provider")
             .with_base_url("http://invalid:1");
         let out = p.embed(Vec::new()).await.expect("empty ok");
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

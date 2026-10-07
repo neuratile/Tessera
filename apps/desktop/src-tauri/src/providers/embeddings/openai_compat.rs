@@ -258,7 +258,7 @@ mod tests {
     async fn empty_input_returns_empty_output_without_http() {
         let p = provider_at("http://invalid:1/v1/embeddings".into(), 4);
         let out = p.embed(Vec::new()).await.expect("empty ok");
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

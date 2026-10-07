@@ -267,7 +267,7 @@ mod tests {
     async fn empty_input_returns_empty_output_without_http() {
         let provider = OllamaEmbeddingProvider::new("http://invalid:1").expect("provider");
         let out = provider.embed(Vec::new()).await.expect("empty ok");
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

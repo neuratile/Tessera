@@ -556,9 +556,9 @@ import (
     #[test]
     fn empty_source_parses_to_empty_file() {
         let parsed = parse("", SourceLanguage::TypeScript).expect("parse");
-        assert!(parsed.declarations.is_empty());
-        assert!(parsed.imports.is_empty());
-        assert!(parsed.exports.is_empty());
+        assert_eq!(parsed.declarations.len(), 0);
+        assert_eq!(parsed.imports.len(), 0);
+        assert_eq!(parsed.exports.len(), 0);
     }
 
     #[test]

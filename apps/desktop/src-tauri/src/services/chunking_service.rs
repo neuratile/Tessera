@@ -226,7 +226,7 @@ mod tests {
     fn empty_source_yields_zero_chunks() {
         let parsed = ParsedFile::default();
         let chunks = chunk_source("", &parsed);
-        assert!(chunks.is_empty());
+        assert_eq!(chunks.len(), 0);
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
             .iter()
             .filter(|c| c.kind == ChunkKind::Module)
             .collect();
-        assert!(!module_chunks.is_empty());
+        assert_ne!(module_chunks.len(), 0);
         assert!(module_chunks[0].content.contains("import"));
     }
 

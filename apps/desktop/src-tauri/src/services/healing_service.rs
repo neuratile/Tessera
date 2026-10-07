@@ -792,7 +792,7 @@ mod tests {
     fn summarize_already_green_heal_has_no_rows() {
         let attempts = vec![attempt(1, "v1", 3, vec![])];
         let rows = summarize_heal_tests(&attempts, "v1");
-        assert!(rows.is_empty());
+        assert_eq!(rows.len(), 0);
     }
 
     // ---- scripted test doubles -------------------------------------------
@@ -1140,7 +1140,7 @@ mod tests {
         assert_eq!(result.passed_count, 1);
         // Landed on the regenerated version, not the original.
         assert_ne!(result.final_artifact_id, artifact_id);
-        assert!(!result.final_run_id.is_empty());
+        assert_ne!(result.final_run_id.len(), 0);
         // The healed test flipped from failing (attempt 1) to passing (attempt 2).
         assert_eq!(result.attempts[0].failed_count, 1);
         assert_eq!(result.attempts[1].failed_count, 0);
@@ -1329,7 +1329,7 @@ mod tests {
         assert!(result.error_message.is_some());
         // The errored run is never the "best" attempt, so its run_id must not
         // surface as `final_run_id` (would point a consumer at a failed run).
-        assert!(result.final_run_id.is_empty());
+        assert_eq!(result.final_run_id.len(), 0);
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);
@@ -1358,7 +1358,7 @@ mod tests {
         assert_eq!(result.outcome, HealOutcome::Error);
         assert!(result.error_message.as_deref().unwrap_or_default().contains("cancelled"));
         // A cancelled run is likewise never recorded as "best".
-        assert!(result.final_run_id.is_empty());
+        assert_eq!(result.final_run_id.len(), 0);
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

@@ -731,7 +731,7 @@ mod tests {
                 .expect("deserialize request");
         assert_eq!(req.artifact_id, "a1");
         assert!(req.opt_in_confirmed);
-        assert!(req.client_run_id.is_empty());
+        assert_eq!(req.client_run_id.len(), 0);
 
         let with_id: RunRequest = serde_json::from_str(
             r#"{"artifactId":"a1","optInConfirmed":true,"clientRunId":"run-9"}"#,
