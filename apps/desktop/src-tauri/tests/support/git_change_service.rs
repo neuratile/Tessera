@@ -39,7 +39,13 @@ impl Repo {
             "GIT_CONFIG_GLOBAL",
             if cfg!(windows) { "NUL" } else { "/dev/null" },
         );
+        // A fixture commit must not leave detached maintenance changing the
+        // repository while capture's byte-for-byte read-only assertions run.
         command.args([
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
             "-c",
             "core.fsmonitor=false",
             "-c",

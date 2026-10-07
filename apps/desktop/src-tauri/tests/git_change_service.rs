@@ -67,6 +67,8 @@ async fn staged_checkout_regression_survives_unstaged_fix_and_capture_is_read_on
 #[tokio::test]
 async fn clean_and_unborn_repositories_do_not_write_an_empty_tree() {
     let repo = Repo::new();
+    assert_eq!(repo.text(&["config", "--get", "maintenance.auto"]), "false");
+    assert_eq!(repo.text(&["config", "--get", "gc.auto"]), "0");
     let before = state(&repo.0);
     let empty = repo.capture().await;
     assert!(empty.base_commit.is_none());
