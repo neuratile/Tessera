@@ -13,8 +13,8 @@ inspect coverage, and export results.
 **Next: Review my changes.** We are building a staged Git review with code-linked
 findings and evidence tied to exact source/test versions. The
 [contract](./plan/versions/v2/AI_FIRST_REVIEW.md) and
-[checkout fixture](./evals/README.md) are available. The review engine and UI
-are **not implemented yet**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
+[checkout fixture](./evals/README.md), and read-only staged Git capture service
+are available. The full review engine and UI are **not implemented yet**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
 
 ## What works today
 
@@ -32,7 +32,8 @@ The planned review workflow will preserve that distinction in its evidence.
 
 ## Start locally
 
-Install Git, pnpm 10.9.0, stable Rust, and the native
+Install Git, pnpm 10.9.0, rustup (using the version pinned in
+[`rust-toolchain.toml`](./rust-toolchain.toml)), and the native
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 CI uses Node 20; the optional TypeScript bootstrap helper needs Node 22.6+.
 Docker is required only for sandbox execution or containerized services.
@@ -67,8 +68,9 @@ node --test evals/fixtures/checkout/fixture.test.mjs
 
 This checks a seeded checkout bug and a clean control without an LLM, Docker,
 or the desktop app. It is a fixture check, not a working review or model accuracy
-score. Git capture, contracts, context, and findings come next; core extraction,
-CLI, and MCP follow a proven desktop workflow.
+score. Read-only Git capture is implemented; persistence/contracts, context,
+and findings come next. Core extraction, CLI, and MCP follow a proven desktop
+workflow.
 
 ## Repository map
 

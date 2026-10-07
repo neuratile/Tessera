@@ -6,8 +6,14 @@ Install with `pnpm install --frozen-lockfile`, then run `pnpm guard:pre-push`
 before pushing. The pre-push hook runs it again.
 
 The guard checks conflict markers, tooling tests, review fixtures, TypeScript,
-ESLint, shared/frontend unit tests, then desktop Rust Clippy and unit tests
-when Cargo is available.
+ESLint, shared/frontend unit tests, then desktop Rust Clippy, library tests,
+and the staged Git capture repository tests when Cargo is available.
+
+Local rustup, every Rust CI job, and release bundles use the exact version in
+[`rust-toolchain.toml`](../rust-toolchain.toml) (currently 1.99.0). The shared
+[`setup-rust` action](../.github/actions/setup-rust/action.yml) reads that file;
+update the pin deliberately after validation rather than following floating
+`stable`. This development/CI pin does not change the crate's declared MSRV.
 
 This is not full CI parity. The guard omits server tests, the production
 renderer build, Playwright, Docker execution, coverage, and live Ollama.
@@ -15,7 +21,7 @@ Missing Cargo skips local Rust checks; CI still requires them.
 
 | Command | Coverage |
 |---|---|
-| `pnpm test:tooling` | Release-ref/version validator regression tests |
+| `pnpm test:tooling` | Release-ref/version validator and Rust-pin reader regression tests |
 | `pnpm test:eval-fixtures` | Checkout baseline, seeded regression, clean control |
 | `pnpm typecheck`, `pnpm lint` | Workspace TypeScript and ESLint |
 | `pnpm test` | Tooling, fixtures, workspace tests including desktop Rust |
@@ -25,6 +31,7 @@ Missing Cargo skips local Rust checks; CI still requires them.
 | `pnpm --filter @testing-ide/desktop e2e:install` | Install Playwright browser |
 | `pnpm --filter @testing-ide/desktop test:e2e` | Renderer E2E with mocked Tauri IPC |
 | `cargo test --manifest-path apps/server/Cargo.toml --locked` | API server tests |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --test git_change_service` | Real staged Git capture repository/security tests |
 
 See the [workflow](../.github/workflows/ci.yml) and colocated tests for Docker
 and live-provider flags. Fixture tests require neither Docker nor a model and
@@ -40,7 +47,7 @@ release. There are no docs-only skips; all six required names are preserved.
 | Job | Checks |
 |---|---|
 | `conflict-marker-check` | Marker scan, tooling tests, checkout fixtures |
-| `lint-and-test` | ESLint, desktop Clippy, workspace unit tests |
+| `lint-and-test` | ESLint, desktop Clippy, workspace unit tests, staged Git capture integration tests |
 | `frontend-checks` | TypeScript and production Vite build |
 | `server-check` | Server Clippy and tests |
 | `e2e-test` | Playwright renderer flows |

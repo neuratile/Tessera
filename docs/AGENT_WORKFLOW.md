@@ -52,7 +52,8 @@ the gauntlet, run `pnpm prepare` again.
 Recommended additional tooling:
 
 - **Rust toolchain** (`rustup`) — required to run the local clippy
-  step; without it, `tools/scripts/pre-push.sh` skips Rust gates.
+  step; without it, `tools/scripts/pre-push.sh` skips Rust gates. Local builds,
+  CI, and release use the exact version in `rust-toolchain.toml`.
 - **GitHub CLI** (`gh`) — required for `gh pr create` / `gh pr view`.
 
 ---
@@ -96,11 +97,12 @@ pnpm guard:pre-push
 That script runs:
 
 1. Conflict-marker scan.
-2. Release tooling tests and deterministic checkout fixtures.
+2. Release tooling/Rust-pin reader tests and deterministic checkout fixtures.
 3. Workspace TypeScript checks.
 4. Workspace ESLint checks.
 5. Shared and frontend unit tests.
-6. Desktop Rust Clippy and library tests when Cargo is installed.
+6. Desktop Rust Clippy, library tests, and staged Git capture repository tests
+   when Cargo is installed.
 
 This is a local baseline. Server, production renderer build, Playwright, Docker,
 coverage, and live Ollama checks remain separate CI coverage. See [CI/CD](./CI_CD.md).
@@ -130,7 +132,7 @@ ruleset — the merge button stays greyed out until all six are green:
 | Job                          | Required? | What it asserts                                                  |
 |-----------------------------|:---------:|-----------------------------------------------------------------|
 | `conflict-marker-check`     | ✅        | Marker scan, release tooling tests, and checkout fixtures                   |
-| `lint-and-test`             | ✅        | ESLint + clippy clean, then Vitest + Rust unit tests pass       |
+| `lint-and-test`             | ✅        | ESLint + clippy clean, then Vitest, Rust unit, and Git capture repository tests pass |
 | `frontend-checks`           | ✅        | TypeScript clean, then the production Vite build succeeds        |
 | `server-check`              | ✅        | `apps/server` clippy + tests pass                               |
 | `e2e-test`                  | ✅        | Playwright renderer suite passes (mocked Tauri IPC)             |

@@ -71,8 +71,8 @@ jobs:
         if: matrix.platform.runner == 'ubuntu-latest'
         uses: ./.github/actions/linux-tauri-deps
 
-      - name: Install Rust (stable + universal target on macOS)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned Rust (with universal target on macOS)
+        uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.platform.runner == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 

@@ -2,10 +2,11 @@
 
 ## Requirements and launch
 
-Use Git, pnpm 10.9.0, Node 20 or newer, stable Rust, and your platform's
+Use Git, pnpm 10.9.0, Node 20 or newer, rustup, and your platform's
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
-CI uses Node 20 and stable Rust on Linux. Docker is optional for generation
-and required for sandbox execution.
+Local Rust and CI use the exact version in
+[`rust-toolchain.toml`](../rust-toolchain.toml) (currently 1.99.0). CI uses Node 20.
+Docker is optional for generation and required for sandbox execution.
 
 ```bash
 git clone https://github.com/neuratile/Tessera.git tessera
@@ -70,7 +71,8 @@ Cloud selections send relevant content to the selected provider.
 
 ## Try the review fixture
 
-The staged-review runtime is still planned. Run its fixture now:
+The end-to-end staged-review workflow is still planned; read-only Git capture
+is implemented as a backend service. Run the fixture now:
 
 ```bash
 node --test evals/fixtures/checkout/fixture.test.mjs

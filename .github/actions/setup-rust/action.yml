@@ -1,0 +1,26 @@
+name: Install repository Rust toolchain
+description: Use the local rustup pin for CI and release without a floating stable compiler.
+inputs:
+  components:
+    description: Rust components required by this job.
+    required: false
+    default: clippy,rustfmt
+  targets:
+    description: Additional Rust targets for this job.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Read repository toolchain
+      id: version
+      shell: bash
+      run: |
+        channel=$(bash tools/scripts/read-rust-toolchain.sh)
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+    - name: Install pinned Rust
+      uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+      with:
+        toolchain: ${{ steps.version.outputs.channel }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
