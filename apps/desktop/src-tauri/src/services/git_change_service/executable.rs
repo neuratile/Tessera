@@ -7,10 +7,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) fn resolve(root: &Path) -> AppResult<PathBuf> {
-    let path =
-        std::env::var_os("PATH").ok_or_else(|| invalid("Git is unavailable; install Git"))?;
-    from_path(root, &path)
+pub(super) async fn resolve(root: &Path) -> AppResult<PathBuf> {
+    let root = root.to_owned();
+    blocking_lookup(move || {
+        let path =
+            std::env::var_os("PATH").ok_or_else(|| invalid("Git is unavailable; install Git"))?;
+        from_path(&root, &path)
+    })
+    .await
+}
+
+// Filesystem lookup may wait on a host PATH mount. Do not block a Tokio worker;
+// the caller's capture deadline bounds the wait, not the underlying OS I/O.
+async fn blocking_lookup(
+    lookup: impl FnOnce() -> AppResult<PathBuf> + Send + 'static,
+) -> AppResult<PathBuf> {
+    tokio::task::spawn_blocking(lookup)
+        .await
+        .map_err(|_| invalid("Git executable lookup failed"))?
 }
 
 fn from_path(root: &Path, path: &OsStr) -> AppResult<PathBuf> {
@@ -47,10 +61,21 @@ fn from_path(root: &Path, path: &OsStr) -> AppResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, time::Duration};
 
-    #[test]
-    fn relative_and_repository_owned_executables_are_never_selected() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn stalled_lookup_cannot_block_the_async_capture_deadline() {
+        let lookup = blocking_lookup(|| {
+            std::thread::sleep(Duration::from_millis(150));
+            Ok(PathBuf::from("unused-git"))
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(20), lookup)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn relative_and_repository_owned_executables_are_never_selected() {
         let root = std::env::temp_dir().join(format!("tessera-git-path-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(root.join("bin")).unwrap();
         let root = root.canonicalize().unwrap();
@@ -65,7 +90,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(from_path(&root, &path).unwrap_err().code(), "INVALID_INPUT");
-        let real = resolve(&root).unwrap();
+        let real = resolve(&root).await.unwrap();
         assert!(real.is_absolute());
         assert!(!real.starts_with(&root));
         fs::remove_dir_all(root).unwrap();

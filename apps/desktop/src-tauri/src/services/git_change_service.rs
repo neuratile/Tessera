@@ -113,6 +113,13 @@ pub struct ExcludedFile {
 /// `LIMIT_EXCEEDED` for resource ceilings/timeouts. Errors never expose Git
 /// stderr or source. Later index/working-tree edits cannot alter returned bytes.
 pub async fn capture(root: &Path) -> AppResult<StagedChangeSet> {
+    // Root validation and executable lookup share the capture deadline too.
+    tokio::time::timeout(Duration::from_secs(60), capture_at(root))
+        .await
+        .map_err(|_| limit_error("Git capture timed out; start a new review"))?
+}
+
+async fn capture_at(root: &Path) -> AppResult<StagedChangeSet> {
     let root = tokio::fs::canonicalize(root)
         .await
         .map_err(|_| invalid("Open a valid Git repository root"))?;
@@ -123,10 +130,8 @@ pub async fn capture(root: &Path) -> AppResult<StagedChangeSet> {
     {
         return Err(invalid("Open a valid Git repository root"));
     }
-    let git = Git::new(&root)?;
-    tokio::time::timeout(Duration::from_secs(60), capture_with(&git))
-        .await
-        .map_err(|_| limit_error("Git capture timed out; start a new review"))?
+    let executable = executable::resolve(&root).await?;
+    capture_with(&Git::new(&root, executable.into_os_string())).await
 }
 
 async fn capture_with(git: &impl Runner) -> AppResult<StagedChangeSet> {
