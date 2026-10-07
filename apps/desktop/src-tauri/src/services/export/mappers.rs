@@ -452,7 +452,7 @@ mod tests {
         match &doc.sections[0] {
             ExportSection::Table(t) => {
                 assert_eq!(t.name, "Test Cases");
-                assert!(t.rows.is_empty());
+                assert_eq!(t.rows.len(), 0);
                 // 8 core columns (the 9-col view minus the auto Sr-no
                 // index) + 4 trailing optional/superset columns.
                 assert_eq!(t.columns.len(), 12);

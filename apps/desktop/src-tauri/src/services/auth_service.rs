@@ -174,7 +174,7 @@ mod tests {
             name: Some("Tester".into()),
         };
         let pair = register(&pool, &cfg, &reg).await.expect("register");
-        assert!(!pair.access_token.is_empty());
+        assert_ne!(pair.access_token.len(), 0);
 
         let logged_in = login(
             &pool,
@@ -192,7 +192,7 @@ mod tests {
         let refreshed = refresh_tokens(&pool, &cfg, &logged_in.refresh_token)
             .await
             .expect("refresh");
-        assert!(!refreshed.access_token.is_empty());
+        assert_ne!(refreshed.access_token.len(), 0);
 
         let claims =
             auth::decode_access_token(&refreshed.access_token, cfg.jwt_secret.as_bytes(), 60)

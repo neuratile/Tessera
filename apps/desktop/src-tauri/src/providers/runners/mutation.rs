@@ -585,7 +585,7 @@ export const f = (a, b) => {
 
     #[test]
     fn empty_and_python_sources_yield_no_mutants() {
-        assert!(gen("").is_empty());
+        assert_eq!(gen("").len(), 0);
         let py = generate_mutants(
             "x.py",
             "def f(a, b):\n    return a + b\n",

@@ -997,7 +997,7 @@ mod tests {
         assert_eq!(result.killed, 1);
         assert_eq!(result.survived, 0);
         assert!((result.score - 1.0).abs() < f64::EPSILON);
-        assert!(!result.baseline_run_id.is_empty());
+        assert_ne!(result.baseline_run_id.len(), 0);
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

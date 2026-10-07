@@ -39,7 +39,7 @@ pub struct ChatRequest<'a> {
 /// Issue the POST and yield `Chunk`s as they arrive. Error responses
 /// are translated via [`map_http_error`] and surfaced as the first
 /// (and only) item on the stream.
-#[must_use]
+#[must_use = "the stream must be polled to send the request and receive chat completions"]
 pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
     let provider = req.provider;
     let endpoint = req.endpoint.to_string();

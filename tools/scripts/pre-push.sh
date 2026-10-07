@@ -50,13 +50,15 @@ pnpm --filter @testing-ide/shared run test || fail "shared unit tests failed"
 pnpm --filter @testing-ide/desktop run test:frontend || fail "frontend unit tests failed"
 ok   "unit tests passed"
 
-# 6. Rust clippy + unit tests, only if cargo is installed locally.
+# 6. Pinned Rust clippy + unit/repository tests, when Cargo is installed.
 if command -v cargo >/dev/null 2>&1; then
-  step "6/6  cargo clippy + cargo test --lib"
+  step "6/6  cargo clippy + library and capture repository tests"
   (
-    cd apps/desktop/src-tauri
-    cargo clippy --locked --all-targets --lib -- -D warnings
-    cargo test --locked --lib --quiet
+    cd apps/desktop/src-tauri &&
+    rustc --version &&
+    cargo clippy --locked --all-targets --lib -- -D warnings &&
+    cargo test --locked --lib --quiet &&
+    cargo test --locked --test git_change_service --quiet
   ) || fail "Rust checks failed"
   ok   "Rust checks passed"
 else

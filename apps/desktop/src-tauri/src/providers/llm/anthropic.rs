@@ -702,7 +702,7 @@ mod tests {
     fn parse_ping_event_yields_no_chunks() {
         let mut state = AnthropicStreamState::default();
         let chunks = parse_sse_event("data: {\"type\":\"ping\"}", &mut state).expect("parse");
-        assert!(chunks.is_empty());
+        assert_eq!(chunks.len(), 0);
     }
 
     #[test]

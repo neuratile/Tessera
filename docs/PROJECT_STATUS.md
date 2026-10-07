@@ -1,6 +1,6 @@
 # Project status
 
-Reviewed against the repository on 2026-09-07. “Implemented” means code is on
+Reviewed against the repository on 2026-10-06. “Implemented” means code is on
 the main development line, not that an installer is publicly released or every
 provider/model combination has been evaluated.
 
@@ -16,14 +16,16 @@ provider/model combination has been evaluated.
 | Quality | Flaky history, bounded test healing/history, JS/TS mutation scoring/improvement |
 | Export | Markdown/JSON, spreadsheet/tabular formats, Jira Cloud artifact push |
 | Optional API | Boards service in `apps/server`, separately checked in CI |
-| Review foundations | Staged-review contract and seeded checkout/clean-control fixture |
+| Review foundations | Staged-review contract, checkout/clean-control fixture, and read-only staged Git capture |
 
 ## Planned next
 
 The [review contract](../plan/versions/v2/AI_FIRST_REVIEW.md) defines staged
 index-versus-HEAD capture, bounded context, findings, immutable snapshots, and
-evidence states. Runtime capture, persistence/IPC, UI, and evaluation harness
-are not implemented. Fixture success is not a model evaluation score.
+evidence states. The Tauri-independent capture service reads pinned Git blobs;
+persistence/IPC, review UI, and the evaluation harness are not implemented.
+Capture retains raw source locally; model-facing redaction belongs to the later
+context step. Fixture success is not a model evaluation score.
 
 Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104) and the
 [delivery order](../plan/ROADMAP.md). Prove the desktop workflow before core,

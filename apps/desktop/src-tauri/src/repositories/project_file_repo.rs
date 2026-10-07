@@ -234,7 +234,7 @@ mod tests {
     async fn empty_batch_returns_empty_vec() {
         let (pool, path) = seed_pool().await;
         let ids = insert_batch(&pool, Vec::new()).await.expect("empty ok");
-        assert!(ids.is_empty());
+        assert_eq!(ids.len(), 0);
         pool.close().await;
         let _ = std::fs::remove_file(&path);
     }

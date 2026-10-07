@@ -497,7 +497,7 @@ mod tests {
         rt.block_on(async {
             let pool = init_pool_at(&tmp_db()).await.expect("pool");
             let result = insert_batch(&pool, Vec::new()).await.expect("ok");
-            assert!(result.is_empty());
+            assert_eq!(result.len(), 0);
         });
     }
 

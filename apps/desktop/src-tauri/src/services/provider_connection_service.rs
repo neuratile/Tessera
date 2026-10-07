@@ -472,7 +472,7 @@ mod tests {
 
         assert!(!result.ok);
         assert!(result.message.contains("API key"));
-        assert!(result.models.is_empty());
+        assert_eq!(result.models.len(), 0);
 
         pool.close().await;
         let _ = std::fs::remove_file(&path);

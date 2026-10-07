@@ -1,0 +1,3 @@
+# Git Bash and CI must read the same executable script bytes on Windows/Linux.
+*.sh text eol=lf
+.husky/* text eol=lf
