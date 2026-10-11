@@ -8,6 +8,12 @@ mod executable;
 mod hunks;
 mod manifest;
 mod policy;
+mod support;
+
+#[cfg(test)]
+pub(super) use support::support_paths;
+pub use support::SupportingCapture;
+pub(super) use support::{is_test, parse};
 
 use std::{path::Path, time::Duration};
 
@@ -117,6 +123,35 @@ pub async fn capture(root: &Path) -> AppResult<StagedChangeSet> {
     tokio::time::timeout(Duration::from_secs(60), capture_at(root))
         .await
         .map_err(|_| limit_error("Git capture timed out; start a new review"))?
+}
+
+/// Capture optional related index blobs against the exact HEAD/index identity
+/// of `snapshot`. Semantic paths are hints only, not trusted retrieval content.
+/// Maximum 20 supporting files; source/policy bytes share the 1 MiB ceiling.
+/// Rejected stale captures must be restarted, never silently refreshed.
+pub async fn capture_support(
+    root: &Path,
+    snapshot: &StagedChangeSet,
+    semantic_paths: &[String],
+) -> AppResult<SupportingCapture> {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let root = tokio::fs::canonicalize(root)
+            .await
+            .map_err(|_| invalid("Open a valid Git repository root"))?;
+        let executable = executable::resolve(&root).await?;
+        let git = Git::new(&root, executable.into_os_string());
+        if !git
+            .checked(&["rev-parse", "--show-prefix"], 4096)
+            .await?
+            .iter()
+            .all(|b| *b == b'\n' || *b == b'\r')
+        {
+            return Err(invalid("Open a Git repository root, not a nested folder"));
+        }
+        support::capture(&git, snapshot, semantic_paths).await
+    })
+    .await
+    .map_err(|_| limit_error("Git context capture timed out; start a new review"))?
 }
 
 async fn capture_at(root: &Path) -> AppResult<StagedChangeSet> {
