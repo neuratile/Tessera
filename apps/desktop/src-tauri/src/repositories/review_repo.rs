@@ -357,9 +357,10 @@ pub async fn link_artifact(
 }
 
 /// Append an evidence attempt without modifying a completed finding or earlier attempts.
-/// A failing process alone is never reproduction: the identified failed assertion must match an existing case.
+/// Legacy runs have no immutable execution-time snapshot/test binding. Until #112
+/// supplies that trusted binding, attempts may be inconclusive but never reproduced.
 /// # Errors
-/// Rejects unknown/foreign run bindings or insufficient reproduction evidence.
+/// Rejects unknown/foreign run bindings and all unbound reproduction claims.
 pub async fn link_run(
     pool: &SqlitePool,
     user_id: &str,
@@ -370,7 +371,7 @@ pub async fn link_run(
     let session = load(&mut tx, user_id, review_id).await?;
     ensure(
         session.status == ReviewStatus::Completed
-            && link.evidence_state != EvidenceState::Suspected,
+            && link.evidence_state == EvidenceState::Inconclusive,
     )?;
     let artifact: Option<(String,)> = sqlx::query_as("SELECT l.payload FROM review_artifact_links l JOIN review_findings f ON f.id=l.finding_id WHERE l.id=? AND f.review_id=?")
         .bind(link.artifact_link_id.to_string()).bind(review_id.to_string()).fetch_optional(&mut *tx).await?;
@@ -405,23 +406,6 @@ pub async fn link_run(
             && project_id == session.project_id.to_string()
             && matches!(status.as_str(), "passed" | "failed" | "error" | "cancelled"),
     )?;
-    if link.evidence_state == EvidenceState::Reproduced {
-        ensure(
-            status == "failed"
-                && !env.output_truncated
-                && link.assertion.as_deref().is_some_and(text)
-                && link.expected.as_deref().is_some_and(text)
-                && link.observed.as_deref().is_some_and(text),
-        )?;
-        let case: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM test_run_cases WHERE run_id=? AND name=? AND status='failed'",
-        )
-        .bind(link.run_id.to_string())
-        .bind(&link.assertion)
-        .fetch_one(&mut *tx)
-        .await?;
-        ensure(case.0 > 0)?;
-    }
     let now = Utc::now().to_rfc3339();
     sqlx::query("INSERT INTO review_run_links(id,artifact_link_id,run_id,payload,created_at,updated_at) VALUES (?,?,?,?,?,?)")
         .bind(link.attempt_id.to_string()).bind(link.artifact_link_id.to_string()).bind(link.run_id.to_string()).bind(encode(link)?).bind(&now).bind(&now).execute(&mut *tx).await?;

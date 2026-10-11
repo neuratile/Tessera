@@ -43,21 +43,33 @@ async fn queued(pool: &SqlitePool) -> ReviewSession {
 }
 
 async fn completed(pool: &SqlitePool) -> ReviewSession {
+    completed_from(
+        pool,
+        session_fixture(),
+        fixture()["sourceUtf8"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .await
+}
+
+async fn completed_from(
+    pool: &SqlitePool,
+    mut template: ReviewSession,
+    bytes: Vec<u8>,
+) -> ReviewSession {
     let mut review = queued(pool).await;
     review.status = ReviewStatus::Running;
     review = update(pool, USER, 0, review).await.unwrap();
-    let template = session_fixture();
-    let snapshot = template.snapshot.unwrap();
+    let snapshot = template.snapshot.take().unwrap();
     attach_snapshot(
         pool,
         USER,
         review.review_id,
         &snapshot,
-        &[fixture()["sourceUtf8"]
-            .as_str()
-            .unwrap()
-            .as_bytes()
-            .to_vec()],
+        std::slice::from_ref(&bytes),
     )
     .await
     .unwrap();
@@ -69,6 +81,51 @@ async fn completed(pool: &SqlitePool) -> ReviewSession {
     review.steps = template.steps;
     review.truncation = template.truncation;
     update(pool, USER, 1, review).await.unwrap()
+}
+
+fn mode_snapshot(count: usize) -> ReviewSnapshot {
+    let mut snapshot = session_fixture().snapshot.unwrap();
+    let source = snapshot.sources[0].clone();
+    snapshot.sources.clear();
+    snapshot.changes.clear();
+    for i in 0..count {
+        let path = format!("src/file{i}.ts");
+        let mut old = source.clone();
+        old.path = path.clone();
+        old.side = SourceSide::Old;
+        old.blob_id = format!("{i:040x}");
+        old.content_hash = format!("{i:064x}");
+        old.byte_length = 120 * 1024;
+        let mut new = old.clone();
+        new.side = SourceSide::New;
+        new.mode = "100755".into();
+        snapshot.sources.extend([old, new]);
+        snapshot.changes.push(ReviewChange {
+            change_kind: ReviewChangeKind::Modified,
+            old_path: Some(path.clone()),
+            new_path: Some(path),
+        });
+    }
+    snapshot
+}
+
+#[test]
+fn snapshot_budget_counts_distinct_content_and_rejects_conflicting_identities() {
+    mode_snapshot(5).validate().unwrap(); // 600 KiB distinct, 1200 KiB references.
+    assert!(mode_snapshot(9).validate().is_err()); // 1080 KiB distinct.
+    let base = mode_snapshot(5);
+    let mut size = base.clone();
+    size.sources[1].byte_length += 1;
+    assert!(size.validate().is_err());
+    let mut lines = base.clone();
+    lines.sources[1].line_count += 1;
+    assert!(lines.validate().is_err());
+    let mut blob = base.clone();
+    blob.sources[1].blob_id = "f".repeat(40);
+    assert!(blob.validate().is_err());
+    let mut content = base;
+    content.sources[1].content_hash = "f".repeat(64);
+    assert!(content.validate().is_err());
 }
 
 #[test]
@@ -372,6 +429,59 @@ async fn upgrade_old_database_is_additive_and_idempotent() {
 }
 
 #[tokio::test]
+async fn legacy_run_cannot_reproduce_a_different_snapshot() {
+    let pool = pool().await;
+    let review = completed(&pool).await;
+    let artifact: ReviewArtifactLink =
+        serde_json::from_value(fixture()["artifactLink"].clone()).unwrap();
+    let run: ReviewRunLink = serde_json::from_value(fixture()["runLink"].clone()).unwrap();
+    let stamp = &review.created_at;
+    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,1,?,?)")
+        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(fixture()["artifactContent"].as_str().unwrap()).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
+    link_artifact(&pool, USER, review.review_id, &artifact)
+        .await
+        .unwrap();
+    let env = &run.environment;
+    sqlx::query("INSERT INTO test_runs(id,artifact_id,project_id,status,runner,started_at,finished_at,created_at,updated_at) VALUES (?,?,?,'failed',?,?,?,?,?)")
+        .bind(run.run_id.to_string()).bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(&env.runner).bind(&env.started_at).bind(&env.finished_at).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO test_run_cases(id,run_id,name,status,created_at,updated_at) VALUES (?, ?,?,'failed',?,?)")
+        .bind(Uuid::new_v4().to_string()).bind(run.run_id.to_string()).bind(&run.assertion).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
+    assert!(link_run(&pool, USER, review.review_id, &run).await.is_err());
+
+    let bytes = b"export const price = 3;\n".to_vec();
+    let mut other = session_fixture();
+    let snapshot = other.snapshot.as_mut().unwrap();
+    snapshot.snapshot_id = Uuid::new_v4();
+    snapshot.sources[0].content_hash = digest(&bytes);
+    snapshot.sources[0].blob_id = "d".repeat(40);
+    other.findings[0].finding_id = Uuid::new_v4();
+    other.findings[0].sources[0].snapshot_id = snapshot.snapshot_id;
+    other.steps[0].step_id = Uuid::new_v4();
+    let other = completed_from(&pool, other, bytes).await;
+    let mut other_artifact = artifact.clone();
+    other_artifact.link_id = Uuid::new_v4();
+    other_artifact.finding_id = other.findings[0].finding_id;
+    other_artifact.snapshot_id = other.snapshot.as_ref().unwrap().snapshot_id;
+    link_artifact(&pool, USER, other.review_id, &other_artifact)
+        .await
+        .unwrap();
+    let mut wrong_snapshot = run;
+    wrong_snapshot.attempt_id = Uuid::new_v4();
+    wrong_snapshot.artifact_link_id = other_artifact.link_id;
+    assert!(link_run(&pool, USER, other.review_id, &wrong_snapshot)
+        .await
+        .is_err());
+    assert_eq!(
+        fetch_links(&pool, USER, review.review_id).await.unwrap().1,
+        Vec::<ReviewRunLink>::new()
+    );
+    assert_eq!(
+        fetch_links(&pool, USER, other.review_id).await.unwrap().1,
+        Vec::<ReviewRunLink>::new()
+    );
+}
+
+#[tokio::test]
 async fn evidence_bindings_reject_unknown_ids_and_keep_attempts_append_only() {
     let pool = pool().await;
     let review = completed(&pool).await;
@@ -420,8 +530,16 @@ async fn evidence_bindings_reject_unknown_ids_and_keep_attempts_append_only() {
     assert!(link_run(&pool, USER, review.review_id, &clipped)
         .await
         .is_err());
-    link_run(&pool, USER, review.review_id, &run).await.unwrap();
+    // Even a matching failed assertion is unbound to executed source/test bytes.
     assert!(link_run(&pool, USER, review.review_id, &run).await.is_err());
+    let mut failed_attempt = run.clone();
+    failed_attempt.evidence_state = EvidenceState::Inconclusive;
+    link_run(&pool, USER, review.review_id, &failed_attempt)
+        .await
+        .unwrap();
+    assert!(link_run(&pool, USER, review.review_id, &failed_attempt)
+        .await
+        .is_err());
     assert!(sqlx::query("UPDATE review_run_links SET payload='{}'")
         .execute(&pool)
         .await
@@ -437,7 +555,7 @@ async fn evidence_bindings_reject_unknown_ids_and_keep_attempts_append_only() {
         .unwrap();
     let (artifacts, attempts) = fetch_links(&pool, USER, review.review_id).await.unwrap();
     assert_eq!(artifacts, vec![artifact]);
-    assert_eq!(attempts, vec![run, inconclusive]);
+    assert_eq!(attempts, vec![failed_attempt, inconclusive]);
     assert_eq!(fetch(&pool, USER, review.review_id).await.unwrap(), review);
     // Project deletion can clean its own descendants despite provenance retention FKs.
     sqlx::query("DELETE FROM projects WHERE id=?")

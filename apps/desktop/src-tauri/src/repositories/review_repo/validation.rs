@@ -5,7 +5,7 @@ use super::types::{
 use crate::error::{AppError, AppResult};
 use chrono::DateTime;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn invalid() -> AppError {
     AppError::InvalidInput("Invalid review record".into())
@@ -67,6 +67,8 @@ impl ReviewSnapshot {
                     .map_or(true, |s| hash(s, object_len)),
         )?;
         let mut keys = HashSet::new();
+        let mut contents = HashMap::new();
+        let mut blob_hashes = HashMap::new();
         let mut size = 0_u64;
         for source in &self.sources {
             ensure(
@@ -78,7 +80,22 @@ impl ReviewSnapshot {
                     && source.line_count <= source.byte_length
                     && keys.insert((source.side as u8, source.path.as_str())),
             )?;
-            size += u64::from(source.byte_length);
+            // Old/new/path references may share bytes, but cannot disagree on identity.
+            let identity = (
+                source.blob_id.as_str(),
+                source.byte_length,
+                source.line_count,
+            );
+            if let Some(previous) = contents.insert(source.content_hash.as_str(), identity) {
+                ensure(previous == identity)?;
+            } else {
+                size += u64::from(source.byte_length);
+            }
+            if let Some(previous) =
+                blob_hashes.insert(source.blob_id.as_str(), source.content_hash.as_str())
+            {
+                ensure(previous == source.content_hash)?;
+            }
         }
         ensure(size <= 1024 * 1024 && self.changes.len() <= 50 && self.context_paths.len() <= 20)?;
         let mut used = HashSet::new();

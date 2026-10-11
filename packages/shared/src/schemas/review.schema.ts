@@ -43,9 +43,25 @@ export const ReviewSnapshotSchema = z.object({
     if (c.newPath !== undefined) used.push(`new:${c.newPath}`);
   });
   used.push(...s.contextPaths.map((p) => `new:${p}`));
+  const contents = new Map<string, typeof s.sources[number]>();
+  const blobHashes = new Map<string, string>();
+  let size = 0;
+  let inconsistentContent = false;
+  for (const blob of s.sources) {
+    const previous = contents.get(blob.contentHash);
+    if (previous === undefined) {
+      contents.set(blob.contentHash, blob);
+      size += blob.byteLength;
+    } else if (previous.blobId !== blob.blobId || previous.byteLength !== blob.byteLength || previous.lineCount !== blob.lineCount) {
+      inconsistentContent = true;
+    }
+    const previousHash = blobHashes.get(blob.blobId);
+    if (previousHash !== undefined && previousHash !== blob.contentHash) inconsistentContent = true;
+    blobHashes.set(blob.blobId, blob.contentHash);
+  }
   if ((s.baseCommit !== undefined && !hex.test(s.baseCommit)) || s.sources.some((b) => !hex.test(b.blobId)) ||
     keys.size !== s.sources.length || new Set(used).size !== used.length || used.length !== keys.size || used.some((k) => !keys.has(k)) ||
-    s.sources.reduce((sum, b) => sum + b.byteLength, 0) > 1024 * 1024) {
+    inconsistentContent || size > 1024 * 1024) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid snapshot manifest identity' });
   }
 });

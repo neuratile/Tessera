@@ -15,7 +15,31 @@ function mutate(path: string, value: unknown) {
   return candidate;
 }
 
+function modeSnapshot(count: number) {
+  const source = fixture.session.snapshot.sources[0]!;
+  return {
+    ...fixture.session.snapshot,
+    sources: Array.from({ length: count }, (_, i) => {
+      const blob = { ...source, path: `src/file${i}.ts`, blobId: i.toString(16).padStart(40, '0'),
+        contentHash: i.toString(16).padStart(64, '0'), byteLength: 120 * 1024 };
+      return [{ ...blob, side: 'old' as const }, { ...blob, side: 'new' as const, mode: '100755' }];
+    }).flat(),
+    changes: Array.from({ length: count }, (_, i) => ({ changeKind: 'modified', oldPath: `src/file${i}.ts`, newPath: `src/file${i}.ts` })),
+  };
+}
+
 describe('review Rust/Zod shared fixtures', () => {
+  it('counts distinct source content, not old/new mode-only references', () => {
+    expect(ReviewSnapshotSchema.safeParse(modeSnapshot(5)).success).toBe(true);
+    expect(ReviewSnapshotSchema.safeParse(modeSnapshot(9)).success).toBe(false);
+  });
+  it.each([
+    ['byteLength', 120 * 1024 + 1], ['lineCount', 2], ['blobId', 'f'.repeat(40)], ['contentHash', 'f'.repeat(64)],
+  ])('rejects repeated content with conflicting %s', (key, value) => {
+    const snapshot = modeSnapshot(5);
+    Object.assign(snapshot.sources[1]!, { [key]: value });
+    expect(ReviewSnapshotSchema.safeParse(snapshot).success).toBe(false);
+  });
   it('round-trips the same session and version/run bindings without source or keys', () => {
     expect(ReviewSessionSchema.parse(fixture.session)).toEqual(fixture.session);
     expect(ReviewArtifactLinkSchema.parse(fixture.artifactLink)).toEqual(fixture.artifactLink);
