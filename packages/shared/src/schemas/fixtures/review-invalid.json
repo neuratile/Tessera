@@ -1,0 +1,132 @@
+[
+  {
+    "path": "truncation.0.omittedCount",
+    "value": 0
+  },
+  {
+    "path": "truncation.0.resource",
+    "value": ""
+  },
+  {
+    "path": "status",
+    "value": "invalid"
+  },
+  {
+    "path": "reviewId",
+    "value": "bad-id"
+  },
+  {
+    "path": "scope",
+    "value": "worktree"
+  },
+  {
+    "path": "progress",
+    "value": 101
+  },
+  {
+    "path": "sequence",
+    "value": -1
+  },
+  {
+    "path": "provenance.provider",
+    "value": "unsupported"
+  },
+  {
+    "path": "provenance.apiKey",
+    "value": "secret"
+  },
+  {
+    "path": "provenance.model",
+    "value": null
+  },
+  {
+    "path": "snapshot.indexFingerprint",
+    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  {
+    "path": "snapshot.baseCommit",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "path": "snapshot.sources.0.path",
+    "value": "../escape.ts"
+  },
+  {
+    "path": "snapshot.sources.0.path",
+    "value": "C:/escape.ts"
+  },
+  {
+    "path": "snapshot.sources.0.path",
+    "value": "/escape.ts"
+  },
+  {
+    "path": "snapshot.sources.0.path",
+    "value": "src\\escape.ts"
+  },
+  {
+    "path": "snapshot.sources.0.path",
+    "value": "src//escape.ts"
+  },
+  {
+    "path": "snapshot.sources.0.contentHash",
+    "value": "abc"
+  },
+  {
+    "path": "snapshot.sources.0.mode",
+    "value": "120000"
+  },
+  {
+    "path": "snapshot.sources.0.blobId",
+    "value": "bad"
+  },
+  {
+    "path": "snapshot.sources.0.byteLength",
+    "value": 131073
+  },
+  {
+    "path": "findings.0.sources.0.lineStart",
+    "value": 0
+  },
+  {
+    "path": "findings.0.sources.0.lineEnd",
+    "value": 0
+  },
+  {
+    "path": "findings.0.sources.0.lineEnd",
+    "value": 2
+  },
+  {
+    "path": "findings.0.sources.0.snapshotId",
+    "value": "00000000-0000-4000-8000-000000000099"
+  },
+  {
+    "path": "findings.0.sources.0.path",
+    "value": "missing.ts"
+  },
+  {
+    "path": "findings.0.severity",
+    "value": "info"
+  },
+  {
+    "path": "findings.0.evidenceState",
+    "value": "passed"
+  },
+  {
+    "path": "steps.0.step",
+    "value": "tests"
+  },
+  {
+    "path": "outcome",
+    "value": "no_changes"
+  },
+  {
+    "path": "snapshot.contextPaths",
+    "value": [
+      "missing.ts"
+    ]
+  },
+  {
+    "path": "findings.0.sources.0.lineStart",
+    "value": null
+  }
+]

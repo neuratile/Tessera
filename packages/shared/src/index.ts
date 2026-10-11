@@ -37,4 +37,4 @@ export * from './schemas/user.schema';
 export * from './schemas/ollama-status.schema';
 export * from './schemas/board.schema';
 export * from './schemas/tracker.schema';
-
+export * from './schemas/review.schema';

@@ -51,6 +51,7 @@ async fn connect_pool_and_migrate(
         .await?;
 
     run_migrations(&pool).await?;
+    crate::repositories::review_repo::interrupt_active(&pool).await?;
 
     tracing::info!(database = %log_target, "database pool ready");
     Ok(pool)
