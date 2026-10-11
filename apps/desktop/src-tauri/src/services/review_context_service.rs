@@ -157,7 +157,12 @@ pub fn assemble(
     if hints.is_empty() {
         result.limitations.push("no_embeddings_exact_context_only");
     }
-    let metadata_source = append_changed(snapshot, &redact, &mut result)?;
+    let excluded: BTreeSet<_> = snapshot
+        .excluded_files
+        .iter()
+        .map(|e| e.path.as_str())
+        .collect();
+    let metadata_source = append_changed(snapshot, &excluded, &redact, &mut result)?;
     let required_count = count_tokens(&render(&result.excerpts));
     if required_count > available {
         return Err(limit(
@@ -165,31 +170,16 @@ pub fn assemble(
         ));
     }
     result.excerpts.extend(metadata_source);
-    for hint in hints {
-        let blob = snapshot
+    record_retrieval_status(snapshot, support, hints, &mut result);
+    // Defend the pure assembly seam even if a caller supplies excluded support.
+    let mut seen = excluded;
+    seen.extend(
+        snapshot
             .files
             .iter()
             .flat_map(|f| f.new.iter())
-            .chain(support.files.iter())
-            .find(|b| b.path == hint.path);
-        let reason = match blob {
-            Some(b) if b.content_hash == hint.content_hash => None,
-            Some(_) => Some("stale_retrieval_replaced"),
-            None => Some("stale_retrieval_unavailable"),
-        };
-        if let Some(reason) = reason {
-            result.omitted.push(ExcludedFile {
-                path: hint.path.clone(),
-                reason: reason.into(),
-            });
-        }
-    }
-    let mut seen: BTreeSet<_> = snapshot
-        .files
-        .iter()
-        .flat_map(|f| f.new.iter())
-        .map(|b| b.path.as_str())
-        .collect();
+            .map(|b| b.path.as_str()),
+    );
     for blob in &support.files {
         if !seen.insert(&blob.path) {
             continue;
@@ -224,6 +214,33 @@ pub fn assemble(
     }
     result.input_tokens = budget.fixed_prompt_tokens + count_tokens(&render(&result.excerpts));
     Ok(result)
+}
+
+fn record_retrieval_status(
+    snapshot: &StagedChangeSet,
+    support: &SupportingCapture,
+    hints: &[RetrievalHint],
+    result: &mut ReviewContext,
+) {
+    for hint in hints {
+        let blob = snapshot
+            .files
+            .iter()
+            .flat_map(|f| f.new.iter())
+            .chain(support.files.iter())
+            .find(|b| b.path == hint.path);
+        let reason = match blob {
+            Some(b) if b.content_hash == hint.content_hash => None,
+            Some(_) => Some("stale_retrieval_replaced"),
+            None => Some("stale_retrieval_unavailable"),
+        };
+        if let Some(reason) = reason {
+            result.omitted.push(ExcludedFile {
+                path: hint.path.clone(),
+                reason: reason.into(),
+            });
+        }
+    }
 }
 
 fn fit_prompt(

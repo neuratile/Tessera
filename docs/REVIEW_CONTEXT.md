@@ -40,6 +40,11 @@ semantic paths; ties are lexical. This intentionally does not resolve aliases,
 package imports, all reverse dependents, or transitive graphs. Missing related
 tests and the no-embedding path are explicit `limitations`, not completeness claims.
 
+Whole-change capture exclusions are final for that snapshot: a dependency excluded
+because either its base or staged side is unsafe, ignored, binary, or oversized
+cannot return as optional index evidence. Assembly also rejects reintroduction
+through caller-supplied support or contradictory changed entries.
+
 Cached retrieval is a path/hash hint, never prompt text. Exact index blobs are
 re-read. A hash mismatch is recorded as `stale_retrieval_replaced` and a missing blob as
 `stale_retrieval_unavailable`;

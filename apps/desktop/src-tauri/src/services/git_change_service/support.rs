@@ -178,11 +178,13 @@ pub(in crate::services) fn support_paths(
     index_paths: &[&str],
     semantic: &[String],
 ) -> AppResult<Vec<String>> {
+    // A changed file excluded on either side cannot return as index support.
     let changed: BTreeSet<_> = snapshot
         .files
         .iter()
         .flat_map(|f| f.new.iter())
         .map(|b| b.path.as_str())
+        .chain(snapshot.excluded_files.iter().map(|e| e.path.as_str()))
         .collect();
     let present: BTreeSet<_> = index_paths.iter().copied().collect();
     let mut ranked = BTreeMap::<String, u8>::new();

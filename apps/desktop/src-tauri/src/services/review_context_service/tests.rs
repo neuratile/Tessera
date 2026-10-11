@@ -612,6 +612,118 @@ async fn supporting_blob_and_total_source_ceilings_do_not_truncate_source() {
 }
 
 #[test]
+fn assembly_cannot_reintroduce_excluded_support_or_contradictory_changed_entries() {
+    let forbidden = "export const forbidden_source = 1;\n";
+    let mut changed_dep = snapshot("dep.js", forbidden);
+    let mut snapshot = snapshot("main.js", "import './dep.js';\nexport const main = 1;\n");
+    snapshot.excluded_files.push(ExcludedFile {
+        path: "dep.js".into(),
+        reason: "file_too_large".into(),
+    });
+    let dep = blob("dep.js", forbidden);
+    let hash = dep.content_hash.clone();
+    let support = support(&snapshot, vec![dep]);
+    let hints = [RetrievalHint {
+        path: "dep.js".into(),
+        content_hash: hash.clone(),
+    }];
+    for contradictory in [false, true] {
+        if contradictory {
+            snapshot.files.append(&mut changed_dep.files);
+        }
+        let context = assemble(
+            &snapshot,
+            &support,
+            &hints,
+            budget(),
+            |s| {
+                assert!(
+                    !s.contains("forbidden_source"),
+                    "excluded bytes reached redactor"
+                );
+                identity(s)
+            },
+            str::len,
+        )
+        .unwrap();
+        assert!(context.excerpts.iter().all(|e| e.path != "dep.js"));
+        assert!(!context.model_text().contains("forbidden_source"));
+        assert!(!context.permits("dep.js", Side::New, &hash, 1, 1));
+        assert!(context
+            .omitted
+            .iter()
+            .any(|e| e.path == "dep.js" && e.reason == "file_too_large"));
+    }
+}
+
+#[tokio::test]
+async fn old_side_excluded_dependencies_never_return_as_new_support() {
+    let cases = [
+        (
+            "file_too_large",
+            format!("// {}\n", "x".repeat(128 * 1024)),
+            false,
+        ),
+        ("binary", "\0binary base\n".into(), false),
+        ("ignored", "export const value = 1;\n".into(), true),
+    ];
+    for (reason, old, ignored) in cases {
+        let repo = Repo::new();
+        repo.write(
+            "main.js",
+            "import {value} from './dep.js';\nexport const main = value;\n",
+        );
+        repo.write("dep.js", &old);
+        if ignored {
+            repo.write(".ignore", "dep.js\n");
+        }
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "--quiet", "-m", "base with excluded dependency"]);
+        repo.write(
+            "main.js",
+            "import {value} from './dep.js';\nexport const main = value + 1;\n",
+        );
+        let new = "export const value = 2; // forbidden_dependency\n";
+        repo.write("dep.js", new);
+        repo.git(&["add", "main.js", "dep.js"]);
+        if ignored {
+            // Only the pinned base side remains ignored; the index permits dep.js.
+            repo.write(".ignore", "");
+            repo.git(&["add", ".ignore"]);
+        }
+        let snapshot = git_change_service::capture(&repo.0).await.unwrap();
+        assert!(
+            snapshot
+                .excluded_files
+                .iter()
+                .any(|e| e.path == "dep.js" && e.reason == reason),
+            "missing {reason} exclusion"
+        );
+        assert!(snapshot
+            .files
+            .iter()
+            .all(|f| f.new.as_ref().is_none_or(|b| b.path != "dep.js")));
+        let support = git_change_service::capture_support(&repo.0, &snapshot, &["dep.js".into()])
+            .await
+            .unwrap();
+        assert!(support.files.iter().all(|b| b.path != "dep.js"));
+        let hash = blob("dep.js", new).content_hash;
+        let hints = [RetrievalHint {
+            path: "dep.js".into(),
+            content_hash: hash.clone(),
+        }];
+        let context = assemble(&snapshot, &support, &hints, budget(), identity, str::len).unwrap();
+        assert!(context.excerpts.iter().all(|e| e.path != "dep.js"));
+        assert!(!context.model_text().contains("forbidden_dependency"));
+        assert!(!context.permits("dep.js", Side::New, &hash, 1, 1));
+        assert!(context
+            .omitted
+            .iter()
+            .any(|e| e.path == "dep.js" && e.reason == reason));
+    }
+}
+
+#[test]
 fn unchanged_mode_or_rename_source_is_optional_and_missing_retrieval_is_not_replaced() {
     let mut snapshot = snapshot("new.js", &format!("// {}\n", "x".repeat(9_000)));
     snapshot.files[0].hunks.clear();

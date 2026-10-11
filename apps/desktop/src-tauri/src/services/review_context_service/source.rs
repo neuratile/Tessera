@@ -2,6 +2,7 @@
 use super::{CapturedBlob, Excerpt, ExcludedFile, ReviewContext, Side, StagedChangeSet};
 use crate::error::{AppError, AppResult};
 use crate::services::git_change_service::parse;
+use std::collections::BTreeSet;
 
 pub(super) fn excerpt(
     b: &CapturedBlob,
@@ -90,11 +91,20 @@ pub(super) fn safe_source(
 /// Map required hunks/symbols; return optional metadata-only source separately.
 pub(super) fn append_changed(
     snapshot: &StagedChangeSet,
+    excluded: &BTreeSet<&str>,
     redact: &impl Fn(&str) -> Option<String>,
     result: &mut ReviewContext,
 ) -> AppResult<Vec<Excerpt>> {
     let mut metadata_source = vec![];
     for file in &snapshot.files {
+        if file
+            .old
+            .iter()
+            .chain(file.new.iter())
+            .any(|b| excluded.contains(b.path.as_str()))
+        {
+            continue;
+        }
         let mut excerpts = vec![];
         let mut unmappable = false;
         for (side, blob) in [
