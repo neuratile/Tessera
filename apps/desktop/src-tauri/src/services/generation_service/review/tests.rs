@@ -2,6 +2,7 @@ use super::*;
 use serde_json::json;
 mod input_tests;
 mod stream_tests;
+mod transport_tests;
 use crate::{
     providers::llm::{Chunk, ChunkStream, FinishReason, ProviderCapabilities, Usage},
     repositories::provider_config_repo::ProviderConfigUpsert,
@@ -191,7 +192,7 @@ async fn invoke(
     let calls = Arc::new(AtomicUsize::new(0));
     let mock = Mock {
         name: if name == "ollama-cloud" {
-            "ollama"
+            "openai"
         } else {
             name
         },

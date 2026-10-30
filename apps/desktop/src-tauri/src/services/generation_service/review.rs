@@ -11,7 +11,7 @@ use crate::{
     prompts::review_v1,
     providers::{
         factory::{self, ProviderConfig},
-        llm::{GenerateRequest, LlmError, LlmProvider, Message},
+        llm::{GenerateRequest, LlmError, LlmProvider, Message, StreamPolicy},
     },
     repositories::{
         provider_config_repo,
@@ -117,18 +117,21 @@ async fn generate_once(
     if output_cap == 0 {
         return Err(AppError::LimitExceeded("Model has no output budget".into()));
     }
-    let mut stream = llm.stream(GenerateRequest {
-        model: request.model.into(),
-        messages,
-        tools: if capabilities.supports_tools {
-            vec![schema.clone()]
-        } else {
-            vec![]
+    let mut stream = llm.stream_with_policy(
+        GenerateRequest {
+            model: request.model.into(),
+            messages,
+            tools: if capabilities.supports_tools {
+                vec![schema.clone()]
+            } else {
+                vec![]
+            },
+            temperature: Some(0.0),
+            max_tokens: Some(output_cap),
+            stop_sequences: vec![],
         },
-        temperature: Some(0.0),
-        max_tokens: Some(output_cap),
-        stop_sequences: vec![],
-    });
+        StreamPolicy::SingleAttempt,
+    );
     let mut collector = output::Collector::default();
     while let Some(chunk) = stream.next().await {
         collector.push(
@@ -200,9 +203,10 @@ async fn pin_provider(
     }
     let config = provider_config_service::build_provider_config(crypto, &row)?;
     let llm = build(&config).map_err(|e| output::safe_provider_error(&e))?;
-    // ProviderKind keeps ollama-cloud configuration identity even if its runtime is ollama.
+    // Ollama Cloud uses the authenticated OpenAI-compatible runtime, while
+    // provenance retains the explicitly selected ollama-cloud identity.
     let runtime = if row.provider == "ollama-cloud" {
-        "ollama"
+        "openai"
     } else {
         row.provider.as_str()
     };

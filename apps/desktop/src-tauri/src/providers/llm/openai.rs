@@ -15,7 +15,7 @@ use reqwest::Client;
 use super::error::LlmError;
 use super::openai_compat;
 use super::types::{GenerateRequest, ProviderCapabilities};
-use super::{ChunkStream, LlmProvider};
+use super::{ChunkStream, LlmProvider, StreamPolicy};
 
 /// Provider name used in `LlmError::provider` and logs.
 pub const PROVIDER_NAME: &str = "openai";
@@ -76,12 +76,11 @@ impl OpenAiProvider {
         let mut header_bytes = Vec::with_capacity(7 + api_key.len());
         header_bytes.extend_from_slice(b"Bearer ");
         header_bytes.extend_from_slice(api_key.as_bytes());
-        let mut auth_value = HeaderValue::from_bytes(&header_bytes).map_err(|_| {
-            LlmError::AuthFailed {
+        let mut auth_value =
+            HeaderValue::from_bytes(&header_bytes).map_err(|_| LlmError::AuthFailed {
                 provider: PROVIDER_NAME,
                 message: "API key contains invalid characters for an HTTP header".into(),
-            }
-        })?;
+            })?;
         // Always mark the header sensitive so HTTP debug logs do not
         // leak the key (rules.md §9 — never log secrets).
         auth_value.set_sensitive(true);
@@ -136,6 +135,10 @@ impl LlmProvider for OpenAiProvider {
     }
 
     fn stream(&self, request: GenerateRequest) -> ChunkStream {
+        self.stream_with_policy(request, StreamPolicy::default())
+    }
+
+    fn stream_with_policy(&self, request: GenerateRequest, policy: StreamPolicy) -> ChunkStream {
         let body = openai_compat::build_request_payload(&request, true);
         let endpoint = self.endpoint();
         openai_compat::stream_chat_completions(openai_compat::ChatRequest {
@@ -144,6 +147,7 @@ impl LlmProvider for OpenAiProvider {
             headers: self.auth_headers(),
             body,
             client: &self.client,
+            policy,
         })
     }
 }

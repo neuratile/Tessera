@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use super::error::{describe_error_chain, LlmError};
 use super::types::{Chunk, FinishReason, GenerateRequest, Message, Role, ToolSchema, Usage};
-use super::ChunkStream;
+use super::{transport, ChunkStream, StreamPolicy};
 
 /// Configuration handed to [`stream_chat_completions`] by each
 /// concrete provider. `extra_headers` covers things like `OpenRouter`'s
@@ -34,6 +34,7 @@ pub struct ChatRequest<'a> {
     pub headers: HeaderMap,
     pub body: serde_json::Value,
     pub client: &'a Client,
+    pub policy: StreamPolicy,
 }
 
 /// Issue the POST and yield `Chunk`s as they arrive. Error responses
@@ -46,6 +47,7 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
     let headers = req.headers;
     let mut body = req.body.clone();
     let client = req.client.clone();
+    let policy = req.policy;
 
     let s = try_stream! {
         let mut response = client
@@ -59,9 +61,9 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
         let mut status = response.status();
 
         // Check if the request failed and contains tool specifications that we can strip.
-        if !status.is_success() && body.get("tools").is_some() {
+        if !status.is_success() && body.get("tools").is_some() && policy == StreamPolicy::AllowToolFallback {
             let headers_in = response.headers().clone();
-            let text = response.text().await.unwrap_or_default();
+            let text = transport::error_body(response, provider).await?;
             let text_lower = text.to_lowercase();
 
             // If the error suggests that the model or endpoint doesn't support tools/functions
@@ -73,8 +75,8 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
             {
                 tracing::warn!(
                     provider = %provider,
-                    "Model failed with tool error: {}. Retrying without tool use.",
-                    text
+                    status = status.as_u16(),
+                    "Model rejected tools; retrying without tool use"
                 );
 
                 // Strip tools and tool_choice; without a tool schema to
@@ -109,48 +111,37 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
         let body_stream = if status.is_success() {
             response.bytes_stream()
         } else {
-            let text = response.text().await.unwrap_or_default();
+            let text = transport::error_body(response, provider).await?;
             Err(map_http_error(provider, status, &headers_in, &text))?;
             unreachable!("yielded error above")
         };
 
         let mut byte_stream = body_stream;
-        let mut buffer = String::new();
-
+        let mut buffer = transport::EventBuffer::default();
+        let mut state = OpenAiStreamState::default();
         while let Some(bytes) = byte_stream.next().await {
             let bytes = bytes.map_err(|e| LlmError::StreamInterrupted {
                 provider,
-                // `e.to_string()` alone is just reqwest's opaque
-                // "error decoding response body"; keep the source chain
-                // so the real cause (idle/read timeout, upstream
-                // connection drop, …) is visible.
                 message: describe_error_chain(&e),
             })?;
-
-            let text = std::str::from_utf8(&bytes).map_err(|e| LlmError::StreamInterrupted {
-                provider,
-                message: format!("non-utf8 stream bytes: {e}"),
-            })?;
-            buffer.push_str(text);
-
-            while let Some((event, rest)) = split_sse_event(&buffer) {
-                let event_owned = event.to_string();
-                buffer = rest.to_string();
-                for chunk in parse_sse_event(provider, &event_owned)? {
-                    yield chunk;
+            for byte in bytes {
+                if let Some(event) = buffer.push(byte, provider)? {
+                    for chunk in parse_sse_event_with_state(provider, &event, &mut state)? {
+                        yield chunk;
+                    }
                 }
             }
         }
-
-        // The connection closed. Some servers omit the trailing `\n\n`
-        // on the last event, leaving a complete-but-unterminated payload
-        // in the buffer. Parse it so callers do not silently lose the
-        // final delta or `[DONE]` sentinel.
-        let trailing = buffer.trim();
-        if !trailing.is_empty() {
-            for chunk in parse_sse_event(provider, trailing)? {
+        let trailing = buffer.take(provider)?;
+        if !trailing.trim().is_empty() {
+            for chunk in parse_sse_event_with_state(provider, &trailing, &mut state)? {
                 yield chunk;
             }
+        }
+        // One terminal chunk after trailing usage. Never let [DONE] overwrite
+        // a cutoff reason, or fabricate success on an incomplete EOF.
+        if let Some(chunk) = state.finish() {
+            yield chunk;
         }
     };
 
@@ -298,6 +289,7 @@ pub fn map_http_error(
 
 /// Split off the first complete SSE event (terminated by `\n\n` or
 /// `\r\n\r\n`) from `buffer`. Returns `(event, rest)` if found.
+#[cfg(test)]
 fn split_sse_event(buffer: &str) -> Option<(&str, &str)> {
     if let Some(idx) = buffer.find("\n\n") {
         let (event, rest) = buffer.split_at(idx);
@@ -311,7 +303,11 @@ fn split_sse_event(buffer: &str) -> Option<(&str, &str)> {
 }
 
 /// Parse one complete SSE event into zero or more `Chunk`s.
-fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, LlmError> {
+fn parse_sse_event_with_state(
+    provider: &'static str,
+    event: &str,
+    state: &mut OpenAiStreamState,
+) -> Result<Vec<Chunk>, LlmError> {
     let mut out = Vec::new();
     for line in event.lines() {
         let line = line.trim();
@@ -322,11 +318,14 @@ fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, Ll
             continue;
         };
         let payload = payload.trim();
-        if payload == "[DONE]" {
-            out.push(Chunk::Done {
-                usage: Usage::default(),
-                finish_reason: FinishReason::Stop,
+        if state.sentinel {
+            return Err(LlmError::InvalidResponse {
+                provider,
+                message: "Data after stream completion".into(),
             });
+        }
+        if payload == "[DONE]" {
+            state.sentinel = true;
             continue;
         }
         let parsed: OpenAiStreamChunk =
@@ -343,7 +342,7 @@ fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, Ll
         if let Some(err) = &parsed.error {
             return Err(stream_error_to_llm(provider, err));
         }
-        for chunk in openai_chunk_to_chunks(parsed) {
+        for chunk in openai_chunk_to_chunks(provider, parsed, state)? {
             out.push(chunk);
         }
     }
@@ -359,10 +358,7 @@ fn stream_error_to_llm(provider: &'static str, err: &OpenAiStreamError) -> LlmEr
         .clone()
         .unwrap_or_else(|| "upstream provider error".to_string());
     let code_num = err.code.as_ref().and_then(serde_json::Value::as_u64);
-    let error_type = err
-        .metadata
-        .as_ref()
-        .and_then(|m| m.error_type.as_deref());
+    let error_type = err.metadata.as_ref().and_then(|m| m.error_type.as_deref());
     let is_timeout = matches!(code_num, Some(504 | 408 | 524))
         || error_type == Some("timeout")
         || message.to_lowercase().contains("timeout")
@@ -423,6 +419,8 @@ struct OpenAiStreamErrorMeta {
 #[derive(Debug, Deserialize)]
 struct OpenAiStreamChoice {
     #[serde(default)]
+    index: u32,
+    #[serde(default)]
     delta: OpenAiDelta,
     #[serde(default)]
     finish_reason: Option<String>,
@@ -462,19 +460,69 @@ struct OpenAiUsage {
     completion_tokens: u32,
 }
 
-fn openai_chunk_to_chunks(chunk: OpenAiStreamChunk) -> Vec<Chunk> {
+#[derive(Default)]
+struct OpenAiStreamState {
+    tool_ids: std::collections::HashMap<(u32, u32), String>,
+    usage: Usage,
+    finish_reason: Option<FinishReason>,
+    sentinel: bool,
+}
+impl OpenAiStreamState {
+    fn finish(self) -> Option<Chunk> {
+        self.finish_reason
+            .or(self.sentinel.then_some(FinishReason::Stop))
+            .map(|finish_reason| Chunk::Done {
+                usage: self.usage,
+                finish_reason,
+            })
+    }
+}
+
+fn openai_chunk_to_chunks(
+    provider: &'static str,
+    chunk: OpenAiStreamChunk,
+    state: &mut OpenAiStreamState,
+) -> Result<Vec<Chunk>, LlmError> {
     let mut out = Vec::new();
+    if let Some(usage) = chunk.usage {
+        state.usage = Usage {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: usage.completion_tokens,
+        };
+    }
     for choice in chunk.choices {
+        if state.finish_reason.is_some()
+            && (choice.delta.content.as_ref().is_some_and(|s| !s.is_empty())
+                || !choice.delta.tool_calls.is_empty()
+                || choice.finish_reason.is_some())
+        {
+            return Err(LlmError::InvalidResponse {
+                provider,
+                message: "Data after finish reason".into(),
+            });
+        }
         if let Some(text) = choice.delta.content {
             if !text.is_empty() {
                 out.push(Chunk::TextDelta(text));
             }
         }
         for call in choice.delta.tool_calls {
-            let id = call
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("tool_{}", call.index));
+            let key = (choice.index, call.index);
+            let id = match (state.tool_ids.get(&key), call.id) {
+                (Some(known), Some(id)) if known != &id => {
+                    return Err(LlmError::InvalidResponse {
+                        provider,
+                        message: "Tool call identity changed".into(),
+                    })
+                }
+                (Some(known), _) => known.clone(),
+                (None, supplied) => {
+                    let id =
+                        supplied.unwrap_or_else(|| format!("tool_{}_{}", choice.index, call.index));
+                    state.tool_ids.insert(key, id.clone());
+                    id
+                }
+            };
             if let Some(function) = call.function {
                 if let Some(name) = function.name {
                     out.push(Chunk::ToolCallStart {
@@ -493,17 +541,10 @@ fn openai_chunk_to_chunks(chunk: OpenAiStreamChunk) -> Vec<Chunk> {
             }
         }
         if let Some(reason) = choice.finish_reason {
-            let usage = chunk.usage.as_ref().map_or(Usage::default(), |u| Usage {
-                input_tokens: u.prompt_tokens,
-                output_tokens: u.completion_tokens,
-            });
-            out.push(Chunk::Done {
-                usage,
-                finish_reason: parse_finish_reason(&reason),
-            });
+            state.finish_reason = Some(parse_finish_reason(&reason));
         }
     }
-    out
+    Ok(out)
 }
 
 fn parse_finish_reason(raw: &str) -> FinishReason {
@@ -514,6 +555,14 @@ fn parse_finish_reason(raw: &str) -> FinishReason {
         "content_filter" => FinishReason::ContentFilter,
         _ => FinishReason::Other,
     }
+}
+
+#[cfg(test)]
+fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, LlmError> {
+    let mut state = OpenAiStreamState::default();
+    let mut chunks = parse_sse_event_with_state(provider, event, &mut state)?;
+    chunks.extend(state.finish());
+    Ok(chunks)
 }
 
 #[cfg(test)]
@@ -825,6 +874,7 @@ mod tests {
             headers,
             body,
             client: &client,
+            policy: StreamPolicy::AllowToolFallback,
         });
 
         let mut text = String::new();

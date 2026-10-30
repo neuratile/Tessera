@@ -14,7 +14,7 @@ use reqwest::Client;
 use super::error::LlmError;
 use super::openai_compat;
 use super::types::{GenerateRequest, ProviderCapabilities};
-use super::{ChunkStream, LlmProvider};
+use super::{ChunkStream, LlmProvider, StreamPolicy};
 use crate::utils::provider_base_url::normalize_ollama_base_url;
 
 /// Provider name used in `LlmError::provider` and logs.
@@ -95,6 +95,10 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn stream(&self, request: GenerateRequest) -> ChunkStream {
+        self.stream_with_policy(request, StreamPolicy::default())
+    }
+
+    fn stream_with_policy(&self, request: GenerateRequest, policy: StreamPolicy) -> ChunkStream {
         let body = openai_compat::build_request_payload(&request, true);
         let endpoint = self.endpoint();
         openai_compat::stream_chat_completions(openai_compat::ChatRequest {
@@ -103,6 +107,7 @@ impl LlmProvider for OllamaProvider {
             headers: HeaderMap::new(),
             body,
             client: &self.client,
+            policy,
         })
     }
 }

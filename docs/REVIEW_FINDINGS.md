@@ -31,6 +31,18 @@ successful terminal stream completion. Cancellation drops the stream; a
 120-second deadline bounds the entire call. Provider errors retain existing
 codes and recovery hints, with raw bodies/endpoints removed.
 
+Reviews select `StreamPolicy::SingleAttempt` through the existing provider
+trait. The default `stream` path retains artifact generation's tool-to-JSON
+compatibility fallback; its warning contains only provider/status, never the
+response body. Ollama Cloud retains `ollama-cloud` provenance while using the
+factory's authenticated `openai` runtime. The compatible SSE transport maintains
+tool IDs across indexed fragments and emits one completion after trailing usage,
+preserving cutoff reasons. Both SSE wire formats bound each event to 128 KiB
+and HTTP error bodies to 16 KiB before appending bytes; oversized events fail,
+while oversized error bodies retain HTTP status classification using a bounded
+prefix. Credential declarations with comments outside quoted values are excluded
+because comments can conceal multiline continuations.
+
 The returned `ReviewGenerationOutcome` carries findings, exact configuration /
 provider / model / prompt provenance, available usage, final `excluded_files`,
 and `truncation`. **#110 must persist all of these before emitting completion**:

@@ -25,6 +25,7 @@ use futures::Stream;
 
 pub mod error;
 pub mod openai_compat;
+mod transport;
 pub mod types;
 
 pub mod anthropic;
@@ -42,6 +43,16 @@ pub use types::{
 /// Boxed stream type returned by `LlmProvider::stream`. See ADR-0003 for
 /// the rationale (trait-object dispatch requires a concrete return type).
 pub type ChunkStream = Pin<Box<dyn Stream<Item = Result<Chunk, LlmError>> + Send>>;
+
+/// Whether a provider may retry a rejected tool request as text-only JSON.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum StreamPolicy {
+    /// Preserve artifact generation's compatibility fallback.
+    #[default]
+    AllowToolFallback,
+    /// Send exactly one model request, including on tool capability errors.
+    SingleAttempt,
+}
 
 /// Provider-agnostic LLM interface. All concrete providers (Ollama,
 /// `OpenAI`, `OpenRouter`, Anthropic, Gemini) implement this trait.
@@ -139,6 +150,12 @@ pub trait LlmProvider: Send + Sync {
     /// chunks follow it. Errors mid-stream surface as `Err(LlmError)`
     /// items and end the stream.
     fn stream(&self, request: GenerateRequest) -> ChunkStream;
+
+    /// Stream with an explicit attempt policy. Providers with a compatibility
+    /// retry must override this method and honor `SingleAttempt`.
+    fn stream_with_policy(&self, request: GenerateRequest, _policy: StreamPolicy) -> ChunkStream {
+        self.stream(request)
+    }
 }
 
 /// Heuristic token counter shared by every provider until per-provider
