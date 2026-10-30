@@ -291,6 +291,21 @@ fn credential_continuations_never_reach_final_model_context() {
                 "function connect(password:",
                 "string =\n'opaque-credential-value'\n) {}",
             ),
+            ("settings['token']", "= 'opaque-credential-value';"),
+            ("settings['token'] //;", "= 'opaque-credential-value';"),
+            (
+                "/* details */ settings['token']",
+                "= 'opaque-credential-value';",
+            ),
+            (
+                "class Credentials {\n #token",
+                "= 'opaque-credential-value';\n}",
+            ),
+            (
+                "settings['token']",
+                "// details\n/* parts */ = 'opaque-credential-value';",
+            ),
+            ("settings[\n 'token'\n]", "= 'opaque-credential-value';"),
         ] {
             let (capture, mut support, mut manifest) = fixture();
             let raw = format!("{declaration}\n{continuation}\n").replace('\n', newline);

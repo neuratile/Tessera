@@ -8,7 +8,8 @@
 pub fn redact_source(source: &str) -> Option<String> {
     let mut pem: Option<String> = None;
     let mut result = String::with_capacity(source.len());
-    for raw_line in source.split_inclusive('\n') {
+    let mut lines = source.split_inclusive('\n');
+    while let Some(raw_line) = lines.next() {
         let line = redact_http_userinfo(raw_line);
         let lower = line.to_ascii_lowercase();
         if let Some((_, rest)) = lower.split_once("-----begin ") {
@@ -63,7 +64,7 @@ pub fn redact_source(source: &str) -> Option<String> {
                 })
             });
         if sensitive {
-            if pem.is_none() && ambiguous_value(&line) {
+            if pem.is_none() && (ambiguous_value(&line) || later_assignment(lines.clone())) {
                 return None;
             }
             // Mask characters, not terminators; no source coordinates are shifted.
@@ -82,6 +83,67 @@ pub fn redact_source(source: &str) -> Option<String> {
         }
     }
     pem.is_none().then_some(result)
+}
+
+fn later_assignment<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
+    let mut block_comment = false;
+    for (index, raw) in lines.enumerate() {
+        // ponytail: bound trivia scanning to 64 lines; omit longer uncertain
+        // continuations instead of introducing a cross-language parser.
+        if index == 64 {
+            return true;
+        }
+        let mut rest = trim_continuation(raw);
+        loop {
+            if block_comment {
+                let Some((head, tail)) = rest.split_once("*/") else {
+                    if rest.contains("/*") {
+                        return true;
+                    }
+                    break;
+                };
+                if head.contains("/*") {
+                    // Nested block comments differ across languages; exclude
+                    // uncertain source rather than mistake an inner close.
+                    return true;
+                }
+                rest = tail;
+                block_comment = false;
+            }
+            rest = trim_continuation(trim_continuation(rest).trim_start_matches([']', ')']));
+            if rest.is_empty() {
+                break;
+            }
+            if rest.starts_with("//") || rest.starts_with('#') {
+                // JS line comments can end before LF at CR, U+2028 or U+2029.
+                if let Some((_, tail)) = rest.split_once(['\r', '\u{2028}', '\u{2029}']) {
+                    rest = tail;
+                    continue;
+                }
+                break;
+            }
+            if let Some(tail) = rest.strip_prefix("/*") {
+                rest = tail;
+                block_comment = true;
+                continue;
+            }
+            let Some((operator, value)) = rest.split_once('=') else {
+                return false;
+            };
+            return [
+                "", "+", "-", "*", "/", "%", "**", "&&", "||", "??", "<<", ">>", ">>>", "&", "|",
+                "^",
+            ]
+            .contains(&operator.trim())
+                && !value.starts_with(['=', '>']);
+        }
+    }
+    block_comment
+}
+
+fn trim_continuation(text: &str) -> &str {
+    // ECMAScript also accepts BOM as whitespace, beyond Rust's White_Space set.
+    text.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
 
 fn ambiguous_value(line: &str) -> bool {
@@ -443,5 +505,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn excludes_split_computed_assignments_across_trivia_and_closing_brackets() {
+        for newline in ["\n", "\r\n"] {
+            for raw in [
+                "settings['token']\n= 'opaque-credential-value';\n",
+                "settings['token'] //;\n= 'opaque-credential-value';\n",
+                "settings['token'] //{\n= 'opaque-credential-value';\n",
+                "settings['token']\n \u{feff}= 'opaque-credential-value';\n",
+                "settings['token']\n // details\u{2028}= 'opaque-credential-value';\n",
+                "settings['token']\n // details\u{2029}= 'opaque-credential-value';\n",
+                "settings['token']\n // details\r= 'opaque-credential-value';\n",
+                "// details\u{2028}settings['token']\n= 'opaque-credential-value';\n",
+                "/* details */ settings['token']\n= 'opaque-credential-value';\n",
+                "class Credentials {\n #token\n = 'opaque-credential-value';\n}\n",
+                "*access_token\n = \"opaque-credential-value\";\n",
+                "settings['token']\n // parts\n /* details */ = 'opaque-credential-value';\n",
+                "settings['token']\n /* multiple\n lines */ = 'opaque-credential-value';\n",
+                "settings[\"token\"]\n /* outer /* inner */ outer */ = \"opaque-credential-value\";\n",
+                "settings[\n 'token'\n ]\n= 'opaque-credential-value';\n",
+                "settings['token']\n??= 'opaque-credential-value';\n",
+            ] {
+                assert!(
+                    redact_source(&raw.replace('\n', newline)).is_none(),
+                    "{raw}"
+                );
+            }
+        }
+        let long = format!(
+            "settings['token']\n{}= 'opaque-credential-value';\n",
+            "// parts\n".repeat(65)
+        );
+        assert!(redact_source(&long).is_none());
+        assert!(redact_source(
+            "function verify_password(password) {\n // details\n return true;\n}\n"
+        )
+        .is_some());
     }
 }
