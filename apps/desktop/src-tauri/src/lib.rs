@@ -63,9 +63,12 @@ pub fn run() {
             let db_path = db::resolve_app_db_path(app.handle(), &cfg_for_db_path)
                 .map_err(|e| e.to_string())?;
             tracing::info!(db_path = %db_path.display(), "initializing database");
-            let pool = tauri::async_runtime::block_on(db::init_pool_at(&db_path))
+            let database = tauri::async_runtime::block_on(db::AppDatabase::open(&db_path))
                 .map_err(|e| e.to_string())?;
-            app.manage(pool);
+            app.manage(database.pool().clone());
+            // Keep exclusive ownership for the entire application lifetime,
+            // including workers using clones of the managed pool.
+            app.manage(database);
 
             let crypto_key =
                 utils::crypto::CryptoKey::derive_from_secret(&cfg_for_db_path.jwt_secret);
@@ -164,7 +167,6 @@ pub fn run() {
             commands::trackers::bulk_push_to_tracker,
             commands::trackers::refresh_tracker_link_status,
             commands::trackers::list_external_links,
-
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Tauri application");

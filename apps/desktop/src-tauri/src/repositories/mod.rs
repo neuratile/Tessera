@@ -39,8 +39,8 @@ pub mod mutation_check_repo;
 pub mod project_file_repo;
 pub mod project_repo;
 pub mod provider_config_repo;
+pub mod review_repo;
 pub mod test_case_result_repo;
 pub mod test_run_repo;
 pub mod tracker_config_repo;
 pub mod user_repo;
-

@@ -26,7 +26,9 @@ use tauri::{AppHandle, Manager, Runtime};
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 
+mod app_database;
 pub mod models;
+pub use app_database::AppDatabase;
 
 /// Default pool size. Desktop workload is low-concurrency (one user, a few
 /// background workers); five connections covers analysis + generation +
@@ -72,6 +74,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> AppResult<()> {
 
 /// Build a `SQLite` pool from the configured database URL, creating the file
 /// if necessary and applying all pending migrations.
+/// Does not recover reviews; desktop startup uses [`AppDatabase`] ownership.
 ///
 /// Sets pragmas for desktop usage:
 ///   * `journal_mode = WAL` — concurrent readers + single writer
@@ -95,6 +98,7 @@ pub async fn init_pool(database_url: &str) -> AppResult<SqlitePool> {
 
 /// Build a pool against a path on disk. Uses sqlx file options (not a URI string)
 /// so paths with spaces, Unicode, and Windows drive letters stay correct and safe.
+/// Does not recover reviews; desktop startup uses [`AppDatabase`] ownership.
 ///
 /// # Errors
 ///

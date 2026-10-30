@@ -323,13 +323,11 @@ fn guard_non_empty_payload(
     data: &JsonValue,
     model: &str,
 ) -> AppResult<()> {
-    // True when the array is absent OR present-but-empty. Phrased via
-    // `is_some_and` (MSRV 1.81 — `Option::is_none_or` is 1.82).
+    // True when the array is absent OR present-but-empty.
     let empty_array = |key: &str| {
-        !data
-            .get(key)
+        data.get(key)
             .and_then(JsonValue::as_array)
-            .is_some_and(|a| !a.is_empty())
+            .is_none_or(Vec::is_empty)
     };
     let noun = match kind {
         ArtifactType::TestCases if empty_array("cases") => "test cases",

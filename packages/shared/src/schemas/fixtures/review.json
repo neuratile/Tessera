@@ -1,0 +1,119 @@
+{
+  "session": {
+    "reviewId": "00000000-0000-4000-8000-000000000001",
+    "projectId": "00000000-0000-4000-8000-000000000002",
+    "scope": "staged",
+    "status": "completed",
+    "sequence": 2,
+    "progress": 100,
+    "provenance": {
+      "providerConfigId": "00000000-0000-4000-8000-000000000004",
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "promptVersion": "review-findings-v1",
+      "inputTokens": 42,
+      "outputTokens": 17
+    },
+    "createdAt": "2026-10-11T00:00:00Z",
+    "updatedAt": "2026-10-11T00:00:00Z",
+    "outcome": "reviewed",
+    "truncation": [{ "resource": "context", "reason": "context_limit", "omittedCount": 1 }],
+    "snapshot": {
+      "snapshotId": "00000000-0000-4000-8000-000000000003",
+      "gitObjectFormat": "sha1",
+      "baseCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "indexFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sources": [
+        {
+          "path": "src/price.ts",
+          "side": "new",
+          "blobId": "cccccccccccccccccccccccccccccccccccccccc",
+          "mode": "100644",
+          "contentHash": "d1ef367918422a895708b41a48748bddd386d960422cd3e9a2297d83ca028740",
+          "byteLength": 24,
+          "lineCount": 1
+        }
+      ],
+      "changes": [
+        {
+          "changeKind": "added",
+          "newPath": "src/price.ts"
+        }
+      ],
+      "contextPaths": [],
+      "exclusions": [
+        {
+          "path": ".env",
+          "reason": "sensitive_path"
+        }
+      ]
+    },
+    "steps": [
+      {
+        "stepId": "00000000-0000-4000-8000-000000000006",
+        "step": "findings",
+        "status": "completed",
+        "progress": 100,
+        "createdAt": "2026-10-11T00:00:00Z"
+      }
+    ],
+    "findings": [
+      {
+        "findingId": "00000000-0000-4000-8000-000000000005",
+        "summary": "Price is incorrect",
+        "explanation": "The expected price is two.",
+        "expectedBehavior": "Return two",
+        "severity": "major",
+        "sources": [
+          {
+            "snapshotId": "00000000-0000-4000-8000-000000000003",
+            "path": "src/price.ts",
+            "side": "new",
+            "lineStart": 1,
+            "lineEnd": 1
+          }
+        ],
+        "evidenceState": "suspected"
+      }
+    ]
+  },
+  "artifactLink": {
+    "linkId": "00000000-0000-4000-8000-000000000007",
+    "findingId": "00000000-0000-4000-8000-000000000005",
+    "snapshotId": "00000000-0000-4000-8000-000000000003",
+    "artifactId": "00000000-0000-4000-8000-000000000008",
+    "testId": "00000000-0000-4000-8000-000000000009",
+    "testVersion": 1,
+    "testContentHash": "032d76d5ceacd1fd347dd66720581218fc8903c1f743bff9287a6b0fa55bb073",
+    "provenance": {
+      "providerConfigId": "00000000-0000-4000-8000-000000000004",
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "promptVersion": "review-findings-v1",
+      "inputTokens": 42,
+      "outputTokens": 17
+    }
+  },
+  "runLink": {
+    "attemptId": "00000000-0000-4000-8000-000000000010",
+    "artifactLinkId": "00000000-0000-4000-8000-000000000007",
+    "runId": "00000000-0000-4000-8000-000000000011",
+    "environment": {
+      "runner": "docker-js",
+      "imageId": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "startedAt": "2026-10-11T00:00:00Z",
+      "finishedAt": "2026-10-11T00:00:00Z",
+      "timeoutMs": 1000,
+      "memoryBytes": 268435456,
+      "cpuMillis": 1000,
+      "outputTruncated": false
+    },
+    "evidenceState": "reproduced",
+    "assertion": "price equals two",
+    "expected": "2",
+    "observed": "1"
+  },
+  "sourceUtf8": "export const price = 1;\n",
+  "artifactContent": "assert.equal(price, 2);\n",
+  "artifactStructuredData": {"files":[{"path":"price.test.ts","contents":"assert.equal(price, 2);\n\n","isTest":true}]}
+}
