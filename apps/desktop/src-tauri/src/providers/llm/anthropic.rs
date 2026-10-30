@@ -359,12 +359,39 @@ fn parse_sse_event(raw: &str, state: &mut AnthropicStreamState) -> Result<Vec<Ch
             message: format!("invalid stream JSON: {e}"),
         })?;
 
+    if let AnthropicEvent::Error { error } = parsed {
+        // Error messages may echo prompts, credentials, or endpoints. Classify
+        // the documented type without retaining or logging its raw message.
+        return Err(match error.kind.as_str() {
+            "authentication_error" | "permission_error" => LlmError::AuthFailed {
+                provider: PROVIDER_NAME,
+                message: "Provider rejected credentials".into(),
+            },
+            "rate_limit_error" => LlmError::RateLimited {
+                provider: PROVIDER_NAME,
+                retry_after_seconds: None,
+            },
+            "invalid_request_error" | "not_found_error" | "request_too_large" => {
+                LlmError::InvalidResponse {
+                    provider: PROVIDER_NAME,
+                    message: "Provider rejected the streamed request".into(),
+                }
+            }
+            _ => LlmError::ProviderUnavailable {
+                provider: PROVIDER_NAME,
+                message: "Provider reported a temporary failure".into(),
+            },
+        });
+    }
     Ok(translate_event(parsed, state))
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicEvent {
+    Error {
+        error: AnthropicStreamError,
+    },
     MessageStart {
         #[serde(default)]
         message: AnthropicMessageStart,
@@ -388,6 +415,12 @@ enum AnthropicEvent {
     Ping,
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamError {
+    #[serde(rename = "type")]
+    kind: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -506,7 +539,10 @@ fn translate_event(event: AnthropicEvent, state: &mut AnthropicStreamState) -> V
                 finish_reason: state.finish_reason.unwrap_or(FinishReason::Stop),
             });
         }
-        AnthropicEvent::ContentBlockStop | AnthropicEvent::Ping | AnthropicEvent::Unknown => {}
+        AnthropicEvent::ContentBlockStop
+        | AnthropicEvent::Ping
+        | AnthropicEvent::Unknown
+        | AnthropicEvent::Error { .. } => {}
     }
     out
 }

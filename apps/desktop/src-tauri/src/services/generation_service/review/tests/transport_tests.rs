@@ -227,6 +227,87 @@ async fn both_wire_formats_bound_unterminated_events_and_error_bodies() {
 }
 
 #[tokio::test]
+async fn real_openai_transport_bounds_identity_state_without_collector() {
+    for (count, id_len, function) in [
+        (3, 65_536, Value::Null),
+        (3, 65_536, json!({"name":"test"})),
+        (65, 1, json!({"name":"test"})),
+        (17, 1024, json!({"name":"test"})),
+    ] {
+        let mut server = Server::new_async().await;
+        let body: String = (0..count)
+            .map(|index| {
+                event(&json!({"choices":[{"delta":{"tool_calls":[{
+                    "index":index,"id":"x".repeat(id_len),"function":function
+                }]}}]}))
+            })
+            .collect();
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
+        let provider = factory::build_llm_provider(&ProviderConfig {
+            kind: factory::ProviderKind::OpenAi,
+            api_key: Some("transport-test-key".into()),
+            base_url: Some(server.url()),
+        })
+        .unwrap();
+        let mut stream = provider.stream(GenerateRequest {
+            model: "pinned-model".into(),
+            messages: vec![Message::user("test")],
+            tools: vec![],
+            temperature: None,
+            max_tokens: None,
+            stop_sequences: vec![],
+        });
+        let mut failure = None;
+        while let Some(chunk) = stream.next().await {
+            if let Err(error) = chunk {
+                failure = Some(error);
+                break;
+            }
+        }
+        assert_eq!(failure.unwrap().code(), "LLM_INVALID_RESPONSE");
+        mock.assert_async().await;
+    }
+}
+
+#[tokio::test]
+async fn real_anthropic_stream_errors_preserve_sanitized_classification() {
+    for (kind, code) in [
+        ("overloaded_error", "LLM_PROVIDER_UNAVAILABLE"),
+        ("api_error", "LLM_PROVIDER_UNAVAILABLE"),
+        ("authentication_error", "LLM_AUTH_FAILED"),
+        ("permission_error", "LLM_AUTH_FAILED"),
+        ("rate_limit_error", "LLM_RATE_LIMITED"),
+        ("invalid_request_error", "LLM_INVALID_RESPONSE"),
+    ] {
+        let mut server = Server::new_async().await;
+        let body = event(&json!({"type":"error","error":{
+            "type":kind,"message":format!("opaque-body-credential {}", server.url())
+        }}));
+        let mock = server
+            .mock("POST", "/v1/messages")
+            .with_status(200)
+            .with_body(body)
+            .expect(1)
+            .create_async()
+            .await;
+        let error = real_review("anthropic", &server.url()).await.err().unwrap();
+        assert_eq!(error.code(), code, "{kind}");
+        assert!(!error.to_string().contains("opaque-body-credential"));
+        assert!(!error.to_string().contains(&server.url()));
+        if kind == "overloaded_error" {
+            assert!(error.recovery_hint().contains("temporary failure"));
+        }
+        mock.assert_async().await;
+    }
+}
+
+#[tokio::test]
 async fn default_artifact_stream_keeps_tool_fallback_without_logging_error_body() {
     let mut server = Server::new_async().await;
     let failure = server

@@ -460,9 +460,14 @@ struct OpenAiUsage {
     completion_tokens: u32,
 }
 
+const MAX_TOOL_ID_BYTES: usize = 1024;
+const MAX_TOOL_CALLS: usize = 64;
+const MAX_TOOL_ID_STATE_BYTES: usize = 16 * 1024;
+
 #[derive(Default)]
 struct OpenAiStreamState {
     tool_ids: std::collections::HashMap<(u32, u32), String>,
+    tool_id_bytes: usize,
     usage: Usage,
     finish_reason: Option<FinishReason>,
     sentinel: bool,
@@ -507,6 +512,20 @@ fn openai_chunk_to_chunks(
             }
         }
         for call in choice.delta.tool_calls {
+            let Some(function) = call.function else {
+                return Err(LlmError::InvalidResponse {
+                    provider,
+                    message: "Tool call fragment has no function".into(),
+                });
+            };
+            if function.name.as_ref().is_none_or(String::is_empty)
+                && function.arguments.as_ref().is_none_or(String::is_empty)
+            {
+                return Err(LlmError::InvalidResponse {
+                    provider,
+                    message: "Tool call fragment has no name or arguments".into(),
+                });
+            }
             let key = (choice.index, call.index);
             let id = match (state.tool_ids.get(&key), call.id) {
                 (Some(known), Some(id)) if known != &id => {
@@ -519,24 +538,35 @@ fn openai_chunk_to_chunks(
                 (None, supplied) => {
                     let id =
                         supplied.unwrap_or_else(|| format!("tool_{}_{}", choice.index, call.index));
+                    // Bound state independently of emitted chunks and the consumer.
+                    // Both entry count and retained bytes matter for tiny/large IDs.
+                    if id.is_empty()
+                        || id.len() > MAX_TOOL_ID_BYTES
+                        || state.tool_ids.len() >= MAX_TOOL_CALLS
+                        || state.tool_id_bytes.saturating_add(id.len()) > MAX_TOOL_ID_STATE_BYTES
+                    {
+                        return Err(LlmError::InvalidResponse {
+                            provider,
+                            message: "Tool call identity limit exceeded".into(),
+                        });
+                    }
+                    state.tool_id_bytes += id.len();
                     state.tool_ids.insert(key, id.clone());
                     id
                 }
             };
-            if let Some(function) = call.function {
-                if let Some(name) = function.name {
-                    out.push(Chunk::ToolCallStart {
-                        id: id.clone(),
-                        name,
+            if let Some(name) = function.name {
+                out.push(Chunk::ToolCallStart {
+                    id: id.clone(),
+                    name,
+                });
+            }
+            if let Some(args) = function.arguments {
+                if !args.is_empty() {
+                    out.push(Chunk::ToolCallArgsDelta {
+                        id,
+                        json_fragment: args,
                     });
-                }
-                if let Some(args) = function.arguments {
-                    if !args.is_empty() {
-                        out.push(Chunk::ToolCallArgsDelta {
-                            id,
-                            json_fragment: args,
-                        });
-                    }
                 }
             }
         }
@@ -568,6 +598,37 @@ fn parse_sse_event(provider: &'static str, event: &str) -> Result<Vec<Chunk>, Ll
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounds_retained_tool_identity_before_inserting() {
+        let mut state = OpenAiStreamState::default();
+        for function in [serde_json::Value::Null, serde_json::json!({})] {
+            let wire = serde_json::json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"x".repeat(65_536),"function":function
+            }]}}]});
+            assert!(
+                parse_sse_event_with_state("test", &format!("data: {wire}"), &mut state).is_err()
+            );
+            assert!(state.tool_ids.is_empty());
+        }
+        for (count, length) in [
+            (MAX_TOOL_CALLS, 1),
+            (16, MAX_TOOL_ID_BYTES),
+            (0, MAX_TOOL_ID_BYTES + 1),
+        ] {
+            let mut state = OpenAiStreamState::default();
+            for index in 0..=count {
+                let wire = serde_json::json!({"choices":[{"delta":{"tool_calls":[{
+                    "index":index,"id":"x".repeat(length),"function":{"name":"test"}
+                }]}}]});
+                let result =
+                    parse_sse_event_with_state("test", &format!("data: {wire}"), &mut state);
+                assert_eq!(result.is_err(), index == count);
+            }
+            assert_eq!(state.tool_ids.len(), count);
+            assert!(state.tool_id_bytes <= MAX_TOOL_ID_STATE_BYTES);
+        }
+    }
     use crate::providers::llm::types::Content;
     use mockito::Server;
 

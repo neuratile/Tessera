@@ -112,6 +112,14 @@ fn ambiguous_value(line: &str) -> bool {
     {
         return false;
     }
+    // A balanced line need not finish its expression: JS/TS permits `''`
+    // followed by `+ 'credential'`, a property access, or a tagged template.
+    // Without a language parser, require an explicit same-line terminator.
+    // Other languages may omit semicolons; exclude uncertain source visibly
+    // instead of guessing where a credential-bearing declaration ends.
+    if !line.trim_end().ends_with(';') {
+        return true;
+    }
     ['\'', '"', '`'].into_iter().any(|quote| {
         let mut escaped = false;
         let mut count = 0;
@@ -268,5 +276,24 @@ mod tests {
             "const token = { http:// parts\nkey: 'opaque-credential-value'\n};\n"
         )
         .is_none());
+    }
+
+    #[test]
+    fn excludes_next_line_credential_expressions_lf_and_crlf() {
+        for newline in ["\n", "\r\n"] {
+            for declaration in ["const token = ''", "const token", "token = ''"] {
+                for continuation in [
+                    "+ 'opaque-credential-value';",
+                    "/* continuation */ + 'opaque-credential-value';",
+                    "['opaque-credential-value'];",
+                    "`opaque-credential-value`;",
+                ] {
+                    let raw = format!("{declaration}{newline}  {continuation}{newline}");
+                    assert!(redact_source(&raw).is_none(), "{raw}");
+                }
+            }
+        }
+        assert!(redact_source("// token = useful prose\nconst ok = 1;\n").is_some());
+        assert!(redact_source("const token = 'opaque';\nconst ok = 1;\n").is_some());
     }
 }

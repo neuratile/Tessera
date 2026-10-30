@@ -264,13 +264,20 @@ fn oversized_required_code_fails_and_redaction_omissions_survive() {
 }
 
 #[test]
-fn comment_hidden_credentials_never_reach_final_model_context() {
+fn credential_continuations_never_reach_final_model_context() {
     for newline in ["\n", "\r\n"] {
-        for comment in ["// parts", "/* parts */", "/* parts"] {
+        for (declaration, continuation) in [
+            ("const token = [ // parts", "'opaque-credential-value'\n];"),
+            (
+                "const token = [ /* parts */",
+                "'opaque-credential-value'\n];",
+            ),
+            ("const token = [ /* parts", "'opaque-credential-value'\n];"),
+            ("const token = ''", "+ 'opaque-credential-value';"),
+            ("const token", "= 'opaque-credential-value';"),
+        ] {
             let (capture, mut support, mut manifest) = fixture();
-            let raw = format!(
-                "const token = [ {comment}{newline}'opaque-credential-value'{newline}];{newline}"
-            );
+            let raw = format!("{declaration}\n{continuation}\n").replace('\n', newline);
             let blob = support_blob(&raw);
             manifest.sources.push(source(&blob, SourceSide::New));
             manifest.context_paths.push(blob.path.clone());
