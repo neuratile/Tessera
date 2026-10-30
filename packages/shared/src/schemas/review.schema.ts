@@ -70,7 +70,7 @@ export const ReviewSourceReferenceSchema = z.object({
 }).strict().refine((s) => (s.lineStart === undefined && s.lineEnd === undefined) ||
   (s.lineStart !== undefined && s.lineEnd !== undefined && s.lineStart > 0 && s.lineEnd >= s.lineStart));
 export const ReviewFindingSchema = z.object({
-  findingId: uuid, summary: text, explanation: text, expectedBehavior: text,
+  findingId: uuid, summary: text, explanation: text, expectedBehavior: text, suggestedTest: text.optional(),
   severity: z.enum(['critical', 'major', 'minor', 'trivial']), sources: z.array(ReviewSourceReferenceSchema).min(1),
   evidenceState: EvidenceStateSchema,
 }).strict();
@@ -84,6 +84,7 @@ export const ReviewSessionSchema = z.object({
   createdAt: timestamp, updatedAt: timestamp,
   outcome: z.enum(['reviewed', 'no_changes', 'nothing_reviewable']).optional(), error: error.optional(),
   snapshot: ReviewSnapshotSchema.optional(), steps: z.array(ReviewStepSchema), findings: z.array(ReviewFindingSchema),
+  excludedFiles: z.array(z.object({ path: text, reason: text }).strict()).optional(),
   truncation: z.array(z.object({ resource: text, reason: text, omittedCount: uint.min(1) }).strict()),
 }).strict().superRefine((r, ctx) => {
   const fail = () => ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent review lifecycle or source reference' });

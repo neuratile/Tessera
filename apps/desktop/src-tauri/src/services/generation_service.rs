@@ -19,6 +19,8 @@
 //! Tauri command layer (Phase 6) can emit IPC events to the frontend
 //! per chunk without coupling this service to Tauri.
 
+pub mod review;
+
 use std::sync::Arc;
 
 use chrono::Utc;

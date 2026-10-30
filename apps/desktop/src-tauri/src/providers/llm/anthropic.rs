@@ -30,7 +30,7 @@ use super::openai_compat;
 use super::types::{
     Chunk, FinishReason, GenerateRequest, Message, ProviderCapabilities, Role, ToolSchema, Usage,
 };
-use super::{ChunkStream, LlmProvider};
+use super::{transport, ChunkStream, LlmProvider};
 
 /// Provider name used in `LlmError::provider` and logs.
 pub const PROVIDER_NAME: &str = "anthropic";
@@ -172,7 +172,7 @@ impl LlmProvider for AnthropicProvider {
             let body_stream = if status.is_success() {
                 response.bytes_stream()
             } else {
-                let text = response.text().await.unwrap_or_default();
+                let text = transport::error_body(response).await;
                 Err(openai_compat::map_http_error(
                     PROVIDER_NAME,
                     status,
@@ -183,7 +183,7 @@ impl LlmProvider for AnthropicProvider {
             };
 
             let mut byte_stream = body_stream;
-            let mut buffer = String::new();
+            let mut buffer = transport::EventBuffer::default();
             let mut state = AnthropicStreamState::default();
 
             while let Some(bytes) = byte_stream.next().await {
@@ -193,28 +193,17 @@ impl LlmProvider for AnthropicProvider {
                     // is the opaque "error decoding response body".
                     message: describe_error_chain(&e),
                 })?;
-                let text = std::str::from_utf8(&bytes).map_err(|e| LlmError::StreamInterrupted {
-                    provider: PROVIDER_NAME,
-                    message: format!("non-utf8 stream bytes: {e}"),
-                })?;
-                buffer.push_str(text);
-
-                while let Some((event, rest)) = split_sse_event(&buffer) {
-                    let event_owned = event.to_string();
-                    buffer = rest.to_string();
-                    for chunk in parse_sse_event(&event_owned, &mut state)? {
-                        yield chunk;
+                for byte in bytes {
+                    if let Some(event) = buffer.push(byte, PROVIDER_NAME)? {
+                        for chunk in parse_sse_event(&event, &mut state)? {
+                            yield chunk;
+                        }
                     }
                 }
             }
-
-            // Drain any complete-but-unterminated event left in the buffer
-            // when the server closes the connection without a final
-            // `\n\n`. Without this the last `message_stop` (and thus the
-            // `Chunk::Done`) can be silently dropped.
-            let trailing = buffer.trim();
-            if !trailing.is_empty() {
-                for chunk in parse_sse_event(trailing, &mut state)? {
+            let trailing = buffer.take(PROVIDER_NAME)?;
+            if !trailing.trim().is_empty() {
+                for chunk in parse_sse_event(&trailing, &mut state)? {
                     yield chunk;
                 }
             }
@@ -296,8 +285,8 @@ fn message_to_anthropic(msg: &Message) -> serde_json::Value {
                 // would 400 the whole follow-up call; an empty object
                 // lets the model see the tool was invoked and re-issue
                 // arguments in the next turn.
-                let parsed_args: serde_json::Value = serde_json::from_str(args)
-                    .unwrap_or_else(|err| {
+                let parsed_args: serde_json::Value =
+                    serde_json::from_str(args).unwrap_or_else(|err| {
                         tracing::warn!(
                             tool_id = %id,
                             tool_name = %name,
@@ -346,18 +335,6 @@ struct AnthropicStreamState {
     finish_reason: Option<FinishReason>,
 }
 
-fn split_sse_event(buffer: &str) -> Option<(&str, &str)> {
-    if let Some(idx) = buffer.find("\n\n") {
-        let (event, rest) = buffer.split_at(idx);
-        Some((event, &rest[2..]))
-    } else if let Some(idx) = buffer.find("\r\n\r\n") {
-        let (event, rest) = buffer.split_at(idx);
-        Some((event, &rest[4..]))
-    } else {
-        None
-    }
-}
-
 fn parse_sse_event(raw: &str, state: &mut AnthropicStreamState) -> Result<Vec<Chunk>, LlmError> {
     // SSE event = optional `event: <name>` line + one or more
     // `data: <payload>` lines. Anthropic always sends both.
@@ -382,12 +359,39 @@ fn parse_sse_event(raw: &str, state: &mut AnthropicStreamState) -> Result<Vec<Ch
             message: format!("invalid stream JSON: {e}"),
         })?;
 
+    if let AnthropicEvent::Error { error } = parsed {
+        // Error messages may echo prompts, credentials, or endpoints. Classify
+        // the documented type without retaining or logging its raw message.
+        return Err(match error.kind.as_str() {
+            "authentication_error" | "permission_error" => LlmError::AuthFailed {
+                provider: PROVIDER_NAME,
+                message: "Provider rejected credentials".into(),
+            },
+            "rate_limit_error" => LlmError::RateLimited {
+                provider: PROVIDER_NAME,
+                retry_after_seconds: None,
+            },
+            "invalid_request_error" | "not_found_error" | "request_too_large" => {
+                LlmError::InvalidResponse {
+                    provider: PROVIDER_NAME,
+                    message: "Provider rejected the streamed request".into(),
+                }
+            }
+            _ => LlmError::ProviderUnavailable {
+                provider: PROVIDER_NAME,
+                message: "Provider reported a temporary failure".into(),
+            },
+        });
+    }
     Ok(translate_event(parsed, state))
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicEvent {
+    Error {
+        error: AnthropicStreamError,
+    },
     MessageStart {
         #[serde(default)]
         message: AnthropicMessageStart,
@@ -411,6 +415,12 @@ enum AnthropicEvent {
     Ping,
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamError {
+    #[serde(rename = "type")]
+    kind: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -529,7 +539,10 @@ fn translate_event(event: AnthropicEvent, state: &mut AnthropicStreamState) -> V
                 finish_reason: state.finish_reason.unwrap_or(FinishReason::Stop),
             });
         }
-        AnthropicEvent::ContentBlockStop | AnthropicEvent::Ping | AnthropicEvent::Unknown => {}
+        AnthropicEvent::ContentBlockStop
+        | AnthropicEvent::Ping
+        | AnthropicEvent::Unknown
+        | AnthropicEvent::Error { .. } => {}
     }
     out
 }

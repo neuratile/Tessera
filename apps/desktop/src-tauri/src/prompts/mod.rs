@@ -49,6 +49,7 @@ pub mod bug_report_v2;
 pub mod context_md_v1;
 pub mod defect_report_v1;
 pub mod defect_report_v2;
+pub mod review_v1;
 pub mod runnable_files_v1;
 pub mod test_cases_v1;
 pub mod test_cases_v2;

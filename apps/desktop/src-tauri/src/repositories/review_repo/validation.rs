@@ -178,6 +178,9 @@ impl ReviewSession {
         for entry in &self.truncation {
             ensure(text(&entry.resource) && text(&entry.reason) && entry.omitted_count > 0)?;
         }
+        for exclusion in self.excluded_files.iter().flatten() {
+            ensure(text(&exclusion.path) && text(&exclusion.reason))?;
+        }
         let mut ids = HashSet::new();
         for step in &self.steps {
             ensure(
@@ -197,6 +200,7 @@ impl ReviewSession {
                     && text(&finding.summary)
                     && text(&finding.explanation)
                     && text(&finding.expected_behavior)
+                    && finding.suggested_test.as_ref().is_none_or(|s| text(s))
                     && !finding.sources.is_empty(),
             )?;
             let snapshot = self.snapshot.as_ref().ok_or_else(invalid)?;

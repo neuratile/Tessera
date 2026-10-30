@@ -98,9 +98,94 @@ async fn completed_from(
     review.progress = 100;
     review.outcome = Some(ReviewOutcome::Reviewed);
     review.findings = template.findings;
+    review.excluded_files = template.excluded_files;
     review.steps = template.steps;
     review.truncation = template.truncation;
     update(pool, USER, 1, review).await.unwrap()
+}
+
+#[tokio::test]
+async fn persists_suggested_tests_and_final_omissions_without_changing_snapshot() {
+    let pool = pool().await;
+    let mut template = session_fixture();
+    template.findings[0].suggested_test = Some("Assert rejection of negative quantities".into());
+    template.excluded_files = Some(vec![ReviewExclusion {
+        path: "src/support.ts".into(),
+        reason: "prompt_budget".into(),
+    }]);
+    template.truncation.push(ReviewTruncation {
+        resource: "final_prompt".into(),
+        reason: "prompt_budget".into(),
+        omitted_count: 1,
+    });
+    let snapshot = template.snapshot.clone();
+    let review = completed_from(
+        &pool,
+        template,
+        fixture()["sourceUtf8"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+    .await;
+    let saved = fetch(&pool, USER, review.review_id).await.unwrap();
+    assert_eq!(saved, review);
+    assert_eq!(saved.snapshot, snapshot);
+    assert_eq!(
+        saved.findings[0].suggested_test.as_deref(),
+        Some("Assert rejection of negative quantities")
+    );
+    assert_eq!(saved.excluded_files.unwrap()[0].reason, "prompt_budget");
+    assert!(saved
+        .truncation
+        .iter()
+        .any(|t| t.resource == "final_prompt"));
+}
+
+#[test]
+fn optional_suggested_tests_and_omissions_match_zod_without_changing_legacy_payloads() {
+    let original = fixture()["session"].clone();
+    assert_eq!(serde_json::to_value(session_fixture()).unwrap(), original);
+    for value in [
+        serde_json::json!(""),
+        serde_json::json!("   "),
+        Value::Null,
+        serde_json::json!("x".repeat(16385)),
+        serde_json::json!("\0"),
+    ] {
+        let mut candidate = original.clone();
+        candidate["findings"][0]["suggestedTest"] = value;
+        assert!(
+            !serde_json::from_value::<ReviewSession>(candidate).is_ok_and(|r| r.validate().is_ok())
+        );
+    }
+    for value in [
+        Value::Null,
+        serde_json::json!([{"path":"src/a.ts","reason":""}]),
+    ] {
+        let mut candidate = original.clone();
+        candidate["excludedFiles"] = value;
+        assert!(
+            !serde_json::from_value::<ReviewSession>(candidate).is_ok_and(|r| r.validate().is_ok())
+        );
+    }
+}
+
+#[tokio::test]
+async fn final_omissions_are_append_only() {
+    let pool = pool().await;
+    let mut review = queued(&pool).await;
+    review.status = ReviewStatus::Running;
+    review.excluded_files = Some(vec![ReviewExclusion {
+        path: "src/a.ts".into(),
+        reason: "redaction_unmappable".into(),
+    }]);
+    let review = update(&pool, USER, 0, review).await.unwrap();
+    let mut rewritten = review.clone();
+    rewritten.excluded_files = None;
+    assert!(update(&pool, USER, 1, rewritten).await.is_err());
+    assert_eq!(fetch(&pool, USER, review.review_id).await.unwrap(), review);
 }
 
 fn mode_snapshot(count: usize) -> ReviewSnapshot {
