@@ -227,6 +227,7 @@ fn oversized_required_code_fails_and_redaction_omissions_survive() {
         "const apiKey =\n 'synthetic-secret-value';\n".into(),
         "const token = [ // parts\n'opaque-credential-value'\n];\n".into(),
         "const token = [ // parts\r\n'opaque-credential-value'\r\n];\r\n".into(),
+        "const token = ['first'\n, 'opaque-credential-value'\n];\n".into(),
     ] {
         let (mut capture, support, mut manifest) = fixture();
         let blob = capture.files[0].new.as_mut().unwrap();

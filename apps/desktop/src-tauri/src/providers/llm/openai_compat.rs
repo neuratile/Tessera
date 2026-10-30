@@ -63,7 +63,7 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
         // Check if the request failed and contains tool specifications that we can strip.
         if !status.is_success() && body.get("tools").is_some() && policy == StreamPolicy::AllowToolFallback {
             let headers_in = response.headers().clone();
-            let text = transport::error_body(response, provider).await?;
+            let text = transport::error_body(response).await;
             let text_lower = text.to_lowercase();
 
             // If the error suggests that the model or endpoint doesn't support tools/functions
@@ -111,7 +111,7 @@ pub fn stream_chat_completions(req: ChatRequest<'_>) -> ChunkStream {
         let body_stream = if status.is_success() {
             response.bytes_stream()
         } else {
-            let text = transport::error_body(response, provider).await?;
+            let text = transport::error_body(response).await;
             Err(map_http_error(provider, status, &headers_in, &text))?;
             unreachable!("yielded error above")
         };

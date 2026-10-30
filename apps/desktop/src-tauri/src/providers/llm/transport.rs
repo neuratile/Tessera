@@ -32,19 +32,11 @@ impl EventBuffer {
     }
 }
 
-pub(super) async fn error_body(
-    mut response: reqwest::Response,
-    provider: &'static str,
-) -> Result<String, LlmError> {
+pub(super) async fn error_body(mut response: reqwest::Response) -> String {
     let mut body = Vec::new();
-    while let Some(bytes) = response
-        .chunk()
-        .await
-        .map_err(|_| LlmError::StreamInterrupted {
-            provider,
-            message: "Failed reading provider error response".into(),
-        })?
-    {
+    // The HTTP error status is authoritative even if its optional diagnostic
+    // body is interrupted. Return only the bounded bytes received so far.
+    while let Ok(Some(bytes)) = response.chunk().await {
         let count = bytes.len().min(MAX_ERROR_BYTES - body.len());
         body.extend_from_slice(&bytes[..count]);
         if body.len() == MAX_ERROR_BYTES {
@@ -53,7 +45,7 @@ pub(super) async fn error_body(
             break;
         }
     }
-    Ok(String::from_utf8_lossy(&body).into_owned())
+    String::from_utf8_lossy(&body).into_owned()
 }
 
 fn oversized(provider: &'static str) -> LlmError {
@@ -85,5 +77,42 @@ mod tests {
             assert_eq!(events, [event]);
             assert_eq!(buffer.take("test").unwrap(), "");
         }
+    }
+
+    #[tokio::test]
+    async fn interrupted_error_body_keeps_received_prefix_and_http_status() {
+        use std::io::{Error, ErrorKind};
+        use std::sync::{mpsc, Arc, Mutex};
+        let mut server = mockito::Server::new_async().await;
+        let (release, wait) = mpsc::channel();
+        let wait = Arc::new(Mutex::new(wait));
+        let mock = server
+            .mock("GET", "/")
+            .with_status(401)
+            .with_chunked_body(move |writer| {
+                writer.write_all(b"partial diagnostic")?;
+                // Fail only after the client has received the response headers.
+                wait.lock().unwrap().recv().unwrap();
+                Err(Error::new(
+                    ErrorKind::ConnectionReset,
+                    "synthetic body interruption",
+                ))
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let response = reqwest::Client::new()
+            .get(server.url())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        release.send(()).unwrap();
+        let prefix = error_body(response).await;
+        assert_eq!(prefix, "partial diagnostic");
+        let error = super::super::openai_compat::map_http_error("test", status, &headers, &prefix);
+        assert_eq!(error.code(), "LLM_AUTH_FAILED");
+        mock.assert_async().await;
     }
 }

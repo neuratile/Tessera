@@ -40,8 +40,9 @@ tool IDs across indexed fragments and emits one completion after trailing usage,
 preserving cutoff reasons. Both SSE wire formats bound each event to 128 KiB
 and HTTP error bodies to 16 KiB before appending bytes; oversized events fail,
 while oversized error bodies retain HTTP status classification using a bounded
-prefix. Credential declarations with comments outside quoted values are excluded
-because comments can conceal multiline continuations.
+prefix, including when reading that body is interrupted. Credential declarations
+with comments or unmatched delimiters outside quoted values are excluded because
+they can conceal multiline continuations.
 
 The returned `ReviewGenerationOutcome` carries findings, exact configuration /
 provider / model / prompt provenance, available usage, final `excluded_files`,

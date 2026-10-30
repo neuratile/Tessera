@@ -90,7 +90,7 @@ fn ambiguous_value(line: &str) -> bool {
         // Comments can hide an unfinished expression, including block comments
         // spanning later lines. Exclude uncertain declarations rather than try
         // to parse comments/strings across arbitrary source languages.
-        if has_comment(value) {
+        if ambiguous_expression(value) {
             return true;
         }
         let value = value.trim();
@@ -125,9 +125,10 @@ fn ambiguous_value(line: &str) -> bool {
     })
 }
 
-fn has_comment(value: &str) -> bool {
+fn ambiguous_expression(value: &str) -> bool {
     let mut quote = None;
     let mut escaped = false;
+    let mut delimiters = Vec::new();
     let mut chars = value.chars().peekable();
     while let Some(c) = chars.next() {
         if let Some(delimiter) = quote {
@@ -135,13 +136,24 @@ fn has_comment(value: &str) -> bool {
                 quote = None;
             }
             escaped = !escaped && c == '\\';
-        } else if matches!(c, '\'' | '"') {
+        } else if matches!(c, '\'' | '"' | '`') {
             quote = Some(c);
         } else if c == '#' || (c == '/' && matches!(chars.peek(), Some('/' | '*'))) {
             return true;
+        } else if matches!(c, '(' | '[' | '{') {
+            delimiters.push(c);
+        } else if let Some(open) = match c {
+            ')' => Some('('),
+            ']' => Some('['),
+            '}' => Some('{'),
+            _ => None,
+        } {
+            if delimiters.pop() != Some(open) {
+                return true;
+            }
         }
     }
-    false
+    !delimiters.is_empty()
 }
 
 #[cfg(test)]
@@ -220,6 +232,9 @@ mod tests {
             "first,",
             "first:",
             "first =",
+            "['first'",
+            "make('first'",
+            "{ part: 'first'",
         ] {
             assert!(
                 redact_source(&format!("const token = {value}\n'synthetic';\n")).is_none(),

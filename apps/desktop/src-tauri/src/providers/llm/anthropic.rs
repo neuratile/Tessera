@@ -172,7 +172,7 @@ impl LlmProvider for AnthropicProvider {
             let body_stream = if status.is_success() {
                 response.bytes_stream()
             } else {
-                let text = transport::error_body(response, PROVIDER_NAME).await?;
+                let text = transport::error_body(response).await;
                 Err(openai_compat::map_http_error(
                     PROVIDER_NAME,
                     status,
