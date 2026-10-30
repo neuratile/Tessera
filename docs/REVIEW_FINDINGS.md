@@ -37,7 +37,9 @@ Token metadata such as `max_tokens` stays available only for numeric literals;
 collections and arbitrary values receive the credential checks. Identifier-only Rust references/imports are retained
 after the same continuation checks; literals, credentials, and comments stay masked.
 Authority-shaped URLs also receive continuation checks, so split userinfo values
-are omitted rather than exposed after a scheme on an earlier line.
+are omitted rather than exposed after a scheme on an earlier line. Only direct
+URL literals are retained; concatenated/interpolated URL expressions are omitted.
+Harmless URL comments remain available as context.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens

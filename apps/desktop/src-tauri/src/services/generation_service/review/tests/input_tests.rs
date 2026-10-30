@@ -267,6 +267,7 @@ fn oversized_required_code_fails_and_redaction_omissions_survive() {
 fn credential_continuations_never_reach_final_model_context() {
     for newline in ["\n", "\r\n"] {
         for (declaration, continuation) in [
+            ("const uri = 'postgres://' + 'alice:' + 'opaque-credential-value' + '@db.test/app';", ""),
             ("const api_keys = [", "'opaque-credential-value'\n];"),
             ("const apiKeys = [", "'opaque-credential-value'\n];"),
             ("const passwords = [", "'opaque-credential-value'\n];"),
@@ -397,7 +398,7 @@ fn url_userinfo_is_masked_in_final_serialized_context_without_losing_safe_url() 
 fn rust_imports_and_token_metadata_reach_final_model_context() {
     let (capture, mut support, mut manifest) = fixture();
     let mut blob =
-        support_blob("use crate::utils::secret_redaction;\nconst MAX_TOKENS: usize = 6000;\nlet config = auth::Credentials { token: [17, 43, 91, 202] };\n");
+        support_blob("use crate::utils::secret_redaction;\nconst MAX_TOKENS: usize = 6000; // output budget\n// https://example.test/docs\nlet config = auth::Credentials { token: [17, 43, 91, 202] };\n");
     blob.path = "src/support.rs".into();
     manifest.sources.push(source(&blob, SourceSide::New));
     manifest.context_paths.push(blob.path.clone());
@@ -414,6 +415,7 @@ fn rust_imports_and_token_metadata_reach_final_model_context() {
     let messages = fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
     let serialized = serde_json::to_string(&messages).unwrap();
     assert!(!serialized.contains("17, 43, 91, 202"));
+    assert!(serialized.contains("https://example.test/docs"));
     assert!(serialized.contains("use crate::utils::secret_redaction;"));
     assert!(context
         .model_text()

@@ -67,7 +67,7 @@ pub fn redact_source(source: &str) -> Option<String> {
             pem = Some(label.into());
         }
         let keyword = credential_term(&line) && !numeric_metadata(&line);
-        let authority = line.contains("://");
+        let authority = without_safe_comment(&line).contains("://");
         let opaque = lower.contains("bearer ")
             || [
                 "sk-",
@@ -96,7 +96,9 @@ pub fn redact_source(source: &str) -> Option<String> {
             });
         if pem.is_none()
             && (keyword || opaque || authority)
-            && (ambiguous_value(&line) || later_assignment(lines.clone()))
+            && (ambiguous_value(&line)
+                || later_assignment(lines.clone())
+                || (authority && ambiguous_authority(&line)))
         {
             return None;
         }
@@ -190,6 +192,7 @@ fn credential_identifier(identifier: &str, allow_metadata: bool) -> bool {
 }
 
 fn numeric_metadata(line: &str) -> bool {
+    let line = without_safe_comment(line);
     if !line.trim_end().ends_with(';') {
         return false;
     }
@@ -201,6 +204,34 @@ fn numeric_metadata(line: &str) -> bool {
         && !credential_term_with_metadata(target, true)
         && value.chars().any(|c| c.is_ascii_digit())
         && value.chars().all(|c| c.is_ascii_digit() || c == '_')
+}
+
+fn ambiguous_authority(line: &str) -> bool {
+    // ponytail: only retain direct URL literals, not cross-language expression
+    // evaluation. Semicolons inside literals conservatively omit the source.
+    without_safe_comment(line)
+        .split(';')
+        .filter(|statement| statement.contains("://"))
+        .any(|statement| {
+            let Some((_, value)) = value_declaration(statement) else {
+                return true;
+            };
+            let value = value.trim();
+            let Some(quote @ ('\'' | '"' | '`')) = value.chars().next() else {
+                return true;
+            };
+            if value.contains("${") {
+                return true;
+            }
+            let mut escaped = false;
+            for (index, c) in value.char_indices().skip(1) {
+                if !escaped && c == quote {
+                    return !value[index + c.len_utf8()..].trim().is_empty();
+                }
+                escaped = !escaped && c == '\\';
+            }
+            true
+        })
 }
 
 fn value_declaration(line: &str) -> Option<(&str, &str)> {
@@ -549,6 +580,8 @@ mod tests {
             ] {
                 let raw = format!("const uri = '{scheme}://' +{newline}'alice:opaque-credential-value@db.test/app';{newline}");
                 assert!(redact_source(&raw).is_none(), "{raw}");
+                let raw = format!("const uri = '{scheme}://' + 'alice:' + 'opaque-credential-value' + '@db.test/app';{newline}");
+                assert!(redact_source(&raw).is_none(), "{raw}");
             }
             for value in [
                 "auth::Credentials { token: [17, 43, 91, 202] }",
@@ -598,7 +631,7 @@ mod tests {
             redact_source("function max(tokens =\n 'opaque-credential-value'\n) {}\n").is_none()
         );
         let metadata =
-            "const max_context_tokens = 8000;\nlet tokenCount = 12;\nlet maxTokens2 = 40;\n";
+            "const max_context_tokens = 8000;\nlet tokenCount = 12;\nlet maxTokens2 = 40;\nconst max_tokens = 6000; // output budget\n// https://example.test/docs\n";
         assert_eq!(redact_source(metadata).as_deref(), Some(metadata));
         let raw = "use crate::secret_redaction; // token = opaque-credential-value;\n";
         assert!(!redact_source(raw)
