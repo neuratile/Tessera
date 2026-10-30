@@ -26,13 +26,33 @@ async fn pool() -> SqlitePool {
         .await
         .unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
+    seed_pool(&pool).await;
+    pool
+}
+
+async fn seed_pool(pool: &SqlitePool) {
     let template = session_fixture();
     let now = &template.created_at;
     sqlx::query("INSERT INTO projects(id,user_id,name,root_path,created_at,updated_at) VALUES (?,?,'review','/tmp',?,?)")
-        .bind(template.project_id.to_string()).bind(USER).bind(now).bind(now).execute(&pool).await.unwrap();
+        .bind(template.project_id.to_string()).bind(USER).bind(now).bind(now).execute(pool).await.unwrap();
     sqlx::query("INSERT INTO user_provider_configs(id,user_id,provider,is_active,created_at,updated_at) VALUES (?,?,'ollama',1,?,?)")
-        .bind(template.provenance.provider_config_id.to_string()).bind(USER).bind(now).bind(now).execute(&pool).await.unwrap();
-    pool
+        .bind(template.provenance.provider_config_id.to_string()).bind(USER).bind(now).bind(now).execute(pool).await.unwrap();
+}
+
+async fn remove_test_directory(path: &std::path::Path) {
+    // SQLite pool returns can finish closing worker handles asynchronously.
+    // Windows refuses deletion during that short interval. Retry only sharing
+    // violations; persistent handles and every other cleanup error still fail.
+    for _ in 0..20 {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if cfg!(windows) && error.raw_os_error() == Some(32) => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("test directory cleanup failed: {error}"),
+        }
+    }
+    std::fs::remove_dir_all(path).unwrap();
 }
 
 async fn queued(pool: &SqlitePool) -> ReviewSession {
@@ -107,6 +127,108 @@ fn mode_snapshot(count: usize) -> ReviewSnapshot {
         });
     }
     snapshot
+}
+
+#[test]
+fn saved_test_hash_covers_sorted_exact_file_bytes() {
+    let files = serde_json::json!({"files": [
+        {"path": "z.test.ts", "contents": "assert(false);\r\n\n", "isTest": true},
+        {"path": "src/é.ts", "contents": "export const value = 1;\n"}
+    ]});
+    // Independently specified serialized representation: no Markdown or trimming.
+    let representation = "[[\"src/é.ts\",\"export const value = 1;\\n\"],[\"z.test.ts\",\"assert(false);\\r\\n\\n\"]]";
+    let expected = digest(representation.as_bytes());
+    assert_eq!(saved_test_content_hash(&files).unwrap(), expected);
+    let mut reordered = files.clone();
+    reordered["files"].as_array_mut().unwrap().reverse();
+    assert_eq!(saved_test_content_hash(&reordered).unwrap(), expected);
+    for content in [
+        "assert(false);\r\n",
+        "assert(false);\n\n",
+        "assert(true);\r\n\n",
+    ] {
+        let mut changed = files.clone();
+        changed["files"][0]["contents"] = content.into();
+        assert_ne!(saved_test_content_hash(&changed).unwrap(), expected);
+    }
+    let mut renamed = files;
+    renamed["files"][0]["path"] = "other.test.ts".into();
+    assert_ne!(saved_test_content_hash(&renamed).unwrap(), expected);
+    assert_eq!(
+        saved_test_content_hash(&fixture()["artifactStructuredData"]).unwrap(),
+        fixture()["artifactLink"]["testContentHash"]
+    );
+}
+
+#[test]
+fn saved_test_hash_rejects_ambiguous_or_malformed_files() {
+    for path in [
+        "",
+        "   ",
+        "/a.ts",
+        "../a.ts",
+        "a/../b.ts",
+        "./a.ts",
+        "a//b.ts",
+        "C:/a.ts",
+        "a\\b.ts",
+        "a\0.ts",
+    ] {
+        assert!(
+            saved_test_content_hash(
+                &serde_json::json!({"files": [{"path": path, "contents": ""}]})
+            )
+            .is_err(),
+            "accepted {path:?}"
+        );
+    }
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"files": []}),
+        serde_json::json!({"files": [{"path": "a.ts", "contents": 1}]}),
+        serde_json::json!({"files": [{"path": "a.ts", "content": "wrong field"}]}),
+        serde_json::json!({"files": [{"contents": ""}]}),
+        serde_json::json!({"files": [{"path": "a.ts", "contents": "1"}, {"path": "a.ts", "contents": "2"}]}),
+    ] {
+        assert!(saved_test_content_hash(&value).is_err());
+    }
+}
+
+#[tokio::test]
+async fn artifact_binding_rejects_markdown_hash_and_changed_saved_test_bytes() {
+    let pool = pool().await;
+    let review = completed(&pool).await;
+    let artifact: ReviewArtifactLink =
+        serde_json::from_value(fixture()["artifactLink"].clone()).unwrap();
+    let markdown = "```ts\nassert.equal(price, 2);\n```\n";
+    let files = fixture()["artifactStructuredData"].clone();
+    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,structured_data,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,?,1,?,?)")
+        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(markdown).bind(files.to_string()).bind(&review.created_at).bind(&review.created_at).execute(&pool).await.unwrap();
+    let mut wrong = artifact.clone();
+    wrong.test_content_hash = digest(markdown.as_bytes());
+    assert!(link_artifact(&pool, USER, review.review_id, &wrong)
+        .await
+        .is_err());
+    link_artifact(&pool, USER, review.review_id, &artifact)
+        .await
+        .unwrap();
+    let mut changed = files;
+    changed["files"][0]["contents"] = "assert.equal(price, 3);\n\n".into();
+    sqlx::query("UPDATE artifacts SET structured_data=? WHERE id=?")
+        .bind(changed.to_string())
+        .bind(artifact.artifact_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    wrong.link_id = Uuid::new_v4();
+    wrong.test_content_hash = artifact.test_content_hash.clone();
+    assert!(link_artifact(&pool, USER, review.review_id, &wrong)
+        .await
+        .is_err());
+    assert_eq!(
+        fetch_links(&pool, USER, review.review_id).await.unwrap().0,
+        vec![artifact]
+    );
 }
 
 #[test]
@@ -354,6 +476,137 @@ async fn startup_marks_orphans_interrupted_without_touching_terminal_results() {
 }
 
 #[tokio::test]
+async fn second_live_pool_and_desktop_cannot_interrupt_reviews() {
+    let dir = std::env::temp_dir().join(format!("tessera-live-{}", Uuid::new_v4()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("review data.db");
+    let owner = crate::db::AppDatabase::open(&path).await.unwrap();
+    let pool = owner.pool();
+    seed_pool(pool).await;
+    let queued = queued(pool).await;
+    let mut running = super::tests::queued(pool).await;
+    running.status = ReviewStatus::Running;
+    running = update(pool, USER, 0, running).await.unwrap();
+    let second = crate::db::init_pool_at(&path).await.unwrap();
+    // URI opening is generic too; use / separators for portable SQLite URLs.
+    let url = format!("sqlite://{}", path.to_string_lossy().replace('\\', "/"));
+    let third = crate::db::init_pool(&url).await.unwrap();
+    let alias = dir.join(".").join("review data.db");
+    assert!(crate::db::AppDatabase::open(&alias).await.is_err());
+    for review in [&queued, &running] {
+        assert_eq!(
+            fetch(&second, USER, review.review_id).await.unwrap(),
+            *review
+        );
+    }
+    // The first worker still accepts progress after the rejected second startup.
+    running.progress = 20;
+    update(pool, USER, 1, running).await.unwrap();
+    third.close().await;
+    second.close().await;
+    pool.close().await;
+    drop(owner);
+    remove_test_directory(&dir).await;
+}
+
+// A subprocess owns the database with unfinished work. The parent kills it
+// without Rust destructors, exercising actual OS lock and SQLite crash release.
+#[tokio::test]
+async fn restart_worker() {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("TESSERA_REVIEW_RESTART_TEST_DB") else {
+        return;
+    };
+    let owner = crate::db::AppDatabase::open(std::path::Path::new(&path))
+        .await
+        .unwrap();
+    let pool = owner.pool();
+    seed_pool(pool).await;
+    completed(pool).await;
+    queued(pool).await;
+    let mut running = queued(pool).await;
+    running.status = ReviewStatus::Running;
+    update(pool, USER, 0, running).await.unwrap();
+    println!("review-restart-ready");
+    std::io::stdout().flush().unwrap();
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line).unwrap();
+    drop(owner);
+}
+
+#[tokio::test]
+async fn real_restart_recovers_abandoned_reviews_once() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    let dir = std::env::temp_dir().join(format!("tessera-restart-{}", Uuid::new_v4()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("review.db");
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "repositories::review_repo::tests::restart_worker",
+            "--nocapture",
+            "--test-threads=2",
+        ])
+        .env("TESSERA_REVIEW_RESTART_TEST_DB", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    loop {
+        assert!(
+            output.read_line(&mut line).unwrap() > 0,
+            "worker exited before ready"
+        );
+        if line.trim_end().ends_with("review-restart-ready") {
+            break;
+        }
+        line.clear();
+    }
+    assert!(crate::db::AppDatabase::open(&path).await.is_err());
+    child.kill().unwrap();
+    child.wait().unwrap();
+    drop(output);
+    drop(child);
+
+    // Generic pool open leaves abandoned state untouched, until app ownership.
+    let generic = crate::db::init_pool_at(&path).await.unwrap();
+    let template = session_fixture();
+    let before = list(&generic, USER, template.project_id, 10).await.unwrap();
+    assert_eq!(before.iter().filter(|r| !r.status.is_terminal()).count(), 2);
+    generic.close().await;
+    drop(generic);
+    let owner = crate::db::AppDatabase::open(&path).await.unwrap();
+    let after = list(owner.pool(), USER, template.project_id, 10)
+        .await
+        .unwrap();
+    for old in &before {
+        let next = after.iter().find(|r| r.review_id == old.review_id).unwrap();
+        if old.status.is_terminal() {
+            assert_eq!(old, next);
+        } else {
+            assert_eq!(next.status, ReviewStatus::Interrupted);
+            assert_eq!(next.sequence, old.sequence + 1);
+            assert_eq!(next.error.as_ref().unwrap().code, "INTERRUPTED");
+        }
+    }
+    owner.pool().close().await;
+    drop(owner);
+    let reopened = crate::db::AppDatabase::open(&path).await.unwrap();
+    assert_eq!(
+        list(reopened.pool(), USER, template.project_id, 10)
+            .await
+            .unwrap(),
+        after
+    );
+    reopened.pool().close().await;
+    drop(reopened);
+    remove_test_directory(&dir).await;
+}
+
+#[tokio::test]
 async fn recovery_does_not_decode_corrupt_headers_or_hide_sequence_overflow() {
     let pool = pool().await;
     let review = queued(&pool).await;
@@ -436,8 +689,8 @@ async fn legacy_run_cannot_reproduce_a_different_snapshot() {
         serde_json::from_value(fixture()["artifactLink"].clone()).unwrap();
     let run: ReviewRunLink = serde_json::from_value(fixture()["runLink"].clone()).unwrap();
     let stamp = &review.created_at;
-    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,1,?,?)")
-        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(fixture()["artifactContent"].as_str().unwrap()).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,structured_data,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,?,1,?,?)")
+        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(fixture()["artifactContent"].as_str().unwrap()).bind(fixture()["artifactStructuredData"].to_string()).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
     link_artifact(&pool, USER, review.review_id, &artifact)
         .await
         .unwrap();
@@ -491,8 +744,8 @@ async fn evidence_bindings_reject_unknown_ids_and_keep_attempts_append_only() {
         .await
         .is_err());
     let stamp = &review.created_at;
-    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,1,?,?)")
-        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(fixture()["artifactContent"].as_str().unwrap()).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO artifacts(id,project_id,artifact_type,title,content_md,structured_data,version,created_at,updated_at) VALUES (?,?,'test_cases','test',?,?,1,?,?)")
+        .bind(artifact.artifact_id.to_string()).bind(review.project_id.to_string()).bind(fixture()["artifactContent"].as_str().unwrap()).bind(fixture()["artifactStructuredData"].to_string()).bind(stamp).bind(stamp).execute(&pool).await.unwrap();
     let mut bad = artifact.clone();
     bad.test_version = 2;
     assert!(link_artifact(&pool, USER, review.review_id, &bad)

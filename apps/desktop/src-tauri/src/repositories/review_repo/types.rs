@@ -223,6 +223,7 @@ pub struct ReviewArtifactLink {
     pub artifact_id: Uuid,
     pub test_id: Uuid,
     pub test_version: u32,
+    /// SHA-256 from `saved_test_content_hash`, covering all saved file paths/bytes.
     pub test_content_hash: String,
     pub provenance: ReviewProvenance,
 }

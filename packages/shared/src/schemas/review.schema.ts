@@ -101,6 +101,8 @@ export const ReviewSessionSchema = z.object({
 });
 export const ReviewArtifactLinkSchema = z.object({
   linkId: uuid, findingId: uuid, snapshotId: uuid, artifactId: uuid, testId: uuid,
+  // SHA-256 of compact JSON [[path, contents], ...], sorted by UTF-8 path bytes. Exact saved
+  // UTF-8 file contents; never display Markdown or execution-time proof (#112).
   testVersion: uint.min(1), testContentHash: hash, provenance: ReviewProvenanceSchema,
 }).strict();
 const environment = z.object({

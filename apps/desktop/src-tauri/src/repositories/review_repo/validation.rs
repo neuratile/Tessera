@@ -64,7 +64,7 @@ impl ReviewSnapshot {
                 && self
                     .base_commit
                     .as_ref()
-                    .map_or(true, |s| hash(s, object_len)),
+                    .is_none_or(|s| hash(s, object_len)),
         )?;
         let mut keys = HashSet::new();
         let mut contents = HashMap::new();

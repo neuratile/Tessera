@@ -84,7 +84,7 @@
     "artifactId": "00000000-0000-4000-8000-000000000008",
     "testId": "00000000-0000-4000-8000-000000000009",
     "testVersion": 1,
-    "testContentHash": "1db47d01ac8f4e5b07df02beacad12272de5da3d4036cdba532c3996920081c3",
+    "testContentHash": "032d76d5ceacd1fd347dd66720581218fc8903c1f743bff9287a6b0fa55bb073",
     "provenance": {
       "providerConfigId": "00000000-0000-4000-8000-000000000004",
       "provider": "ollama",
@@ -114,5 +114,6 @@
     "observed": "1"
   },
   "sourceUtf8": "export const price = 1;\n",
-  "artifactContent": "assert.equal(price, 2);\n"
+  "artifactContent": "assert.equal(price, 2);\n",
+  "artifactStructuredData": {"files":[{"path":"price.test.ts","contents":"assert.equal(price, 2);\n\n","isTest":true}]}
 }

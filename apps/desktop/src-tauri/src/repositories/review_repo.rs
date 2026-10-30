@@ -280,10 +280,10 @@ pub async fn update(
     Ok(next)
 }
 
-/// Called once after migrations during pool startup; never resumes orphaned work.
+/// Recover abandoned work only while holding exclusive application/database ownership.
 /// # Errors
 /// Returns database errors or sequence overflow, rolling back recovery as a batch.
-pub async fn interrupt_active(pool: &SqlitePool) -> AppResult<u64> {
+pub(crate) async fn interrupt_active(pool: &SqlitePool) -> AppResult<u64> {
     let mut tx = pool.begin().await?;
     let overflow: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM review_sessions WHERE status IN ('queued','running') AND sequence >= ?",
@@ -303,6 +303,36 @@ pub async fn interrupt_active(pool: &SqlitePool) -> AppResult<u64> {
         .bind(&now).bind(&now).bind(encode(&error)?).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(changed.rows_affected())
+}
+
+/// Hash saved runnable files as UTF-8 compact JSON `[[path, contents], ...]`,
+/// sorted lexicographically by UTF-8 path bytes. All workspace files participate; contents are never trimmed
+/// or newline-normalized. Display Markdown and file metadata do not participate.
+/// This identifies saved bytes, not execution-time provenance (deferred to #112).
+/// # Errors
+/// Rejects missing/empty files, non-string paths/contents, unsafe or duplicate paths.
+pub fn saved_test_content_hash(structured_data: &serde_json::Value) -> AppResult<String> {
+    let raw = structured_data
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(invalid)?;
+    ensure(!raw.is_empty())?;
+    let mut files = Vec::with_capacity(raw.len());
+    let mut paths = std::collections::HashSet::new();
+    for file in raw {
+        let path = file
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(invalid)?;
+        let contents = file
+            .get("contents")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(invalid)?;
+        ensure(!path.trim().is_empty() && validation::path(path) && paths.insert(path))?;
+        files.push((path, contents));
+    }
+    files.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    Ok(digest(encode(&files)?.as_bytes()))
 }
 
 /// Link a test artifact/version to the exact finding/snapshot and generating provenance.
@@ -330,7 +360,7 @@ pub async fn link_artifact(
                 .any(|f| f.finding_id == link.finding_id),
     )?;
     let artifact: Option<(String, i64)> =
-        sqlx::query_as("SELECT content_md,version FROM artifacts WHERE id=? AND project_id=?")
+        sqlx::query_as("SELECT structured_data,version FROM artifacts WHERE id=? AND project_id=? AND artifact_type='test_cases'")
             .bind(link.artifact_id.to_string())
             .bind(session.project_id.to_string())
             .fetch_optional(&mut *tx)
@@ -338,7 +368,8 @@ pub async fn link_artifact(
     let (content, version) = artifact.ok_or_else(invalid)?;
     ensure(
         version == i64::from(link.test_version)
-            && digest(content.as_bytes()) == link.test_content_hash,
+            && saved_test_content_hash(&decode::<serde_json::Value>(&content)?)?
+                == link.test_content_hash,
     )?;
     let config: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM user_provider_configs WHERE id=? AND user_id=? AND provider=?",
