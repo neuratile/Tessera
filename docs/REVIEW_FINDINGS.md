@@ -23,7 +23,8 @@ values exclude the file instead of sending uncertain continuation lines.
 Credential value declarations without an explicit same-line semicolon are also omitted:
 balanced quotes alone cannot rule out a next-line expression continuation across
 languages. Comments and PEM blocks retain their existing line-preserving masking.
-HTTP(S) URL userinfo is masked before other checks, preserving hosts, paths, query
+URL authority userinfo is masked for all schemes, including compound schemes,
+before other checks, preserving safe hosts, paths, query
 strings, and line endings. Complete named authentication function signatures
 without credential defaults remain usable context. Ambiguous multiline signatures,
 function expressions, and defaults containing credential terms are visibly omitted.
@@ -31,6 +32,9 @@ Split assignments are checked across whitespace, comments, and closing brackets;
 uncertain continuation scans exceeding 64 lines also omit the source.
 Member/operator/cast continuations of sensitive expressions are also omitted
 rather than accepted before a possible later assignment.
+Credential identifiers use word/case segments, so token metadata such as
+`max_tokens` stays available. Identifier-only Rust references/imports are retained
+after the same continuation checks; literals, credentials, and comments stay masked.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens

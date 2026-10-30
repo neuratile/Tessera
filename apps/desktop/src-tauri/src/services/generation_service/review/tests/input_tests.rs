@@ -343,7 +343,7 @@ fn credential_continuations_never_reach_final_model_context() {
 #[test]
 fn url_userinfo_is_masked_in_final_serialized_context_without_losing_safe_url() {
     let (capture, mut support, mut manifest) = fixture();
-    let blob = support_blob("const proxy = 'https://alice:opaque-credential-value@example.com/path';\r\nconst ok = 1;\r\n");
+    let blob = support_blob("const proxy = 'https://alice:opaque-credential-value@example.com/path';\r\nconst alternate = 'mongodb+srv://bob:opaque-mongo-value@cluster.test/db';\r\nconst max_tokens = 6000;\r\n");
     manifest.sources.push(source(&blob, SourceSide::New));
     manifest.context_paths.push(blob.path.clone());
     support.files.push(blob);
@@ -360,6 +360,37 @@ fn url_userinfo_is_masked_in_final_serialized_context_without_losing_safe_url() 
     let serialized = serde_json::to_string(&messages).unwrap();
     assert!(!serialized.contains("opaque-credential-value"));
     assert!(!serialized.contains("alice"));
+    assert!(!serialized.contains("opaque-mongo-value"));
+    assert!(!serialized.contains("bob"));
     assert!(serialized.contains("@example.com/path"));
+    assert!(serialized.contains("@cluster.test/db"));
+    assert!(context.model_text().contains("const max_tokens = 6000;"));
     assert!(context.excerpts.iter().any(|e| e.path == "src/support.ts"));
+}
+
+#[test]
+fn rust_imports_and_token_metadata_reach_final_model_context() {
+    let (capture, mut support, mut manifest) = fixture();
+    let mut blob =
+        support_blob("use crate::utils::secret_redaction;\nconst MAX_TOKENS: usize = 6000;\n");
+    blob.path = "src/support.rs".into();
+    manifest.sources.push(source(&blob, SourceSide::New));
+    manifest.context_paths.push(blob.path.clone());
+    support.files.push(blob);
+    let request = ReviewRequest {
+        provider_config_id: None,
+        model: "pinned-model",
+        capture: &capture,
+        support: &support,
+        manifest: &manifest,
+    };
+    let mock = mock();
+    let mut context = prepare(&request, &mock).unwrap();
+    let messages = fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
+    let serialized = serde_json::to_string(&messages).unwrap();
+    assert!(serialized.contains("use crate::utils::secret_redaction;"));
+    assert!(context
+        .model_text()
+        .contains("const MAX_TOKENS: usize = 6000;"));
+    assert!(context.excerpts.iter().any(|e| e.path == "src/support.rs"));
 }

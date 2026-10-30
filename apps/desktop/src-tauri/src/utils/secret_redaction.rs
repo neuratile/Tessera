@@ -1,6 +1,50 @@
 //! Conservative source redaction before review context assembly. Never changes lines.
 //! This is not an authorization boundary: all surviving source remains untrusted.
 
+const CREDENTIAL_PARTS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "tokens",
+    "apikey",
+    "authorization",
+    "bearer",
+];
+const CREDENTIAL_COMPOUNDS: &[&str] = &[
+    "tokenvalue",
+    "passwordhash",
+    "passwordvalue",
+    "secretvalue",
+    "secretkey",
+    "apikeyvalue",
+];
+const TOKEN_METADATA_PARTS: &[&str] = &[
+    "max",
+    "min",
+    "input",
+    "output",
+    "prompt",
+    "completion",
+    "total",
+    "requested",
+    "cached",
+    "context",
+    "available",
+    "remaining",
+    "used",
+    "cache",
+    "read",
+    "write",
+    "count",
+    "counts",
+    "limit",
+    "budget",
+    "usage",
+    "length",
+    "size",
+];
+
 /// Mask entire credential-bearing lines and PEM blocks, retaining CR/LF layout.
 /// Reject unterminated PEM or ambiguous multiline credential values rather than
 /// sending continuation lines whose boundaries cannot be established safely.
@@ -10,7 +54,7 @@ pub fn redact_source(source: &str) -> Option<String> {
     let mut result = String::with_capacity(source.len());
     let mut lines = source.split_inclusive('\n');
     while let Some(raw_line) = lines.next() {
-        let line = redact_http_userinfo(raw_line);
+        let line = redact_url_userinfo(raw_line);
         let lower = line.to_ascii_lowercase();
         if let Some((_, rest)) = lower.split_once("-----begin ") {
             let (label, _) = rest.split_once("-----")?;
@@ -19,20 +63,8 @@ pub fn redact_source(source: &str) -> Option<String> {
             }
             pem = Some(label.into());
         }
-        let sensitive = pem.is_some()
-            || [
-                "password",
-                "passwd",
-                "secret",
-                "token",
-                "api_key",
-                "apikey",
-                "api-key",
-                "authorization",
-                "bearer ",
-            ]
-            .iter()
-            .any(|s| lower.contains(s))
+        let keyword = credential_term(&line);
+        let opaque = lower.contains("bearer ")
             || [
                 "sk-",
                 "ghp_",
@@ -48,11 +80,6 @@ pub fn redact_source(source: &str) -> Option<String> {
                 "hf_",
                 "akia",
                 "aiza",
-                "postgres://",
-                "postgresql://",
-                "mysql://",
-                "mongodb://",
-                "redis://",
             ]
             .iter()
             .any(|prefix| {
@@ -63,10 +90,13 @@ pub fn redact_source(source: &str) -> Option<String> {
                         .is_none_or(|c| !c.is_alphanumeric() && c != '_')
                 })
             });
-        if sensitive {
-            if pem.is_none() && (ambiguous_value(&line) || later_assignment(lines.clone())) {
-                return None;
-            }
+        if pem.is_none()
+            && (keyword || opaque)
+            && (ambiguous_value(&line) || later_assignment(lines.clone()))
+        {
+            return None;
+        }
+        if pem.is_some() || opaque || (keyword && !reference_only(&line)) {
             // Mask characters, not terminators; no source coordinates are shifted.
             result.extend(
                 line.chars()
@@ -83,6 +113,138 @@ pub fn redact_source(source: &str) -> Option<String> {
         }
     }
     pem.is_none().then_some(result)
+}
+
+fn credential_term(text: &str) -> bool {
+    let mut segmented = String::with_capacity(text.len());
+    let mut previous: Option<char> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if previous.is_some_and(|p| {
+            (c.is_ascii_digit() && p.is_ascii_alphabetic())
+                || (c.is_ascii_alphabetic() && p.is_ascii_digit())
+                || (c.is_ascii_uppercase()
+                    && (p.is_ascii_lowercase()
+                        || (p.is_ascii_uppercase()
+                            && chars.peek().is_some_and(char::is_ascii_lowercase))))
+        }) {
+            segmented.push('_');
+        }
+        segmented.push(c.to_ascii_lowercase());
+        previous = Some(c);
+    }
+    segmented
+        .split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-'))
+        .any(credential_identifier)
+}
+
+fn credential_identifier(identifier: &str) -> bool {
+    let parts = identifier.split(['_', '-']).filter(|s| !s.is_empty());
+    let token_word = parts.clone().any(|word| matches!(word, "token" | "tokens"));
+    let count_word = parts.clone().any(|word| {
+        [
+            "count", "counts", "limit", "budget", "usage", "length", "size",
+        ]
+        .contains(&word)
+    });
+    let plural = parts.clone().any(|word| word == "tokens");
+    let role = parts
+        .clone()
+        .any(|word| TOKEN_METADATA_PARTS.contains(&word));
+    if token_word
+        && role
+        && (plural || count_word)
+        && parts.clone().all(|word| {
+            matches!(word, "token" | "tokens")
+                || TOKEN_METADATA_PARTS.contains(&word)
+                || word.chars().all(|c| c.is_ascii_digit())
+        })
+    {
+        return false;
+    }
+    let compact = identifier.replace(['_', '-'], "");
+    if CREDENTIAL_PARTS
+        .iter()
+        .any(|suffix| compact.ends_with(suffix))
+        || CREDENTIAL_COMPOUNDS.contains(&compact.as_str())
+    {
+        return true;
+    }
+    let mut prior = "";
+    for word in parts {
+        if CREDENTIAL_PARTS.contains(&word) || (prior == "api" && word == "key") {
+            return true;
+        }
+        prior = word;
+    }
+    false
+}
+
+fn value_declaration(line: &str) -> Option<(&str, &str)> {
+    let line = without_safe_comment(line);
+    line.split_once('=')
+        .filter(|(target, value)| {
+            !target.trim_end().ends_with(['!', '<', '>', '=']) && !value.starts_with(['=', '>'])
+        })
+        .or_else(|| {
+            line.split_once(':').filter(|(target, value)| {
+                !target.contains('(')
+                    && !target.trim_start().starts_with("class ")
+                    && !target.ends_with(':')
+                    && !value.starts_with(':')
+            })
+        })
+}
+
+fn reference_only(line: &str) -> bool {
+    // Only retain code identifiers, never literal data or comment contents.
+    // Boundary checks still run first, including qualified/split assignments.
+    let line = without_safe_comment(line);
+    if line.contains(['\'', '"', '`', '#', '/'])
+        || line.contains("/*")
+        || value_declaration(line).is_some_and(|(target, _)| credential_term(target))
+    {
+        return false;
+    }
+    let trimmed = line.trim();
+    let declaration = if trimmed.starts_with("pub(") {
+        trimmed.split_once(") ").map_or(trimmed, |(_, tail)| tail)
+    } else {
+        trimmed.strip_prefix("pub ").unwrap_or(trimmed)
+    };
+    let identifier = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '$'))
+    };
+    let name = trimmed.trim_end_matches([',', ';']);
+    line.contains("::")
+        || identifier(name)
+        || ["use ", "mod "].iter().any(|prefix| {
+            declaration
+                .strip_prefix(prefix)
+                .is_some_and(|tail| identifier(tail.trim_end_matches([';', '{']).trim()))
+        })
+        || (!line.contains('=')
+            && [
+                "fn ",
+                "async fn ",
+                "def ",
+                "async def ",
+                "function ",
+                "async function ",
+            ]
+            .iter()
+            .any(|prefix| declaration.starts_with(prefix)))
+}
+
+fn without_safe_comment(line: &str) -> &str {
+    if let Some((code, comment)) = line.split_once("//") {
+        if !code.contains(['\'', '"', '`']) && !credential_term(comment) {
+            return code;
+        }
+    }
+    line
 }
 
 fn later_assignment<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
@@ -170,16 +332,7 @@ fn ambiguous_value(line: &str) -> bool {
     let comment = ["//", "#", "/*", "*", "<!--"]
         .iter()
         .any(|prefix| trimmed.starts_with(prefix));
-    let declaration = line
-        .split_once('=')
-        .filter(|(target, value)| {
-            !target.trim_end().ends_with(['!', '<', '>', '=']) && !value.starts_with(['=', '>'])
-        })
-        .or_else(|| {
-            line.split_once(':').filter(|(target, _)| {
-                !target.contains('(') && !target.trim_start().starts_with("class ")
-            })
-        });
+    let declaration = value_declaration(line);
     let bare_target = trimmed
         .trim_end()
         .rsplit('.')
@@ -265,14 +418,11 @@ fn ambiguous_value(line: &str) -> bool {
     })
 }
 
-fn redact_http_userinfo(line: &str) -> std::borrow::Cow<'_, str> {
-    let lower = line.to_ascii_lowercase();
+fn redact_url_userinfo(line: &str) -> std::borrow::Cow<'_, str> {
     let mut masked = String::new();
     let mut copied = 0;
-    for (separator, _) in lower.match_indices("://") {
-        if !lower[..separator].ends_with("https") && !lower[..separator].ends_with("http") {
-            continue;
-        }
+    // Authority-shaped userinfo is sensitive regardless of scheme semantics.
+    for (separator, _) in line.match_indices("://") {
         let start = separator + 3;
         let end = line[start..]
             .find(|c: char| {
@@ -328,6 +478,82 @@ fn ambiguous_expression(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retains_token_metadata_and_rust_references_without_retaining_values() {
+        let raw = "use crate::utils::secret_redaction; // max_tokens=6000\npub(crate) use secret_redaction;\nmod secret_redaction;\nuse crate::{\n secret_redaction,\n};\nconst MAX_TOKENS: usize = 6000;\nlet input_tokens = 12;\nlet outputTokens = 40;\nlet reference = crate::secret_redaction::redact_source;\n";
+        assert_eq!(redact_source(raw).as_deref(), Some(raw));
+        for name in [
+            "accessToken",
+            "auth_token",
+            "API_KEY",
+            "apiKey",
+            "secret_value",
+            "clientSecret",
+            "passwordHash",
+            "access_tokens",
+            "refreshTokens",
+            "auth_tokens",
+            "tokens",
+            "mytoken",
+            "mytokens",
+            "token1",
+            "password2",
+            "TOKENvalue",
+            "passwordhash",
+        ] {
+            let raw = format!("const {name} = 'opaque-credential-value';\n");
+            assert!(
+                !redact_source(&raw)
+                    .unwrap()
+                    .contains("opaque-credential-value"),
+                "{name}"
+            );
+        }
+        assert!(redact_source("crate::TOKEN\n = \"opaque-credential-value\";\n").is_none());
+        assert!(
+            redact_source("function max(tokens =\n 'opaque-credential-value'\n) {}\n").is_none()
+        );
+        let metadata =
+            "const max_context_tokens = 8000;\nlet tokenCount = 12;\nlet maxTokens2 = 40;\n";
+        assert_eq!(redact_source(metadata).as_deref(), Some(metadata));
+        let raw = "use crate::secret_redaction; // token = opaque-credential-value;\n";
+        assert!(!redact_source(raw)
+            .unwrap()
+            .contains("opaque-credential-value"));
+        let regex = "const pattern = /token::opaque-credential-value/;\n";
+        assert!(!redact_source(regex)
+            .unwrap()
+            .contains("opaque-credential-value"));
+    }
+
+    #[test]
+    fn masks_authority_userinfo_for_all_schemes_and_retains_host_only_urls() {
+        for scheme in [
+            "http",
+            "https",
+            "postgres",
+            "postgresql",
+            "mysql",
+            "mongodb",
+            "mongodb+srv",
+            "redis",
+            "amqp",
+            "custom+v1",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let raw = format!("const uri = '{scheme}://alice:opaque-credential-value@example.test:1234/path?ok=1#part';{newline}");
+                let safe = redact_source(&raw).unwrap();
+                assert!(!safe.contains("alice"));
+                assert!(!safe.contains("opaque-credential-value"));
+                assert!(safe.contains(&format!("{scheme}://")));
+                assert!(safe.contains("@example.test:1234/path?ok=1#part"));
+                assert!(safe.ends_with(newline));
+                let raw = format!("const uri = '{scheme}://example.test/path';{newline}");
+                assert_eq!(redact_source(&raw).as_deref(), Some(raw.as_str()));
+            }
+        }
+    }
     #[test]
     fn masks_credentials_and_multiline_keys_without_moving_lines() {
         let raw = "const api_key = 'synthetic';\r\n-----BEGIN PRIVATE KEY-----\nsynthetic\n-----END PRIVATE KEY-----\nconst ok = 1;\n";
@@ -357,15 +583,7 @@ mod tests {
         ] {
             assert!(redact_source(source).is_none());
         }
-        for prefix in [
-            "ghp_",
-            "gho_",
-            "xoxb-",
-            "glpat-",
-            "AKIA",
-            "AIza",
-            "postgres://",
-        ] {
+        for prefix in ["ghp_", "gho_", "xoxb-", "glpat-", "AKIA", "AIza"] {
             let safe = redact_source(&format!(
                 "const value = '{prefix}synthetic';\r\nconst ok = 1;"
             ))
