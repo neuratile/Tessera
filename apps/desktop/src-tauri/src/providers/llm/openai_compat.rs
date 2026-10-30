@@ -631,10 +631,9 @@ mod tests {
         parse_sse_event_with_state("test", start, &mut state).unwrap();
         for function in [serde_json::Value::Null, serde_json::json!({"arguments":""})] {
             let wire = serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":function}]}}]});
-            assert!(
-                parse_sse_event_with_state("test", &format!("data: {wire}"), &mut state)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                parse_sse_event_with_state("test", &format!("data: {wire}"), &mut state).unwrap(),
+                [] as [Chunk; 0]
             );
             assert_eq!(state.tool_ids.len(), 1);
             assert_eq!(state.tool_id_bytes, "call_abc".len());
