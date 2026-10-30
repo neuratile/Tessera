@@ -29,6 +29,8 @@ without credential defaults remain usable context. Ambiguous multiline signature
 function expressions, and defaults containing credential terms are visibly omitted.
 Split assignments are checked across whitespace, comments, and closing brackets;
 uncertain continuation scans exceeding 64 lines also omit the source.
+Member/operator/cast continuations of sensitive expressions are also omitted
+rather than accepted before a possible later assignment.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens

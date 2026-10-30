@@ -110,7 +110,9 @@ fn later_assignment<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
                 rest = tail;
                 block_comment = false;
             }
-            rest = trim_continuation(trim_continuation(rest).trim_start_matches([']', ')']));
+            rest = rest.trim_start_matches(|c: char| {
+                c.is_whitespace() || matches!(c, '\u{feff}' | ']' | ')' | '}')
+            });
             if rest.is_empty() {
                 break;
             }
@@ -126,6 +128,23 @@ fn later_assignment<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
                 rest = tail;
                 block_comment = true;
                 continue;
+            }
+            // Operators, member access, casts, and tagged templates may
+            // continue the sensitive expression before its eventual value.
+            // Exclude that uncertainty rather than stop before an assignment.
+            if rest.starts_with(['.', '[', '(', '!', '`', ','])
+                || ["as", "satisfies", "in", "instanceof"]
+                    .iter()
+                    .any(|keyword| {
+                        rest.strip_prefix(keyword).is_some_and(|tail| {
+                            tail.is_empty()
+                                || tail.starts_with(|c: char| {
+                                    !c.is_alphanumeric() && c != '_' && c != '$'
+                                })
+                        })
+                    })
+            {
+                return true;
             }
             let Some((operator, value)) = rest.split_once('=') else {
                 return false;
@@ -512,6 +531,10 @@ mod tests {
         for newline in ["\n", "\r\n"] {
             for raw in [
                 "settings['token']\n= 'opaque-credential-value';\n",
+                "(settings[\n 'token'\n ] )\n = 'opaque-credential-value';\n",
+                "(settings[\n 'token'\n ] /* parts */ )\n = 'opaque-credential-value';\n",
+                "settings[\n 'token'\n ]\n .value\n = 'opaque-credential-value';\n",
+                "(settings[\n 'token'\n ] as string)\n = 'opaque-credential-value';\n",
                 "settings['token'] //;\n= 'opaque-credential-value';\n",
                 "settings['token'] //{\n= 'opaque-credential-value';\n",
                 "settings['token']\n \u{feff}= 'opaque-credential-value';\n",

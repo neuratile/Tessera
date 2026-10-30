@@ -292,6 +292,11 @@ fn credential_continuations_never_reach_final_model_context() {
                 "string =\n'opaque-credential-value'\n) {}",
             ),
             ("settings['token']", "= 'opaque-credential-value';"),
+            ("(settings[\n 'token'\n ] )", "= 'opaque-credential-value';"),
+            (
+                "settings[\n 'token'\n ]\n .value",
+                "= 'opaque-credential-value';",
+            ),
             ("settings['token'] //;", "= 'opaque-credential-value';"),
             (
                 "/* details */ settings['token']",
