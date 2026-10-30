@@ -118,6 +118,7 @@ pub async fn create(
         snapshot: None,
         steps: vec![],
         findings: vec![],
+        excluded_files: None,
         truncation: vec![],
     };
     sqlx::query("INSERT INTO review_sessions(id,project_id,status,sequence,payload,created_at,updated_at) VALUES (?,?,'queued',0,?,?,?)")
@@ -252,6 +253,11 @@ pub async fn update(
             && old.provenance.prompt_version == next.provenance.prompt_version
             && next.steps.starts_with(&old.steps)
             && next.findings.starts_with(&old.findings)
+            && next
+                .excluded_files
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with(old.excluded_files.as_deref().unwrap_or_default())
             && next.truncation.starts_with(&old.truncation)
             && next
                 .findings

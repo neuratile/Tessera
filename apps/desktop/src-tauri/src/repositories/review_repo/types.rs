@@ -142,6 +142,13 @@ pub struct ReviewFinding {
     pub summary: String,
     pub explanation: String,
     pub expected_behavior: String,
+    /// Absent on legacy records; new review generation always supplies this.
+    #[serde(
+        default,
+        deserialize_with = "non_null_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub suggested_test: Option<String>,
     pub severity: ReviewSeverity,
     pub sources: Vec<ReviewSourceReference>,
     pub evidence_state: EvidenceState,
@@ -210,6 +217,13 @@ pub struct ReviewSession {
     pub snapshot: Option<ReviewSnapshot>,
     pub steps: Vec<ReviewStep>,
     pub findings: Vec<ReviewFinding>,
+    /// Final context omissions, appended after prompt selection. Raw snapshot stays immutable.
+    #[serde(
+        default,
+        deserialize_with = "non_null_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub excluded_files: Option<Vec<ReviewExclusion>>,
     pub truncation: Vec<ReviewTruncation>,
 }
 

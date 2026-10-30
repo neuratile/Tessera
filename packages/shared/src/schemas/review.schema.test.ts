@@ -29,6 +29,21 @@ function modeSnapshot(count: number) {
 }
 
 describe('review Rust/Zod shared fixtures', () => {
+  it('preserves legacy findings and validates optional suggestedTest', () => {
+    expect(ReviewSessionSchema.safeParse(fixture.session).success).toBe(true);
+    expect(ReviewSessionSchema.safeParse(mutate('findings.0.suggestedTest', 'Assert expected outcome')).success).toBe(true);
+    for (const value of ['', '   ', null, 'x'.repeat(16385), '\0']) {
+      expect(ReviewSessionSchema.safeParse(mutate('findings.0.suggestedTest', value)).success).toBe(false);
+    }
+  });
+  it('round-trips additive final omissions and rejects malformed omissions', () => {
+    const excludedFiles = [{ path: 'src/support.ts', reason: 'prompt_budget' }];
+    const candidate = { ...fixture.session, excludedFiles };
+    expect(ReviewSessionSchema.parse(candidate)).toEqual(candidate);
+    for (const value of [null, [{ path: 'src/a.ts', reason: '' }]]) {
+      expect(ReviewSessionSchema.safeParse({ ...fixture.session, excludedFiles: value }).success).toBe(false);
+    }
+  });
   it('counts distinct source content, not old/new mode-only references', () => {
     expect(ReviewSnapshotSchema.safeParse(modeSnapshot(5)).success).toBe(true);
     expect(ReviewSnapshotSchema.safeParse(modeSnapshot(9)).success).toBe(false);
