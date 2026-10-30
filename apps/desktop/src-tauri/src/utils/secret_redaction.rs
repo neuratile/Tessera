@@ -87,6 +87,12 @@ fn ambiguous_value(line: &str) -> bool {
     // Deliberately exclude ambiguous declarations instead of parsing arbitrary
     // languages. This also covers template literals and YAML block scalars.
     if let Some((_, value)) = line.split_once('=').or_else(|| line.split_once(':')) {
+        // Comments can hide an unfinished expression, including block comments
+        // spanning later lines. Exclude uncertain declarations rather than try
+        // to parse comments/strings across arbitrary source languages.
+        if has_comment(value) {
+            return true;
+        }
         let value = value.trim();
         if value.is_empty()
             || value.starts_with(['|', '>'])
@@ -117,6 +123,25 @@ fn ambiguous_value(line: &str) -> bool {
         }
         count % 2 != 0
     })
+}
+
+fn has_comment(value: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut chars = value.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(delimiter) = quote {
+            if !escaped && c == delimiter {
+                quote = None;
+            }
+            escaped = !escaped && c == '\\';
+        } else if matches!(c, '\'' | '"') {
+            quote = Some(c);
+        } else if c == '#' || (c == '/' && matches!(chars.peek(), Some('/' | '*'))) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -201,5 +226,32 @@ mod tests {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn excludes_comment_hidden_credential_continuations_lf_and_crlf() {
+        for newline in ["\n", "\r\n"] {
+            for value in [
+                "[ // parts",
+                "[ /* parts */",
+                "[ /* parts",
+                "// parts",
+                "[ # parts",
+            ] {
+                let raw = format!(
+                    "const token = {value}{newline}'opaque-credential-value'{newline}];{newline}"
+                );
+                assert!(redact_source(&raw).is_none(), "{value}");
+            }
+        }
+        let safe =
+            redact_source("const token = 'https://opaque-credential-value/path#fragment';\n")
+                .unwrap();
+        assert!(!safe.contains("opaque-credential-value"));
+        // A scheme-like object key is still followed by a real JS comment.
+        assert!(redact_source(
+            "const token = { http:// parts\nkey: 'opaque-credential-value'\n};\n"
+        )
+        .is_none());
     }
 }

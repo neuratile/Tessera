@@ -225,6 +225,8 @@ fn oversized_required_code_fails_and_redaction_omissions_survive() {
     for content in [
         format!("const a = '{}';\n", "x".repeat(8000)),
         "const apiKey =\n 'synthetic-secret-value';\n".into(),
+        "const token = [ // parts\n'opaque-credential-value'\n];\n".into(),
+        "const token = [ // parts\r\n'opaque-credential-value'\r\n];\r\n".into(),
     ] {
         let (mut capture, support, mut manifest) = fixture();
         let blob = capture.files[0].new.as_mut().unwrap();
@@ -247,12 +249,49 @@ fn oversized_required_code_fails_and_redaction_omissions_survive() {
             ));
         } else {
             let mut context = prepare(&request, &mock).unwrap();
-            fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
+            let messages = fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
+            assert!(!serde_json::to_string(&messages)
+                .unwrap()
+                .contains("opaque-credential-value"));
             assert!(context.excerpts.is_empty());
             assert!(context
                 .omitted
                 .iter()
                 .any(|e| e.path == "src/a.ts" && e.reason == "redaction_unmappable"));
+        }
+    }
+}
+
+#[test]
+fn comment_hidden_credentials_never_reach_final_model_context() {
+    for newline in ["\n", "\r\n"] {
+        for comment in ["// parts", "/* parts */", "/* parts"] {
+            let (capture, mut support, mut manifest) = fixture();
+            let raw = format!(
+                "const token = [ {comment}{newline}'opaque-credential-value'{newline}];{newline}"
+            );
+            let blob = support_blob(&raw);
+            manifest.sources.push(source(&blob, SourceSide::New));
+            manifest.context_paths.push(blob.path.clone());
+            support.files.push(blob);
+            let request = ReviewRequest {
+                provider_config_id: None,
+                model: "pinned-model",
+                capture: &capture,
+                support: &support,
+                manifest: &manifest,
+            };
+            let mock = mock();
+            let mut context = prepare(&request, &mock).unwrap();
+            let messages = fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
+            assert!(!context.model_text().contains("opaque-credential-value"));
+            assert!(!serde_json::to_string(&messages)
+                .unwrap()
+                .contains("opaque-credential-value"));
+            assert!(context
+                .omitted
+                .iter()
+                .any(|e| e.path == "src/support.ts" && e.reason == "redaction_unmappable"));
         }
     }
 }
