@@ -101,6 +101,12 @@ fn ambiguous_value(line: &str) -> bool {
                 !target.contains('(') && !target.trim_start().starts_with("class ")
             })
         });
+    let bare_target = trimmed
+        .trim_end()
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let declaration_head = [
         "const ",
         "let ",
@@ -112,7 +118,21 @@ fn ambiguous_value(line: &str) -> bool {
         "static ",
     ]
     .iter()
-    .any(|prefix| trimmed.starts_with(prefix));
+    .any(|prefix| trimmed.starts_with(prefix))
+        || [
+            "token",
+            "password",
+            "passwd",
+            "secret",
+            "api_key",
+            "apikey",
+            "authorization",
+            "access_token",
+            "refresh_token",
+            "accesstoken",
+            "refreshtoken",
+        ]
+        .contains(&bare_target.as_str());
     // A function name or parameter mentioning passwords is not itself a
     // credential value. Keep masking that line without excluding its body.
     if declaration.is_none() && !declaration_head {
@@ -350,7 +370,13 @@ mod tests {
     #[test]
     fn excludes_next_line_credential_expressions_lf_and_crlf() {
         for newline in ["\n", "\r\n"] {
-            for declaration in ["const token = ''", "const token", "token = ''"] {
+            for declaration in [
+                "const token = ''",
+                "const token",
+                "token = ''",
+                "token",
+                "getConfig().token",
+            ] {
                 for continuation in [
                     "+ 'opaque-credential-value';",
                     "/* continuation */ + 'opaque-credential-value';",
