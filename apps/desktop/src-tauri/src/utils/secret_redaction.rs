@@ -3,11 +3,14 @@
 
 const CREDENTIAL_PARTS: &[&str] = &[
     "password",
+    "passwords",
     "passwd",
     "secret",
+    "secrets",
     "token",
     "tokens",
     "apikey",
+    "apikeys",
     "authorization",
     "bearer",
 ];
@@ -63,7 +66,8 @@ pub fn redact_source(source: &str) -> Option<String> {
             }
             pem = Some(label.into());
         }
-        let keyword = credential_term(&line);
+        let keyword = credential_term(&line) && !numeric_metadata(&line);
+        let authority = line.contains("://");
         let opaque = lower.contains("bearer ")
             || [
                 "sk-",
@@ -91,7 +95,7 @@ pub fn redact_source(source: &str) -> Option<String> {
                 })
             });
         if pem.is_none()
-            && (keyword || opaque)
+            && (keyword || opaque || authority)
             && (ambiguous_value(&line) || later_assignment(lines.clone()))
         {
             return None;
@@ -116,6 +120,10 @@ pub fn redact_source(source: &str) -> Option<String> {
 }
 
 fn credential_term(text: &str) -> bool {
+    credential_term_with_metadata(text, false)
+}
+
+fn credential_term_with_metadata(text: &str, allow_metadata: bool) -> bool {
     let mut segmented = String::with_capacity(text.len());
     let mut previous: Option<char> = None;
     let mut chars = text.chars().peekable();
@@ -135,10 +143,10 @@ fn credential_term(text: &str) -> bool {
     }
     segmented
         .split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-'))
-        .any(credential_identifier)
+        .any(|identifier| credential_identifier(identifier, allow_metadata))
 }
 
-fn credential_identifier(identifier: &str) -> bool {
+fn credential_identifier(identifier: &str, allow_metadata: bool) -> bool {
     let parts = identifier.split(['_', '-']).filter(|s| !s.is_empty());
     let token_word = parts.clone().any(|word| matches!(word, "token" | "tokens"));
     let count_word = parts.clone().any(|word| {
@@ -151,7 +159,8 @@ fn credential_identifier(identifier: &str) -> bool {
     let role = parts
         .clone()
         .any(|word| TOKEN_METADATA_PARTS.contains(&word));
-    if token_word
+    if allow_metadata
+        && token_word
         && role
         && (plural || count_word)
         && parts.clone().all(|word| {
@@ -172,12 +181,26 @@ fn credential_identifier(identifier: &str) -> bool {
     }
     let mut prior = "";
     for word in parts {
-        if CREDENTIAL_PARTS.contains(&word) || (prior == "api" && word == "key") {
+        if CREDENTIAL_PARTS.contains(&word) || (prior == "api" && matches!(word, "key" | "keys")) {
             return true;
         }
         prior = word;
     }
     false
+}
+
+fn numeric_metadata(line: &str) -> bool {
+    if !line.trim_end().ends_with(';') {
+        return false;
+    }
+    let Some((target, value)) = value_declaration(line) else {
+        return false;
+    };
+    let value = value.trim().trim_end_matches(';').trim();
+    credential_term(target)
+        && !credential_term_with_metadata(target, true)
+        && value.chars().any(|c| c.is_ascii_digit())
+        && value.chars().all(|c| c.is_ascii_digit() || c == '_')
 }
 
 fn value_declaration(line: &str) -> Option<(&str, &str)> {
@@ -218,7 +241,15 @@ fn reference_only(line: &str) -> bool {
                 .all(|c| c.is_alphanumeric() || matches!(c, '_' | '$'))
     };
     let name = trimmed.trim_end_matches([',', ';']);
-    line.contains("::")
+    (line.contains("::")
+        && !line.replace("::", "").contains(':')
+        && !line.contains(['[', ']'])
+        && value_declaration(line).is_none_or(|(_, value)| {
+            value
+                .trim_end_matches([';', '\r', '\n'])
+                .chars()
+                .all(|c| c.is_alphanumeric() || c.is_whitespace() || matches!(c, '_' | ':'))
+        }))
         || identifier(name)
         || ["use ", "mod "].iter().any(|prefix| {
             declaration
@@ -240,7 +271,9 @@ fn reference_only(line: &str) -> bool {
 
 fn without_safe_comment(line: &str) -> &str {
     if let Some((code, comment)) = line.split_once("//") {
-        if !code.contains(['\'', '"', '`']) && !credential_term(comment) {
+        if !code.contains(['\'', '"', '`'])
+            && (!credential_term(comment) || numeric_metadata(comment))
+        {
             return code;
         }
     }
@@ -480,8 +513,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_collections_and_split_uris_without_exempting_namespace_values() {
+        for newline in ["\n", "\r\n"] {
+            for name in [
+                "api_keys",
+                "apiKeys",
+                "passwords",
+                "secrets",
+                "cached_tokens",
+                "max_tokens",
+            ] {
+                let raw = format!(
+                    "const {name} = [{newline}'opaque-credential-value'{newline}];{newline}"
+                );
+                assert!(redact_source(&raw).is_none(), "{raw}");
+                let raw = format!("const {name} = ['opaque-credential-value'];{newline}");
+                assert!(
+                    !redact_source(&raw)
+                        .unwrap()
+                        .contains("opaque-credential-value"),
+                    "{raw}"
+                );
+                let raw =
+                    format!("const {name} = 123{newline}+ 'opaque-credential-value';{newline}");
+                assert!(redact_source(&raw).is_none(), "{raw}");
+            }
+            for scheme in [
+                "postgres",
+                "postgresql",
+                "mysql",
+                "mongodb",
+                "redis",
+                "https",
+                "custom+v1",
+            ] {
+                let raw = format!("const uri = '{scheme}://' +{newline}'alice:opaque-credential-value@db.test/app';{newline}");
+                assert!(redact_source(&raw).is_none(), "{raw}");
+            }
+            for value in [
+                "auth::Credentials { token: [17, 43, 91, 202] }",
+                "auth::Credentials { token: 174391202 }",
+            ] {
+                let raw = format!("let config = {value};{newline}");
+                let safe = redact_source(&raw).unwrap();
+                assert!(!safe.contains("17, 43, 91, 202"));
+                assert!(!safe.contains("174391202"));
+            }
+        }
+    }
+
+    #[test]
     fn retains_token_metadata_and_rust_references_without_retaining_values() {
-        let raw = "use crate::utils::secret_redaction; // max_tokens=6000\npub(crate) use secret_redaction;\nmod secret_redaction;\nuse crate::{\n secret_redaction,\n};\nconst MAX_TOKENS: usize = 6000;\nlet input_tokens = 12;\nlet outputTokens = 40;\nlet reference = crate::secret_redaction::redact_source;\n";
+        let raw = "use crate::utils::secret_redaction; // max_tokens=6000;\npub(crate) use secret_redaction;\nmod secret_redaction;\nuse crate::{\n secret_redaction,\n};\nconst MAX_TOKENS: usize = 6000;\nlet input_tokens = 12;\nlet outputTokens = 40;\nlet reference = crate::secret_redaction::redact_source;\n";
         assert_eq!(redact_source(raw).as_deref(), Some(raw));
         for name in [
             "accessToken",

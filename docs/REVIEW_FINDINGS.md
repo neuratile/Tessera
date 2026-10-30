@@ -32,9 +32,12 @@ Split assignments are checked across whitespace, comments, and closing brackets;
 uncertain continuation scans exceeding 64 lines also omit the source.
 Member/operator/cast continuations of sensitive expressions are also omitted
 rather than accepted before a possible later assignment.
-Credential identifiers use word/case segments, so token metadata such as
-`max_tokens` stays available. Identifier-only Rust references/imports are retained
+Credential identifiers use word/case segments, including plural credential names.
+Token metadata such as `max_tokens` stays available only for numeric literals;
+collections and arbitrary values receive the credential checks. Identifier-only Rust references/imports are retained
 after the same continuation checks; literals, credentials, and comments stay masked.
+Authority-shaped URLs also receive continuation checks, so split userinfo values
+are omitted rather than exposed after a scheme on an earlier line.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens
