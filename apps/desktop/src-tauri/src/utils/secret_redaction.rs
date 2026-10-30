@@ -28,6 +28,10 @@ pub fn redact_source(source: &str) -> Option<String> {
                 "api-key",
                 "authorization",
                 "bearer ",
+            ]
+            .iter()
+            .any(|s| lower.contains(s))
+            || [
                 "sk-",
                 "ghp_",
                 "gho_",
@@ -49,7 +53,14 @@ pub fn redact_source(source: &str) -> Option<String> {
                 "redis://",
             ]
             .iter()
-            .any(|s| lower.contains(s));
+            .any(|prefix| {
+                lower.match_indices(prefix).any(|(index, _)| {
+                    lower[..index]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+                })
+            });
         if sensitive {
             if pem.is_none() && ambiguous_value(line) {
                 return None;
@@ -77,9 +88,23 @@ fn ambiguous_value(line: &str) -> bool {
     // languages. This also covers template literals and YAML block scalars.
     if let Some((_, value)) = line.split_once('=').or_else(|| line.split_once(':')) {
         let value = value.trim();
-        if value.is_empty() || value.starts_with(['|', '>']) || value.ends_with('\\') {
+        if value.is_empty()
+            || value.starts_with(['|', '>'])
+            || value.ends_with([
+                '\\', '(', '[', '{', '+', '-', '*', '/', '%', '&', '|', '^', '?', ',', ':', '=',
+                '<', '>', '.',
+            ])
+        {
             return true;
         }
+    }
+    // Apostrophes/quotes in comments are prose, not string delimiters. Keep
+    // masking the line, and retain the value-continuation guard above.
+    if ["//", "#", "/*", "*", "<!--"]
+        .iter()
+        .any(|prefix| line.trim_start().starts_with(prefix))
+    {
+        return false;
     }
     ['\'', '"', '`'].into_iter().any(|quote| {
         let mut escaped = false;
@@ -141,6 +166,40 @@ mod tests {
             .unwrap();
             assert!(!safe.contains("synthetic"));
             assert!(safe.ends_with("\r\nconst ok = 1;"));
+        }
+    }
+    #[test]
+    fn masks_comment_secrets_without_excluding_safe_prose_or_embedded_prefixes() {
+        let source = "// shouldn't keep a token here\nconst task_name = 'task-runner';\n";
+        let safe = redact_source(source).unwrap();
+        assert!(!safe.contains("shouldn't"));
+        assert!(safe.ends_with("const task_name = 'task-runner';\n"));
+        assert_eq!(
+            redact_source("const task_name = 'task-runner';"),
+            Some("const task_name = 'task-runner';".into())
+        );
+        assert!(redact_source("// token =\nunknown").is_none());
+    }
+    #[test]
+    fn excludes_multiline_credential_continuations_before_excerpting() {
+        for value in [
+            "make(",
+            "[",
+            "{",
+            "'first' +",
+            "first &&",
+            "first ||",
+            "first ?",
+            "first /",
+            "first -",
+            "first,",
+            "first:",
+            "first =",
+        ] {
+            assert!(
+                redact_source(&format!("const token = {value}\n'synthetic';\n")).is_none(),
+                "{value}"
+            );
         }
     }
 }
