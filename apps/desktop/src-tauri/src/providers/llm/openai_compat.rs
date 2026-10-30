@@ -444,7 +444,7 @@ struct OpenAiToolCall {
     function: Option<OpenAiToolFunction>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct OpenAiToolFunction {
     #[serde(default)]
     name: Option<String>,
@@ -512,21 +512,17 @@ fn openai_chunk_to_chunks(
             }
         }
         for call in choice.delta.tool_calls {
-            let Some(function) = call.function else {
-                return Err(LlmError::InvalidResponse {
-                    provider,
-                    message: "Tool call fragment has no function".into(),
-                });
-            };
+            let key = (choice.index, call.index);
+            let function = call.function.unwrap_or_default();
             if function.name.as_ref().is_none_or(String::is_empty)
                 && function.arguments.as_ref().is_none_or(String::is_empty)
+                && !state.tool_ids.contains_key(&key)
             {
                 return Err(LlmError::InvalidResponse {
                     provider,
                     message: "Tool call fragment has no name or arguments".into(),
                 });
             }
-            let key = (choice.index, call.index);
             let id = match (state.tool_ids.get(&key), call.id) {
                 (Some(known), Some(id)) if known != &id => {
                     return Err(LlmError::InvalidResponse {
@@ -627,6 +623,21 @@ mod tests {
             }
             assert_eq!(state.tool_ids.len(), count);
             assert!(state.tool_id_bytes <= MAX_TOOL_ID_STATE_BYTES);
+        }
+        // Empty continuations of an existing call are harmless no-ops, not
+        // new retained identities. Preserve compatible endpoint behavior.
+        let mut state = OpenAiStreamState::default();
+        let start = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"test"}}]}}]}"#;
+        parse_sse_event_with_state("test", start, &mut state).unwrap();
+        for function in [serde_json::Value::Null, serde_json::json!({"arguments":""})] {
+            let wire = serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":function}]}}]});
+            assert!(
+                parse_sse_event_with_state("test", &format!("data: {wire}"), &mut state)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(state.tool_ids.len(), 1);
+            assert_eq!(state.tool_id_bytes, "call_abc".len());
         }
     }
     use crate::providers::llm::types::Content;
