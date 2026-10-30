@@ -275,6 +275,22 @@ fn credential_continuations_never_reach_final_model_context() {
             ("const token = [ /* parts", "'opaque-credential-value'\n];"),
             ("const token = ''", "+ 'opaque-credential-value';"),
             ("const token", "= 'opaque-credential-value';"),
+            (
+                "const token = (() => {",
+                "return 'opaque-credential-value';\n})();",
+            ),
+            (
+                "const token = functionFromParts(",
+                "'opaque-credential-value'\n);",
+            ),
+            (
+                "function connect(password =",
+                "'opaque-credential-value'\n) {}",
+            ),
+            (
+                "function connect(password:",
+                "string =\n'opaque-credential-value'\n) {}",
+            ),
         ] {
             let (capture, mut support, mut manifest) = fixture();
             let raw = format!("{declaration}\n{continuation}\n").replace('\n', newline);

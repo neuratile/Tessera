@@ -24,7 +24,9 @@ Credential value declarations without an explicit same-line semicolon are also o
 balanced quotes alone cannot rule out a next-line expression continuation across
 languages. Comments and PEM blocks retain their existing line-preserving masking.
 HTTP(S) URL userinfo is masked before other checks, preserving hosts, paths, query
-strings, and line endings. Authentication function signatures remain usable context.
+strings, and line endings. Complete named authentication function signatures
+without credential defaults remain usable context. Ambiguous multiline signatures,
+function expressions, and defaults containing credential terms are visibly omitted.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens

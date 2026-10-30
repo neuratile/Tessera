@@ -92,9 +92,7 @@ fn ambiguous_value(line: &str) -> bool {
     let declaration = line
         .split_once('=')
         .filter(|(target, value)| {
-            !target.trim_end().ends_with(['!', '<', '>', '='])
-                && !value.starts_with(['=', '>'])
-                && (comment || !ambiguous_expression(target))
+            !target.trim_end().ends_with(['!', '<', '>', '=']) && !value.starts_with(['=', '>'])
         })
         .or_else(|| {
             line.split_once(':').filter(|(target, _)| {
@@ -136,17 +134,13 @@ fn ambiguous_value(line: &str) -> bool {
     // A function name or parameter mentioning passwords is not itself a
     // credential value. Keep masking that line without excluding its body.
     if declaration.is_none() && !declaration_head {
-        return false;
+        // An unfinished parameter list can introduce a default on a later
+        // line, even when this line has no '=' yet. Complete signatures remain.
+        return !comment && line.matches('(').count() > line.matches(')').count();
     }
     // Deliberately exclude ambiguous declarations instead of parsing arbitrary
     // languages. This also covers template literals and YAML block scalars.
     if let Some((_, value)) = declaration {
-        if (value.contains("=>") && !value.contains(['\'', '"', '`']))
-            || value.trim_start().starts_with("function")
-            || value.trim_start().starts_with("lambda ")
-        {
-            return false;
-        }
         // Comments can hide an unfinished expression, including block comments
         // spanning later lines. Exclude uncertain declarations rather than try
         // to parse comments/strings across arbitrary source languages.
@@ -166,10 +160,7 @@ fn ambiguous_value(line: &str) -> bool {
     }
     // Apostrophes/quotes in comments are prose, not string delimiters. Keep
     // masking the line, and retain the value-continuation guard above.
-    if ["//", "#", "/*", "*", "<!--"]
-        .iter()
-        .any(|prefix| line.trim_start().starts_with(prefix))
-    {
+    if comment {
         return false;
     }
     // A balanced line need not finish its expression: JS/TS permits `''`
@@ -412,7 +403,6 @@ mod tests {
             "fn verify_password(password: &str) -> bool {\n    true\n}\n",
             "def verify_password(password):\n    return True\n",
             "function verify_password(password) {\n    return true;\n}\n",
-            "const verify_password = (password) => {\n    return true;\n};\n",
         ] {
             assert!(redact_source(source).is_some(), "{source}");
         }
@@ -432,6 +422,26 @@ mod tests {
             assert!(!safe.contains("opaque-value"));
             assert!(!safe.contains("o'reilly"));
             assert!(safe.contains("@example.com/path"));
+        }
+    }
+
+    #[test]
+    fn excludes_function_values_and_multiline_default_credentials() {
+        for newline in ["\n", "\r\n"] {
+            for raw in [
+                "const token = (() => {\n  return 'opaque-credential-value';\n})();\n",
+                "const token = functionFromParts(\n  'opaque-credential-value'\n);\n",
+                "const token = functionFromParts('first')\n  + 'opaque-credential-value';\n",
+                "function connect(password =\n  'opaque-credential-value'\n) {}\n",
+                "function connect(password:\n  string =\n  'opaque-credential-value'\n) {}\n",
+                "def connect(password =\n  'opaque-credential-value'\n):\n    pass\n",
+                "const verify_password = (password) => {\n  return true;\n};\n",
+            ] {
+                assert!(
+                    redact_source(&raw.replace('\n', newline)).is_none(),
+                    "{raw}"
+                );
+            }
         }
     }
 }
