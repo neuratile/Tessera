@@ -223,6 +223,9 @@ fn record_retrieval_status(
     result: &mut ReviewContext,
 ) {
     for hint in hints {
+        if result.omitted.iter().any(|e| e.path == hint.path) {
+            continue;
+        }
         let blob = snapshot
             .files
             .iter()

@@ -720,6 +720,11 @@ async fn old_side_excluded_dependencies_never_return_as_new_support() {
             .omitted
             .iter()
             .any(|e| e.path == "dep.js" && e.reason == reason));
+        assert!(context
+            .omitted
+            .iter()
+            .filter(|e| e.path == "dep.js")
+            .all(|e| e.reason == reason));
     }
 }
 
