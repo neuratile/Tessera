@@ -81,38 +81,33 @@ mod tests {
 
     #[tokio::test]
     async fn interrupted_error_body_keeps_received_prefix_and_http_status() {
-        use std::io::{Error, ErrorKind};
-        use std::sync::{mpsc, Arc, Mutex};
-        let mut server = mockito::Server::new_async().await;
-        let (release, wait) = mpsc::channel();
-        let wait = Arc::new(Mutex::new(wait));
-        let mock = server
-            .mock("GET", "/")
-            .with_status(401)
-            .with_chunked_body(move |writer| {
-                writer.write_all(b"partial diagnostic")?;
-                // Fail only after the client has received the response headers.
-                wait.lock().unwrap().recv().unwrap();
-                Err(Error::new(
-                    ErrorKind::ConnectionReset,
-                    "synthetic body interruption",
-                ))
-            })
-            .expect(1)
-            .create_async()
-            .await;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            {
+                let mut reader = tokio::io::BufReader::new(&mut socket);
+                let mut headers = String::new();
+                while !headers.ends_with("\r\n\r\n") {
+                    assert!(reader.read_line(&mut headers).await.unwrap() > 0);
+                }
+            }
+            // Send real partial bytes, then close before Content-Length is met.
+            socket.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial diagnostic").await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
         let response = reqwest::Client::new()
-            .get(server.url())
+            .get(format!("http://{address}/"))
             .send()
             .await
             .unwrap();
         let status = response.status();
         let headers = response.headers().clone();
-        release.send(()).unwrap();
         let prefix = error_body(response).await;
         assert_eq!(prefix, "partial diagnostic");
         let error = super::super::openai_compat::map_http_error("test", status, &headers, &prefix);
         assert_eq!(error.code(), "LLM_AUTH_FAILED");
-        mock.assert_async().await;
+        server.await.unwrap();
     }
 }
