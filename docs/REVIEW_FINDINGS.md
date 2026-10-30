@@ -20,9 +20,11 @@ is removed. Metadata-only changes supply old/new modes and paths separately;
 their file-level citations omit both line fields. Redaction masks credential
 lines and PEM blocks while preserving CR/LF. Ambiguous multiline credential
 values exclude the file instead of sending uncertain continuation lines.
-Credential-bearing code without an explicit same-line semicolon is also omitted:
+Credential value declarations without an explicit same-line semicolon are also omitted:
 balanced quotes alone cannot rule out a next-line expression continuation across
 languages. Comments and PEM blocks retain their existing line-preserving masking.
+HTTP(S) URL userinfo is masked before other checks, preserving hosts, paths, query
+strings, and line endings. Authentication function signatures remain usable context.
 
 The full serialized provider-neutral request (including escaped content,
 messages, model, schema, options, and a framing reserve) must fit 8,000 tokens

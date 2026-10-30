@@ -303,3 +303,27 @@ fn credential_continuations_never_reach_final_model_context() {
         }
     }
 }
+
+#[test]
+fn url_userinfo_is_masked_in_final_serialized_context_without_losing_safe_url() {
+    let (capture, mut support, mut manifest) = fixture();
+    let blob = support_blob("const proxy = 'https://alice:opaque-credential-value@example.com/path';\r\nconst ok = 1;\r\n");
+    manifest.sources.push(source(&blob, SourceSide::New));
+    manifest.context_paths.push(blob.path.clone());
+    support.files.push(blob);
+    let request = ReviewRequest {
+        provider_config_id: None,
+        model: "pinned-model",
+        capture: &capture,
+        support: &support,
+        manifest: &manifest,
+    };
+    let mock = mock();
+    let mut context = prepare(&request, &mock).unwrap();
+    let messages = fit(&request, &mut context, &mock, &review_v1::tool_schema()).unwrap();
+    let serialized = serde_json::to_string(&messages).unwrap();
+    assert!(!serialized.contains("opaque-credential-value"));
+    assert!(!serialized.contains("alice"));
+    assert!(serialized.contains("@example.com/path"));
+    assert!(context.excerpts.iter().any(|e| e.path == "src/support.ts"));
+}

@@ -8,7 +8,8 @@
 pub fn redact_source(source: &str) -> Option<String> {
     let mut pem: Option<String> = None;
     let mut result = String::with_capacity(source.len());
-    for line in source.split_inclusive('\n') {
+    for raw_line in source.split_inclusive('\n') {
+        let line = redact_http_userinfo(raw_line);
         let lower = line.to_ascii_lowercase();
         if let Some((_, rest)) = lower.split_once("-----begin ") {
             let (label, _) = rest.split_once("-----")?;
@@ -62,7 +63,7 @@ pub fn redact_source(source: &str) -> Option<String> {
                 })
             });
         if sensitive {
-            if pem.is_none() && ambiguous_value(line) {
+            if pem.is_none() && ambiguous_value(&line) {
                 return None;
             }
             // Mask characters, not terminators; no source coordinates are shifted.
@@ -71,7 +72,7 @@ pub fn redact_source(source: &str) -> Option<String> {
                     .map(|c| if matches!(c, '\r' | '\n') { c } else { '*' }),
             );
         } else {
-            result.push_str(line);
+            result.push_str(&line);
         }
         if pem
             .as_ref()
@@ -84,9 +85,48 @@ pub fn redact_source(source: &str) -> Option<String> {
 }
 
 fn ambiguous_value(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let comment = ["//", "#", "/*", "*", "<!--"]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix));
+    let declaration = line
+        .split_once('=')
+        .filter(|(target, value)| {
+            !target.trim_end().ends_with(['!', '<', '>', '='])
+                && !value.starts_with(['=', '>'])
+                && (comment || !ambiguous_expression(target))
+        })
+        .or_else(|| {
+            line.split_once(':').filter(|(target, _)| {
+                !target.contains('(') && !target.trim_start().starts_with("class ")
+            })
+        });
+    let declaration_head = [
+        "const ",
+        "let ",
+        "var ",
+        "export const ",
+        "export let ",
+        "pub const ",
+        "pub static ",
+        "static ",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix));
+    // A function name or parameter mentioning passwords is not itself a
+    // credential value. Keep masking that line without excluding its body.
+    if declaration.is_none() && !declaration_head {
+        return false;
+    }
     // Deliberately exclude ambiguous declarations instead of parsing arbitrary
     // languages. This also covers template literals and YAML block scalars.
-    if let Some((_, value)) = line.split_once('=').or_else(|| line.split_once(':')) {
+    if let Some((_, value)) = declaration {
+        if (value.contains("=>") && !value.contains(['\'', '"', '`']))
+            || value.trim_start().starts_with("function")
+            || value.trim_start().starts_with("lambda ")
+        {
+            return false;
+        }
         // Comments can hide an unfinished expression, including block comments
         // spanning later lines. Exclude uncertain declarations rather than try
         // to parse comments/strings across arbitrary source languages.
@@ -131,6 +171,35 @@ fn ambiguous_value(line: &str) -> bool {
         }
         count % 2 != 0
     })
+}
+
+fn redact_http_userinfo(line: &str) -> std::borrow::Cow<'_, str> {
+    let lower = line.to_ascii_lowercase();
+    let mut masked = String::new();
+    let mut copied = 0;
+    for (separator, _) in lower.match_indices("://") {
+        if !lower[..separator].ends_with("https") && !lower[..separator].ends_with("http") {
+            continue;
+        }
+        let start = separator + 3;
+        let end = line[start..]
+            .find(|c: char| {
+                c.is_whitespace() || matches!(c, '/' | '?' | '#' | '"' | '`' | '<' | '>')
+            })
+            .map_or(line.len(), |offset| start + offset);
+        if let Some(offset) = line[start..end].rfind('@') {
+            let at = start + offset;
+            masked.push_str(&line[copied..start]);
+            masked.extend(line[start..at].chars().map(|_| '*'));
+            copied = at;
+        }
+    }
+    if copied == 0 {
+        std::borrow::Cow::Borrowed(line)
+    } else {
+        masked.push_str(&line[copied..]);
+        std::borrow::Cow::Owned(masked)
+    }
 }
 
 fn ambiguous_expression(value: &str) -> bool {
@@ -292,8 +361,51 @@ mod tests {
                     assert!(redact_source(&raw).is_none(), "{raw}");
                 }
             }
+            assert!(redact_source(&format!(
+                "const token = '=>'{newline} + 'opaque-credential-value';{newline}"
+            ))
+            .is_none());
+            for declaration in [
+                "const token: (string) = ''",
+                "getConfig().token = ''",
+                "settings['('].token = ''",
+            ] {
+                assert!(redact_source(&format!(
+                    "{declaration}{newline} + 'opaque-credential-value';{newline}"
+                ))
+                .is_none());
+            }
         }
         assert!(redact_source("// token = useful prose\nconst ok = 1;\n").is_some());
         assert!(redact_source("const token = 'opaque';\nconst ok = 1;\n").is_some());
+    }
+
+    #[test]
+    fn retains_authentication_functions_and_masks_http_url_userinfo() {
+        for source in [
+            "fn verify_password(password: &str) -> bool {\n    true\n}\n",
+            "def verify_password(password):\n    return True\n",
+            "function verify_password(password) {\n    return true;\n}\n",
+            "const verify_password = (password) => {\n    return true;\n};\n",
+        ] {
+            assert!(redact_source(source).is_some(), "{source}");
+        }
+        for newline in ["\n", "\r\n"] {
+            let raw = format!("const proxy = 'HTTP://alice:opaque-value@example.com:8080/path'; const other = \"https://bob:p%40ss@second.test?q=1#part\";{newline}const ok = 1;{newline}");
+            let safe = redact_source(&raw).unwrap();
+            assert!(!safe.contains("alice"));
+            assert!(!safe.contains("opaque-value"));
+            assert!(!safe.contains("p%40ss"));
+            assert!(safe.contains("@example.com:8080/path"));
+            assert!(safe.contains("@second.test?q=1#part"));
+            assert!(safe.ends_with(&format!("{newline}const ok = 1;{newline}")));
+            let safe = redact_source(
+                "const proxy = \"https://o'reilly:opaque-value@example.com/path\";\n",
+            )
+            .unwrap();
+            assert!(!safe.contains("opaque-value"));
+            assert!(!safe.contains("o'reilly"));
+            assert!(safe.contains("@example.com/path"));
+        }
     }
 }
