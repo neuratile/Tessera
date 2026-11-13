@@ -1656,21 +1656,73 @@ fn renest_flattened_array_items(
 /// value to its compact JSON text so a richer-but-wrong-shaped value
 /// validates instead of hard-failing the generation. Nulls are left for
 /// validation to report.
+///
+/// The same applies to items of plain string arrays: a model copies a
+/// neighbouring object shape into a string list (`suspensionCriteria`
+/// items emitted as `risks`-style `{description, mitigation}` objects).
+/// An object holding only strings becomes its values joined with an em
+/// dash, so the stored text stays readable. Enum- and pattern-constrained
+/// items are left alone: no stringified object could satisfy them, and
+/// the untouched value gives a clearer validation error.
 fn coerce_structured_strings(
     obj: &mut serde_json::Map<String, JsonValue>,
     properties: &serde_json::Map<String, JsonValue>,
 ) {
     for (schema_key, property_schema) in properties {
-        if property_schema.get("type").and_then(|t| t.as_str()) != Some("string") {
+        let Some(val) = obj.get_mut(schema_key) else {
             continue;
+        };
+        match property_schema.get("type").and_then(|t| t.as_str()) {
+            Some("string") => {
+                if !matches!(val, JsonValue::String(_) | JsonValue::Null) {
+                    let text = val.to_string();
+                    *val = JsonValue::String(text);
+                }
+            }
+            Some("array") => {
+                let Some(items_schema) = property_schema.get("items") else {
+                    continue;
+                };
+                let plain_string_items = items_schema.get("type").and_then(|t| t.as_str())
+                    == Some("string")
+                    && items_schema.get("enum").is_none()
+                    && items_schema.get("pattern").is_none();
+                let JsonValue::Array(items) = val else {
+                    continue;
+                };
+                if !plain_string_items {
+                    continue;
+                }
+                for item in items {
+                    if !matches!(item, JsonValue::String(_) | JsonValue::Null) {
+                        let text = structured_item_text(item);
+                        *item = JsonValue::String(text);
+                    }
+                }
+            }
+            _ => {}
         }
-        if let Some(val) = obj.get_mut(schema_key) {
-            if !matches!(val, JsonValue::String(_) | JsonValue::Null) {
-                let text = val.to_string();
-                *val = JsonValue::String(text);
+    }
+}
+
+/// Text for a structured value found where a string array item belongs.
+/// A non-empty object whose values are all strings reads as those values
+/// joined with an em dash; anything else falls back to compact JSON.
+fn structured_item_text(value: &JsonValue) -> String {
+    if let JsonValue::Object(map) = value {
+        let parts: Option<Vec<&str>> = map.values().map(JsonValue::as_str).collect();
+        if let Some(parts) = parts {
+            let parts: Vec<&str> = parts
+                .into_iter()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .collect();
+            if !parts.is_empty() {
+                return parts.join(" \u{2014} ");
             }
         }
     }
+    value.to_string()
 }
 
 /// Swap `startLine`/`endLine` when a model emits them inverted. JSON
@@ -3635,6 +3687,55 @@ mod tests {
         assert!(test_data.contains("user@example.com"));
         // Plain string values are untouched by the coercion pass.
         assert_eq!(data["cases"][0]["title"], "Login succeeds with valid credentials");
+    }
+
+    #[test]
+    fn normalize_coerces_structured_string_array_items() {
+        // Reproduces the integration-test failure on qwen2.5-coder:1.5b:
+        // the model emitted `suspensionCriteria` items shaped like the
+        // neighbouring `risks` objects, failing with
+        // "is not of type \"string\"".
+        let schema = test_plan_v2::tool();
+        let mut data = serde_json::json!({
+            "summary": "Auth module plan",
+            "objectives": ["Verify login"],
+            "scope": { "inScope": ["src/auth.js"], "outOfScope": [] },
+            "strategy": "Unit tests first",
+            "testLevels": ["unit", { "level": "system" }],
+            "testTypes": ["functional"],
+            "environments": ["Node 20"],
+            "risks": [{ "description": "Token leak", "mitigation": "Rotate" }],
+            "entryCriteria": ["Build passes"],
+            "exitCriteria": ["All cases pass"],
+            "suspensionCriteria": [
+                "Environment outage",
+                {
+                    "description": "The blocking defect rate exceeds 10%.",
+                    "mitigation": "Resume after the blockers are fixed."
+                },
+                { "count": 3 }
+            ],
+            "deliverables": ["Test report"]
+        });
+        normalize_missing_arrays(&mut data, &schema);
+
+        let criteria = data["suspensionCriteria"].as_array().expect("array");
+        assert_eq!(criteria[0], "Environment outage");
+        assert_eq!(
+            criteria[1],
+            "The blocking defect rate exceeds 10%. \u{2014} Resume after the blockers are fixed."
+        );
+        // Non-string values fall back to compact JSON.
+        assert_eq!(criteria[2], r#"{"count":3}"#);
+        // Object arrays keep their shape.
+        assert_eq!(data["risks"][0]["mitigation"], "Rotate");
+        // Enum-constrained items are not coerced, so validation still
+        // reports the bad level instead of a stringified object.
+        assert!(data["testLevels"][1].is_object());
+        assert!(validate_tool_output(&schema, &data).is_err());
+
+        data["testLevels"] = serde_json::json!(["unit"]);
+        validate_tool_output(&schema, &data).expect("coerced criteria validate");
     }
 
     #[test]

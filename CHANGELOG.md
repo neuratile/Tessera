@@ -44,6 +44,14 @@ commit messages and [Semantic Versioning](https://semver.org/) for releases.
   past check's per-test verdicts. See
   [`plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md`](plan/versions/v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) §8.
 
+### 🐛 Fixed
+
+- **Object items in string lists no longer fail generation.** Small local models
+  sometimes write a test plan's `suspensionCriteria` (or another string list) as
+  `{description, mitigation}` objects. The output normalizer now turns such an
+  item into readable text before schema validation. Enum- and
+  pattern-constrained lists are unchanged.
+
 ### 🚀 Added (merged to master 2026-06-09)
 
 - **Explicit connection selection** (#66) — the active LLM connection is now a
