@@ -1,6 +1,6 @@
 # Project status
 
-Reviewed against the repository on 2026-10-06. “Implemented” means code is on
+Reviewed against the repository on 2026-11-13. “Implemented” means code is on
 the main development line, not that an installer is publicly released or every
 provider/model combination has been evaluated.
 
@@ -16,16 +16,26 @@ provider/model combination has been evaluated.
 | Quality | Flaky history, bounded test healing/history, JS/TS mutation scoring/improvement |
 | Export | Markdown/JSON, spreadsheet/tabular formats, Jira Cloud artifact push |
 | Optional API | Boards service in `apps/server`, separately checked in CI |
-| Review foundations | Staged-review contract, checkout/clean-control fixture, and read-only staged Git capture |
+| Review foundations | Staged-review contract and fixture, plus backend-only Git capture, session/snapshot persistence, bounded context, and findings generation |
 
 ## Planned next
 
 The [review contract](../plan/versions/v2/AI_FIRST_REVIEW.md) defines staged
 index-versus-HEAD capture, bounded context, findings, immutable snapshots, and
-evidence states. The Tauri-independent capture service reads pinned Git blobs;
-persistence/IPC, review UI, and the evaluation harness are not implemented.
-Capture retains raw source locally; model-facing redaction belongs to the later
-context step. Fixture success is not a model evaluation score.
+evidence states. Four backend pieces exist, each without a command or UI:
+
+- Capture (#106) reads pinned Git blobs without changing Git or working files.
+- Persistence (#107) adds migration `0011_reviews.sql`, `review_repo`, and
+  matching Zod schemas. Terminal sessions and snapshots are immutable.
+- [Context](./REVIEW_CONTEXT.md) (#108) assembles budgeted excerpts from
+  captured index bytes.
+- [Findings](./REVIEW_FINDINGS.md) (#109) makes one call to the active model,
+  redacts credentials first, and accepts only citations that fit the supplied
+  excerpts. Every finding is `suspected`.
+
+The coordinator/IPC (#110), review UI (#111), execution evidence (#112), and
+evaluation harness (#114) are not implemented. Capture retains raw source
+locally. Fixture success is not a model evaluation score.
 
 Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104) and the
 [delivery order](../plan/ROADMAP.md). Prove the desktop workflow before core,

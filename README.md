@@ -12,9 +12,11 @@ inspect coverage, and export results.
 
 **Next: Review my changes.** We are building a staged Git review with code-linked
 findings and evidence tied to exact source/test versions. The
-[contract](./plan/versions/v2/AI_FIRST_REVIEW.md),
-[checkout fixture](./evals/README.md), and the read-only staged Git capture service
-are available. The full review engine and UI are **not implemented yet**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
+[contract](./plan/versions/v2/AI_FIRST_REVIEW.md) and
+[checkout fixture](./evals/README.md) are available. Four backend pieces are
+merged: read-only staged Git capture, review persistence, bounded source
+context, and validated findings generation. Nothing in the app calls them
+yet. The review workflow, IPC, and UI are **not implemented**. Follow [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
 
 ## What works today
 
@@ -68,9 +70,9 @@ node --test evals/fixtures/checkout/fixture.test.mjs
 
 This checks a seeded checkout bug and a clean control without an LLM, Docker,
 or the desktop app. It is a fixture check, not a working review or model accuracy
-score. Read-only Git capture is implemented; persistence/contracts, context,
-and findings come next. Core extraction, CLI, and MCP follow a proven desktop
-workflow.
+score. Capture, persistence/contracts, context, and findings are implemented as
+backend services. The workflow/IPC and desktop UI come next. Core extraction,
+CLI, and MCP follow a proven desktop workflow.
 
 ## Repository map
 

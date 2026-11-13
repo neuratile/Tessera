@@ -4,7 +4,7 @@
 
 Tessera is a local-first AI testing IDE built as a Tauri desktop app. The React/TypeScript renderer lives in `apps/desktop/src`, with UI components, stores, utilities, assets, and frontend tests colocated there. The Rust backend lives in `apps/desktop/src-tauri/src`; keep commands thin, put orchestration in `services`, data access in `repositories`, provider integrations in `providers`, and prompt logic in `prompts`. Shared schemas and types are in `packages/shared/src`; tooling presets live in `packages/eslint-config` and `packages/tsconfig`. Supporting material lives in `docs/`, `plan/`, `rules/`, and `tools/scripts/`.
 
-The staged-review contract and checkout fixture are available; the review runtime, CLI, and MCP are planned. See [current status](docs/PROJECT_STATUS.md) and [documentation index](docs/README.md).
+The staged-review contract, checkout fixture, and backend review services (Git capture, persistence, bounded context, findings generation) are available. No command or UI calls them yet. The review workflow, CLI, and MCP are planned. See [current status](docs/PROJECT_STATUS.md) and [documentation index](docs/README.md).
 
 ## Build, Test, and Development Commands
 

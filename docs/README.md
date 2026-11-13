@@ -9,6 +9,8 @@ proposed work is not automatically implemented.
 | [Project status](./PROJECT_STATUS.md) | Implemented capabilities and planned work |
 | [Architecture](./ARCHITECTURE.md) | Code ownership, contracts, and data boundaries |
 | [Feature review](./FEATURE_REVIEW.md) | Important limitations |
+| [Review context](./REVIEW_CONTEXT.md) | Internal API: bounded staged-source context |
+| [Review findings](./REVIEW_FINDINGS.md) | Internal API: validated findings generation |
 | [Contributing](../CONTRIBUTING.md) | Pick and submit a useful change |
 | [CI/CD](./CI_CD.md) | Local checks, required jobs, delivery |
 | [Releasing](./RELEASING.md) | Validate a tag and review draft installers |
@@ -21,8 +23,10 @@ proposed work is not automatically implemented.
 [staged-review contract](../plan/versions/v2/AI_FIRST_REVIEW.md) →
 [checkout fixture](../evals/README.md).
 
-The contract and fixture are available. The review runtime, desktop UI, and
-evaluation harness remain delivery work. CLI and MCP are later integrations.
+The contract and fixture are available. Backend capture, persistence, context,
+and findings services are merged without a command or UI. The review
+workflow/IPC, desktop UI, execution evidence, and evaluation harness remain
+delivery work. CLI and MCP are later integrations.
 
 ## Reference and history
 

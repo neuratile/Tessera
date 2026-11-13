@@ -41,7 +41,7 @@ documents retain historical shipped work and deferred ideas.
 
 | Doc | Feature |
 |---|---|
-| [`AI_FIRST_REVIEW.md`](./v2/AI_FIRST_REVIEW.md) | Planned first staged-review workflow: immutable source, evidence states, limits, wire contract, and delivery dependencies |
+| [`AI_FIRST_REVIEW.md`](./v2/AI_FIRST_REVIEW.md) | In progress: first staged-review workflow (backend capture, persistence, context, findings merged, workflow/UI planned): immutable source, evidence states, limits, wire contract, and delivery dependencies |
 | [`V2_VISION.md`](./v2/V2_VISION.md) | Earlier research and priorities; current delivery follows the review contract |
 | [`v2-feature-docs/FLAKY_TEST_DETECTION.md`](./v2/v2-feature-docs/FLAKY_TEST_DETECTION.md) | Implemented: repeated-run flaky detection and persisted history |
 | [Self-healing](./v2/v2-feature-docs/SELF_HEALING_LOOP.md) | Implemented: bounded generated-test healing and history |

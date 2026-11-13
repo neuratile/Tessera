@@ -15,7 +15,7 @@ See [Project status](./PROJECT_STATUS.md) for current availability.
 | Mutation | JS/TS scoring and survivor-driven improvement | Supported mutations only; score is not correctness proof |
 | Export | Files, clipboard/spreadsheets, Jira Cloud | More trackers are later work |
 | Testing | Unit, contracts, renderer E2E, Docker, advisory coverage/live models | E2E mocks IPC; installers still need platform smoke tests |
-| Review | Contract and deterministic fixture | Capture, persistence, context, findings, UI, evidence binding, evaluation remain |
+| Review | Contract, fixture, and backend capture, persistence, context, findings | Not reachable from the app. Workflow/IPC, UI, evidence binding, evaluation remain |
 
 Build one trustworthy staged review before expanding integrations: capture
 without changing Git, preserve exact source and line locations, distinguish

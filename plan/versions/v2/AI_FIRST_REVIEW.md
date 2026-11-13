@@ -1,6 +1,8 @@
 # AI-first staged review: first-release contract
 
-> Status: **planned**, not implemented. Target: v2; contract version: 1.
+> Status: **in progress**. Capture (#106), persistence (#107), context (#108),
+> and findings (#109) are merged as backend services. Coordinator/IPC, UI, and
+> execution evidence are not implemented. Target: v2; contract version: 1.
 > Source: [#105](https://github.com/neuratile/Tessera/issues/105), under
 > [roadmap #104](https://github.com/neuratile/Tessera/issues/104).
 

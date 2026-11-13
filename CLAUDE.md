@@ -7,9 +7,11 @@ Tessera generates artifacts using AST/retrieval and a selected LLM, and optional
 executes JS/TS or Python tests in a hardened Docker sandbox. Cloud model and
 embedding selections send relevant context off-device.
 
-Staged “Review my changes” is planned. Its
-[contract](./plan/versions/v2/AI_FIRST_REVIEW.md) and
-[fixture](./evals/README.md) are available; runtime, CLI, and MCP are not shipped.
+Staged “Review my changes” is not usable yet. Its
+[contract](./plan/versions/v2/AI_FIRST_REVIEW.md),
+[fixture](./evals/README.md), and backend services for capture, persistence,
+[context](./docs/REVIEW_CONTEXT.md), and [findings](./docs/REVIEW_FINDINGS.md)
+are available. Workflow/IPC, UI, CLI, and MCP are not shipped.
 
 ## Implementation rules
 

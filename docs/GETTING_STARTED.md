@@ -72,8 +72,8 @@ Cloud selections send relevant content to the selected provider.
 
 ## Try the review fixture
 
-The end-to-end staged-review workflow is still planned; read-only Git capture
-is implemented as a backend service. Run the fixture now:
+The end-to-end staged-review workflow is still planned. Git capture,
+persistence, context, and findings exist only as backend services. Run the fixture now:
 
 ```bash
 node --test evals/fixtures/checkout/fixture.test.mjs

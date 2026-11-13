@@ -16,5 +16,6 @@ pnpm --filter @testing-ide/shared test
 ```
 
 Add malformed-input, optional-field, enum/casing, and model-specific tests when
-changing contracts. Planned review DTOs follow the
+changing contracts. Review DTOs
+(`src/schemas/review.schema.ts`) follow the
 [staged-review contract](../../plan/versions/v2/AI_FIRST_REVIEW.md).

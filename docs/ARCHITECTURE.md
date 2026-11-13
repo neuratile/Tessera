@@ -50,6 +50,15 @@ a non-root user, dropped capabilities, read-only root filesystem, resource
 limits, and timeout/cancellation. Preserve these boundaries and their tests.
 See [ADR-0004](../apps/desktop/src-tauri/docs/adr/0004-sandbox-test-runner.md).
 
-The planned [review contract](../plan/versions/v2/AI_FIRST_REVIEW.md) adds
-read-only Git capture and immutable source/test identities. Build it within
-these layers first; reusable core, CLI, and MCP follow proven desktop behavior.
+The [review contract](../plan/versions/v2/AI_FIRST_REVIEW.md) adds
+read-only Git capture and immutable source/test identities. The merged pieces
+follow these layers:
+
+- `services/git_change_service`: staged capture.
+- `repositories/review_repo` and migration `0011_reviews.sql`: persistence.
+- `services/review_context_service`: [bounded context](./REVIEW_CONTEXT.md).
+- `services/generation_service/review` and `prompts/review_v1`:
+  [findings](./REVIEW_FINDINGS.md).
+
+No command exposes them yet. Finish the desktop workflow within these layers
+first; reusable core, CLI, and MCP follow proven desktop behavior.
