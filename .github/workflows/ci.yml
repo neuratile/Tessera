@@ -168,7 +168,8 @@ jobs:
     # config starts its own Vite webServer on :4173. Covers renderer flows
     # including the sandbox Run/Stop + results panel from the test-runner
     # feature. Ubuntu-only: the DOM + mocks are platform-independent.
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 does not support Ubuntu 26.04 browser dependencies.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
