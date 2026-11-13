@@ -19,8 +19,19 @@ commit messages and [Semantic Versioning](https://semver.org/) for releases.
 - Validate stable release tags against desktop versions and master ancestry;
   reuse full CI before building draft installers. Publishing stays manual.
 - Pass the configured pnpm script shell through Turbo for Windows contributors.
+- Update status, roadmap, and indexes after the review backend foundations
+  merged, and index the review context and findings guides.
 
 ### 🚀 Added
+
+- **Staged-review backend foundations** (#125–#128) — read-only staged Git
+  capture (`git_change_service`), immutable review sessions and snapshots
+  (migration `0011_reviews.sql`, `review_repo`, shared `review.schema.ts`),
+  bounded source context (`review_context_service`), and validated findings
+  generation (`generation_service::review`, prompt `review_v1`, credential
+  redaction). Backend only: no command, IPC, or UI yet. See
+  [`docs/REVIEW_CONTEXT.md`](docs/REVIEW_CONTEXT.md) and
+  [`docs/REVIEW_FINDINGS.md`](docs/REVIEW_FINDINGS.md).
 
 - **Persisted flaky history** — a completed flaky check is now saved so a suite's
   flakiness can be trended over repeated checks, instead of the verdict being

@@ -16,20 +16,24 @@ records capabilities; a plan folder does not imply a published release.
   [checkout fixture](../evals/README.md), seeded regression and clean control.
 - [#95](https://github.com/neuratile/Tessera/issues/95): expanded sandbox boundary tests.
 
-Read-only staged Git capture ([#106](https://github.com/neuratile/Tessera/issues/106))
-is implemented as a Tauri-independent service with focused repository tests.
-The end-to-end review runtime, persistence/IPC, and review UI remain planned.
+Stages 1 and 2 are merged as backend services with focused tests: read-only
+staged Git capture ([#106](https://github.com/neuratile/Tessera/issues/106)),
+persistence and contracts ([#107](https://github.com/neuratile/Tessera/issues/107)),
+[bounded context](../docs/REVIEW_CONTEXT.md) ([#108](https://github.com/neuratile/Tessera/issues/108)),
+and [validated findings](../docs/REVIEW_FINDINGS.md)
+([#109](https://github.com/neuratile/Tessera/issues/109)). No command or UI
+calls them. The coordinator/IPC, review UI, and execution evidence remain planned.
 
 ## Delivery order
 
-| Stage | Work | Issues |
-|---|---|---|
-| 1 | Read-only Git capture; contracts/persistence | [#106](https://github.com/neuratile/Tessera/issues/106), [#107](https://github.com/neuratile/Tessera/issues/107) |
-| 2 | Bounded context; code-linked findings | [#108](https://github.com/neuratile/Tessera/issues/108), [#109](https://github.com/neuratile/Tessera/issues/109) |
-| 3 | Workflow/IPC; desktop UI | [#110](https://github.com/neuratile/Tessera/issues/110), [#111](https://github.com/neuratile/Tessera/issues/111) |
-| 4 | Execution evidence bound to captured source/tests | [#112](https://github.com/neuratile/Tessera/issues/112) |
-| 5 | Evaluation harness; first-review walkthrough | [#114](https://github.com/neuratile/Tessera/issues/114), [#115](https://github.com/neuratile/Tessera/issues/115) |
-| Later | Reusable core, CLI, MCP | [#116](https://github.com/neuratile/Tessera/issues/116), [#117](https://github.com/neuratile/Tessera/issues/117), [#118](https://github.com/neuratile/Tessera/issues/118) |
+| Stage | Work | Issues | Status |
+|---|---|---|---|
+| 1 | Read-only Git capture; contracts/persistence | [#106](https://github.com/neuratile/Tessera/issues/106), [#107](https://github.com/neuratile/Tessera/issues/107) | Merged, backend only |
+| 2 | Bounded context; code-linked findings | [#108](https://github.com/neuratile/Tessera/issues/108), [#109](https://github.com/neuratile/Tessera/issues/109) | Merged, backend only |
+| 3 | Workflow/IPC; desktop UI | [#110](https://github.com/neuratile/Tessera/issues/110), [#111](https://github.com/neuratile/Tessera/issues/111) | Next |
+| 4 | Execution evidence bound to captured source/tests | [#112](https://github.com/neuratile/Tessera/issues/112) | Planned |
+| 5 | Evaluation harness; first-review walkthrough | [#114](https://github.com/neuratile/Tessera/issues/114), [#115](https://github.com/neuratile/Tessera/issues/115) | Planned |
+| Later | Reusable core, CLI, MCP | [#116](https://github.com/neuratile/Tessera/issues/116), [#117](https://github.com/neuratile/Tessera/issues/117), [#118](https://github.com/neuratile/Tessera/issues/118) | Deferred |
 
 The contract defines dependencies and acceptance details. Contributor setup can
 improve now; a real review walkthrough depends on runtime delivery.
