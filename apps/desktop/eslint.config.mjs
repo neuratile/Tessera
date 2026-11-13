@@ -4,6 +4,7 @@ export default createReactConfig({
   tsconfigRootDir: import.meta.dirname,
   ignores: [
     'eslint.config.mjs',
+    'coverage',
     'playwright-report',
     'src-tauri',
     'scripts/**',
